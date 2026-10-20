@@ -13,12 +13,14 @@ function mountain(id = 'blank') {
 }
 
 for (const tpl of TEMPLATES) {
-  test(`template "${tpl.name}" is skiable hands-off and takes a long run`, () => {
+  test(`template "${tpl.name}" is skiable hands-off, fast and long`, () => {
     const { hf, start } = mountain(tpl.id);
     const s = new Skier(hf, start).simulate();
     assert.equal(s.status, 'finished', `${tpl.id} ended ${s.status} at z=${s.pos[2].toFixed(0)}`);
-    assert.ok(s.time > 40, `${tpl.id} run only ${s.time.toFixed(1)} s`);
-    assert.ok(s.maxSpeed * 3.6 < 160, 'speeds stay plausible');
+    assert.ok(s.time > 30, `${tpl.id} run only ${s.time.toFixed(1)} s`);
+    assert.ok(s.maxSpeed * 3.6 > 110, `${tpl.id} too slow: ${(s.maxSpeed * 3.6).toFixed(0)} km/h`);
+    assert.ok(s.maxSpeed * 3.6 < 200, 'speeds stay plausible');
+    assert.ok(!s.events.some((e) => e.type === 'crash'), 'no crash hands-off');
   });
 }
 

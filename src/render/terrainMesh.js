@@ -51,6 +51,18 @@ const frag = /* glsl */ `
   varying vec3 vWorld;
   varying vec3 vNormal;
 
+  float hash2(vec2 p) {
+    p = fract(p * vec2(123.34, 456.21));
+    p += dot(p, p + 45.32);
+    return fract(p.x * p.y);
+  }
+  float vnoise(vec2 p) {
+    vec2 i = floor(p);
+    vec2 f = fract(p);
+    vec2 u = f * f * (3.0 - 2.0 * f);
+    return mix(mix(hash2(i), hash2(i + vec2(1.0, 0.0)), u.x), mix(hash2(i + vec2(0.0, 1.0)), hash2(i + vec2(1.0, 1.0)), u.x), u.y);
+  }
+
   float aaLine(float v, float spacing, float width) {
     float f = abs(fract(v / spacing - 0.5) - 0.5) * spacing;
     float w = fwidth(v) * width;
@@ -101,6 +113,20 @@ const frag = /* glsl */ `
     }
 
     float dist = length(cameraPosition - vWorld);
+
+    // close-up snow texture: soft grain, wind ripples and sparkles; it's what makes
+    // speed readable when the camera skims the surface
+    float near = 1.0 - smoothstep(25.0, 140.0, dist);
+    if (near > 0.0) {
+      float grain = vnoise(vWorld.xz * 1.7) * 0.6 + vnoise(vWorld.xz * 5.3) * 0.4;
+      float ripple = vnoise(vec2(vWorld.x * 0.35 + vWorld.z * 0.12, vWorld.z * 2.2));
+      col *= 1.0 + near * ((grain - 0.5) * 0.09 + (ripple - 0.5) * 0.05);
+      // tiny sparkles, only right by the camera (larger ones read as road markings)
+      vec2 sc = vWorld.xz * 18.0;
+      float spark = step(0.992, hash2(floor(sc))) * (1.0 - smoothstep(0.15, 0.45, length(fract(sc) - 0.5)));
+      col += spark * max(0.0, ndl) * 0.3 * (1.0 - smoothstep(6.0, 30.0, dist));
+    }
+
     float fog = smoothstep(uFogNear, uFogFar, dist);
     col = mix(col, uFog, fog);
     gl_FragColor = vec4(col, 1.0);

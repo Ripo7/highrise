@@ -889,6 +889,20 @@ kbd {
   }
 }
 
+/* ---------- speed rush: streaked, darkened edges at high speed ---------- */
+.rush {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0;
+  background:
+    radial-gradient(ellipse 70% 62% at 50% 52%, transparent 55%, rgba(16, 26, 36, 0.38) 100%),
+    repeating-conic-gradient(from 0deg at 50% 52%, rgba(255, 255, 255, 0) 0deg 3deg, rgba(255, 255, 255, 0.16) 3.4deg, rgba(255, 255, 255, 0) 4deg 9deg);
+  -webkit-mask-image: radial-gradient(ellipse 75% 70% at 50% 52%, transparent 48%, #000 92%);
+  mask-image: radial-gradient(ellipse 75% 70% at 50% 52%, transparent 48%, #000 92%);
+  transition: opacity 0.15s linear;
+}
+
 /* ---------- ride mode ---------- */
 body.riding .dock,
 body.riding .hint,

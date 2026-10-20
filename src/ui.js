@@ -186,6 +186,8 @@ export function createUI(opts) {
     jumps: $('#s-jumps'),
   };
   const bestEl = $('#s-best');
+  const rush = $('#rush');
+  let lastRush = -1;
   const progressFill = $('#progress-fill');
   const toastEl = $('#toast');
   let toastTimer = 0;
@@ -232,6 +234,13 @@ export function createUI(opts) {
     nudgeRadius(d) {
       radius.value = Math.max(+radius.min, Math.min(+radius.max, +radius.value + d));
       radius.dispatchEvent(new Event('input'));
+    },
+    // speed vignette: 0 = none, 1 = full rush
+    setRush(k) {
+      const v = Math.min(1, Math.max(0, k));
+      if (Math.abs(v - lastRush) < 0.01) return;
+      lastRush = v;
+      rush.style.opacity = v.toFixed(2);
     },
     setRiding(on) {
       ride.hidden = !on;

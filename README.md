@@ -27,22 +27,22 @@ Your mountain, start gate and best time autosave in the browser. **New mountain*
 
 ## Mountains
 
-Every run is 1.2 km long (240 m wide). Start from:
+Every run is 1.2 km long and 480 m wide. Start from:
 
 | Mountain | Level | Hands-off run |
 | --- | --- | --- |
-| Blank slope | Build it yourself | An even 18° face, ~50 s |
-| Meander Valley | Easy | Banked bends down a rolling valley, ~77 s |
-| Kicker Line | Jumps | Five kickers with long landing hills, five clean jumps, ~50 s |
-| Couloir | Expert | Steep bowl, narrow couloir, mogul field, fast finish, ~50 s at up to 130 km/h |
+| Blank slope | Build it yourself | An even 18° face, ~39 s, 133 km/h |
+| Meander Valley | Easy | Wide banked bends down a rolling valley, ~52 s, 131 km/h |
+| Kicker Line | Jumps | Five kickers with long landing hills (1.4–2.3 s of air) plus a roller lane, ~39 s, 147 km/h |
+| Couloir | Expert | Wide steep bowl, narrow couloir, mogul field, fast finish, ~41 s, 150 km/h |
 
-Templates live in `src/core/templates.js`: each is a slope profile along the run plus a cross-section function, so new ones are quick to add. The tests check that every template is skiable hands-off and takes over 40 s.
+Templates live in `src/core/templates.js`: each is a slope profile along the run plus a cross-section function, so new ones are quick to add. The tests check that every template is skiable hands-off without crashing, takes over 30 s and tops 110 km/h.
 
 ## What's in the prototype
 
-- **Heightfield terrain** (193 × 961 samples, 1.25 m apart: a 240 m × 1200 m piste) with raise, lower, smooth and flatten brushes, soft cosine falloff and a live cursor ring.
+- **Heightfield terrain** (321 × 801 samples, 1.5 m apart: a 480 m × 1200 m piste) with raise, lower, smooth and flatten brushes, soft cosine falloff and a live cursor ring.
 - **Skier physics**: a point mass with gravity, snow friction and air drag. It leaves the ground on its own when the slope falls away faster than gravity can follow, so kickers and crests create real jumps. Landings are judged by impact speed into the slope: soft, rough (speed loss) or crash.
-- **Ride mode**: sending the skier drops the camera behind him (chase cam or helmet cam) and you can steer, tuck and brake. The skis have a heading and edge grip carves the velocity towards it; hands off, the skier simply follows the terrain. Land with the skis sideways and you crash.
+- **Ride mode**: sending the skier drops the camera low behind him (chase cam or helmet cam) and you can steer, tuck and brake. Speed shows: the lens widens, the camera rumbles, snow sprays off the skis (rooster tails when carving, bursts on landing) and the screen edges streak. The skis have a heading and edge grip carves the velocity towards it; hands off, the skier simply follows the terrain. Land with the skis sideways and you crash.
 - **Run outcomes**: finish, crash, stopped (not enough slope), off the edge, too slow.
 - **Feedback**: live trail, the previous run as a dashed blue ghost line, topographic contours (2 m / 10 m), run stats and personal best.
 - **Diorama look**: the mountain is a block with stratified sides on a base slab.

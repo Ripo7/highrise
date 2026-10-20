@@ -8,6 +8,7 @@ import { Skier } from './core/skier.js';
 import { TEMPLATES, buildTemplate, getTemplate } from './core/templates.js';
 import { TerrainMesh } from './render/terrainMesh.js';
 import { SkierMesh, Trail } from './render/skierMesh.js';
+import { Spray } from './render/spray.js';
 import { createUI } from './ui.js';
 
 // ---------- state ----------
@@ -83,6 +84,8 @@ skierMesh.visible = false;
 const trail = new Trail({ color: '#ff5a1f' });
 const ghost = new Trail({ color: '#2f6fd6', opacity: 0.75, dashed: true });
 scene.add(trail.line, ghost.line);
+const spray = new Spray();
+scene.add(spray.points);
 
 // start gate: two little poles with a banner
 const gate = makeGate();
@@ -381,6 +384,7 @@ function setTool(t) {
 // ---------- runs ----------
 let skier = null;
 let lastStatus = null;
+let lastEventCount = 0;
 
 // ---------- ride mode: camera behind the skier, player steers ----------
 let riding = false;
@@ -409,6 +413,8 @@ function sendSkier() {
     scheduleSave();
   }
   skier = new Skier(hf, state.start);
+  lastEventCount = 0;
+  spray.clear();
   applyInput();
   skierMesh.reset();
   skierMesh.visible = true;
@@ -495,24 +501,34 @@ function updateRideCamera(dt) {
   const speed = skier.speed;
   let posRate;
   let lookRate;
+  // the faster you go, the wider the lens: speed you can feel
+  const kick = Math.min(1, Math.max(0, (speed - 8) / 32));
   if (state.rideCam === 'helmet') {
     _want.copy(_p).addScaledVector(_flat, 0.4);
-    _want.y += 3.4;
+    _want.y += 3.2;
     _look.copy(_want).addScaledVector(_h, 24);
     _look.y -= 3;
     posRate = 30;
     lookRate = 12;
-    camera.fov = 74 + Math.min(14, speed * 0.3);
+    camera.fov = 72 + 22 * kick;
   } else {
-    // portrait screens are narrow: sit further back so the line ahead stays in frame
+    // low and close behind; portrait screens sit a little further back
     const portrait = camera.aspect < 1;
-    _want.copy(_p).addScaledVector(_flat, portrait ? -15 : -11);
-    _want.y += portrait ? 6.5 : 4.5;
-    _look.copy(_p).addScaledVector(_flat, 9);
+    const back = (portrait ? 10 : 7.5) + 2.5 * kick; // the camera lags further back as you speed up
+    _want.copy(_p).addScaledVector(_flat, -back);
+    _want.y += portrait ? 4.2 : 3.2;
+    _look.copy(_p).addScaledVector(_flat, 10);
     _look.y += 1;
-    posRate = 5;
-    lookRate = 9;
-    camera.fov = 60 + Math.min(14, speed * 0.25);
+    posRate = 7;
+    lookRate = 10;
+    camera.fov = (portrait ? 66 : 58) + 24 * kick;
+  }
+  // a little rumble over the snow at speed
+  if (skier.grounded && speed > 18) {
+    const amp = Math.min(0.12, (speed - 18) * 0.004);
+    const t = performance.now() * 0.001;
+    _look.x += Math.sin(t * 37.1) * amp;
+    _look.y += Math.sin(t * 43.7 + 1.3) * amp;
   }
   // never dip under the snow, and rise until the skier isn't hidden behind a crest
   const ground = hf.heightAt(_want.x, _want.z);
@@ -623,6 +639,16 @@ function frame() {
       ui.setStatus(skier.status);
       if (skier.status !== 'running') onRunEnd(skier);
     }
+    // snow spray and landing bursts
+    spray.fromSkier(skier, dt);
+    if (skier.events.length !== lastEventCount) {
+      for (let i = lastEventCount; i < skier.events.length; i++) {
+        const ev = skier.events[i];
+        spray.burst(skier, ev.type === 'jump' ? Math.min(1.5, 0.5 + ev.value * 0.4) : 1.5);
+      }
+      lastEventCount = skier.events.length;
+    }
+    ui.setRush(riding && skier.status === 'running' ? (skier.speed - 16) / 22 : 0);
     if (riding) {
       updateRideCamera(dt);
       // after the run ends, hold the shot a moment, then fly back to the sculpting view
@@ -632,6 +658,8 @@ function frame() {
       }
     }
   }
+
+  spray.update(dt);
 
   if (viewAnim) {
     viewAnim.t = Math.min(1, viewAnim.t + dt * 1.6);

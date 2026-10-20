@@ -8,8 +8,8 @@
 
 export const PHYS = {
   g: 9.81,
-  mu: 0.055, // ski/snow kinetic friction
-  drag: 0.0032, // 0.5·ρ·CdA / m  (1/m)
+  mu: 0.035, // ski/snow kinetic friction (fast, waxed, game-tuned)
+  drag: 0.002, // 0.5·ρ·CdA / m  (1/m)
   dt: 1 / 240,
   liftoffGap: 0.004, // metres above the surface before we count as airborne
   roughLanding: 9, // m/s into the slope: lose speed
@@ -19,12 +19,12 @@ export const PHYS = {
   stuckTime: 1.5,
   maxTime: 300,
   edgeMargin: 2,
-  turnRate: 2.4, // rad/s at low speed, eases off as speed rises
+  turnRate: 3.0, // rad/s at low speed, eases off as speed rises
   airSpin: 3.2, // rad/s of heading rotation in the air
   followRate: 2.0, // rad/s the heading drifts back to the direction of travel (no input)
-  grip: 3.2, // how fast velocity aligns with the skis
-  carveGrip: 5.2, // grip while steering
-  tuckDrag: 0.55, // drag multiplier while tucked
+  grip: 3.6, // how fast velocity aligns with the skis
+  carveGrip: 7, // grip while steering
+  tuckDrag: 0.45, // drag multiplier while tucked
   brakeDrag: 1.5,
   brakeFriction: 4.5, // friction multiplier while braking (snowplough)
   brakeDecel: 4.5, // extra m/s² scrubbed by the snowplough
@@ -39,7 +39,7 @@ export class Skier {
     this.pos = [start.x, y, start.z];
     // a small push down the fall line
     const n = hf.normalAt(start.x, start.z);
-    const push = [0, 0, 3];
+    const push = [0, 0, 11]; // a strong push out of the gate
     const vn = dot(push, n);
     this.vel = [push[0] - vn * n[0], push[1] - vn * n[1], push[2] - vn * n[2]];
     this.n = n;
@@ -219,7 +219,7 @@ export class Skier {
       h[2] = vel[2] / speed;
     }
     if (input.steer) {
-      rotateAround(h, n, -input.steer * (P.turnRate / (1 + speed / 28)) * dt);
+      rotateAround(h, n, -input.steer * (P.turnRate / (1 + speed / 40)) * dt);
     }
     if (speed < 0.3) return;
     const vd = [vel[0] / speed, vel[1] / speed, vel[2] / speed];

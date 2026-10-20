@@ -2,11 +2,11 @@
 // Pure JS (no Three.js) so the physics and brushes can be tested in Node.
 //
 // World axes: x = across the slope, z = down the slope (start at -z, finish at +z), y = up.
-// The piste is a long strip: 240 m wide, 1200 m from top to bottom.
+// The piste is a long strip: 480 m wide, 1200 m from top to bottom.
 
-export const SIZE_X = 240; // metres across
+export const SIZE_X = 480; // metres across
 export const SIZE_Z = 1200; // metres from top to bottom
-export const CELL = 1.25; // metres between height samples
+export const CELL = 1.5; // metres between height samples
 export const MIN_H = -30;
 export const MAX_H = 620;
 export const START_MARGIN = 20; // start line this far below the top edge

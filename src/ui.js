@@ -1,4 +1,5 @@
 // DOM overlay: tools, brush settings, run HUD, toasts.
+import { makeSlider } from './slider.js';
 
 const ICONS = {
   raise: '<path d="M3 19h18M5 19c2-6 4-9 7-9s5 3 7 9"/><path d="M12 3v5M9.5 5.5 12 3l2.5 2.5"/>',
@@ -43,8 +44,8 @@ export function createUI(opts) {
     if (b) opts.onTool(b.dataset.tool);
   });
 
-  const radius = $('#radius');
-  const strength = $('#strength');
+  const radius = makeSlider($('#radius'));
+  const strength = makeSlider($('#strength'));
   const radiusOut = $('#radius-out');
   const strengthOut = $('#strength-out');
   radius.value = opts.initial.radius;

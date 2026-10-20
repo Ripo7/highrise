@@ -515,6 +515,16 @@ function placeGate() {
   gate.position.set(x, hf.heightAt(x, z), z);
 }
 
-// iOS Safari ignores user-scalable=no for pinch gestures on the page chrome
+// Nothing on this page scrolls. iOS Safari still rubber-bands the page and ignores
+// user-scalable=no, so block page panning/zooming everywhere except the help card text.
 document.addEventListener('gesturestart', (e) => e.preventDefault());
 document.addEventListener('dblclick', (e) => e.preventDefault());
+document.addEventListener(
+  'touchmove',
+  (e) => {
+    const card = e.target.closest?.('.intro-card');
+    if (card && card.scrollHeight > card.clientHeight && e.touches.length === 1) return;
+    e.preventDefault();
+  },
+  { passive: false }
+);

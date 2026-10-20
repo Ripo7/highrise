@@ -49,14 +49,14 @@
       <nav id="tools" class="tools panel" aria-label="Tools"></nav>
 
       <div class="panel brush">
-        <label class="slider">
-          <span>Size <output id="radius-out"></output></span>
-          <input id="radius" type="range" min="3" max="40" step="1" />
-        </label>
-        <label class="slider">
-          <span>Strength <output id="strength-out"></output></span>
-          <input id="strength" type="range" min="5" max="100" step="5" />
-        </label>
+        <div class="slider">
+          <span id="radius-label">Size <output id="radius-out"></output></span>
+          <div id="radius" class="range" aria-labelledby="radius-label" data-min="3" data-max="40" data-step="1"></div>
+        </div>
+        <div class="slider">
+          <span id="strength-label">Strength <output id="strength-out"></output></span>
+          <div id="strength" class="range" aria-labelledby="strength-label" data-min="5" data-max="100" data-step="5"></div>
+        </div>
         <div id="extras" class="extras">
           <label class="check"><input id="follow" type="checkbox" /> Follow skier <kbd>F</kbd></label>
           <label class="check"><input id="contours" type="checkbox" /> Contours <kbd>C</kbd></label>

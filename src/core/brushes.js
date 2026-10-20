@@ -34,8 +34,8 @@ export function applyBrush(hf, p) {
 
   if (tool === 'raise' || tool === 'lower') {
     const sign = tool === 'raise' ? 1 : -1;
-    // larger brushes move more earth so they don't feel weak
-    const amount = sign * RAISE_RATE * strength * dt * (0.6 + radius / 40);
+    // larger brushes move more earth so they don't feel weak (capped for giant brushes)
+    const amount = sign * RAISE_RATE * strength * dt * (0.6 + Math.min(radius, 100) / 40);
     for (let j = j0; j <= j1; j++) {
       for (let i = i0; i <= i1; i++) {
         const w = falloff(Math.hypot(i - gx, j - gz), gr);
@@ -45,12 +45,14 @@ export function applyBrush(hf, p) {
       }
     }
   } else if (tool === 'smooth') {
-    // relax towards the local average; read from a snapshot of the region
-    const w0 = i1 - i0 + 3;
-    const src = new Float32Array(w0 * (j1 - j0 + 3));
-    for (let j = j0 - 1; j <= j1 + 1; j++) {
-      for (let i = i0 - 1; i <= i1 + 1; i++) {
-        src[(j - j0 + 1) * w0 + (i - i0 + 1)] = hf.heightAtCell(i, j);
+    // relax towards the local average; read from a snapshot of the region. The averaging
+    // footprint grows with the brush so big brushes smooth big shapes, not just grain.
+    const r = Math.max(1, Math.round(gr / 12));
+    const w0 = i1 - i0 + 1 + 2 * r;
+    const src = new Float32Array(w0 * (j1 - j0 + 1 + 2 * r));
+    for (let j = j0 - r; j <= j1 + r; j++) {
+      for (let i = i0 - r; i <= i1 + r; i++) {
+        src[(j - j0 + r) * w0 + (i - i0 + r)] = hf.heightAtCell(i, j);
       }
     }
     const k = Math.min(1, 10 * strength * dt);
@@ -58,11 +60,11 @@ export function applyBrush(hf, p) {
       for (let i = i0; i <= i1; i++) {
         const w = falloff(Math.hypot(i - gx, j - gz), gr);
         if (w <= 0) continue;
-        const si = i - i0 + 1;
-        const sj = j - j0 + 1;
+        const si = i - i0 + r;
+        const sj = j - j0 + r;
         let sum = 0;
         for (let dj = -1; dj <= 1; dj++) {
-          for (let di = -1; di <= 1; di++) sum += src[(sj + dj) * w0 + (si + di)];
+          for (let di = -1; di <= 1; di++) sum += src[(sj + dj * r) * w0 + (si + di * r)];
         }
         const avg = sum / 9;
         const idx = j * res + i;

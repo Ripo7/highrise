@@ -48,8 +48,22 @@ const frag = /* glsl */ `
   uniform float uFinishZ;
   uniform vec2 uStart;
   uniform float uContours;
+  uniform float uRelief;
+  uniform sampler2D uLocalMean;
+  uniform vec2 uHalf;
   varying vec3 vWorld;
   varying vec3 vNormal;
+
+  // diverging ramp for local relief: hollows cool blue, flat pale, crests warm orange
+  vec3 reliefRamp(float k) {
+    vec3 deep = vec3(0.13, 0.33, 0.66);
+    vec3 low = vec3(0.47, 0.70, 0.90);
+    vec3 mid = vec3(0.93, 0.94, 0.90);
+    vec3 high = vec3(0.98, 0.70, 0.38);
+    vec3 peak = vec3(0.80, 0.30, 0.12);
+    if (k < 0.0) return k < -0.5 ? mix(low, deep, (-k - 0.5) * 2.0) : mix(mid, low, -k * 2.0);
+    return k > 0.5 ? mix(high, peak, (k - 0.5) * 2.0) : mix(mid, high, k * 2.0);
+  }
 
   float hash2(vec2 p) {
     p = fract(p * vec2(123.34, 456.21));
@@ -83,13 +97,34 @@ const frag = /* glsl */ `
     vec3 hemi = mix(uBounce, uSky, n.y * 0.5 + 0.5);
     vec3 col = base * (hemi * 0.55 + vec3(1.0, 0.97, 0.92) * sun * 0.75);
 
+    if (uRelief > 0.5) {
+      // Relief view: colour by height above/below the surrounding terrain (a ~50 m blur),
+      // shade from two low suns so every bump casts a readable shadow
+      vec2 uv = clamp((vWorld.xz + uHalf) / (2.0 * uHalf), 0.0, 1.0);
+      float local = vWorld.y - texture2D(uLocalMean, uv).r;
+      float k = clamp(local / 8.0, -1.0, 1.0);
+      k = sign(k) * pow(abs(k), 0.7);
+      vec3 tint = reliefRamp(k);
+      vec3 l1 = normalize(vec3(-0.75, 0.42, -0.5));
+      vec3 l2 = normalize(vec3(0.6, 0.5, -0.62));
+      float shade = 0.5 * clamp(dot(n, l1), 0.0, 1.0) + 0.35 * clamp(dot(n, l2), 0.0, 1.0) + 0.32;
+      // steepness darkens, so cliffs and kicker lips pop
+      shade *= 1.0 - 0.45 * smoothstep(0.08, 0.55, slope);
+      col = tint * shade * 1.15;
+      float fwr = fwidth(vWorld.y);
+      float r1 = aaLine(vWorld.y, 2.0, 1.0) * (1.0 - smoothstep(0.5, 1.2, fwr));
+      float r2 = aaLine(vWorld.y, 10.0, 1.4) * (1.0 - smoothstep(2.5, 6.0, fwr));
+      col *= 1.0 - 0.18 * r1 - 0.38 * r2;
+    }
+
     // topographic contours: fine every 5 m, bold every 25 m; fine lines fade out
     // when zoomed far back so the long piste doesn't turn grey
     float fw = fwidth(vWorld.y);
     float c1 = aaLine(vWorld.y, 5.0, 1.0) * (1.0 - smoothstep(0.6, 1.6, fw));
     float c2 = aaLine(vWorld.y, 25.0, 1.6) * (1.0 - smoothstep(4.0, 9.0, fw));
-    col = mix(col, col * 0.86, c1 * 0.35 * uContours);
-    col = mix(col, col * 0.72, c2 * 0.55 * uContours);
+    float cw = uContours * (1.0 - uRelief);
+    col = mix(col, col * 0.86, c1 * 0.35 * cw);
+    col = mix(col, col * 0.72, c2 * 0.55 * cw);
 
     // finish line: dashed band across the slope
     float fz = abs(vWorld.z - uFinishZ);
@@ -116,7 +151,7 @@ const frag = /* glsl */ `
 
     // close-up snow texture: soft grain, wind ripples and sparkles; it's what makes
     // speed readable when the camera skims the surface
-    float near = 1.0 - smoothstep(25.0, 140.0, dist);
+    float near = (1.0 - smoothstep(25.0, 140.0, dist)) * (1.0 - uRelief);
     if (near > 0.0) {
       float grain = vnoise(vWorld.xz * 1.7) * 0.6 + vnoise(vWorld.xz * 5.3) * 0.4;
       float ripple = vnoise(vec2(vWorld.x * 0.35 + vWorld.z * 0.12, vWorld.z * 2.2));
@@ -222,7 +257,23 @@ export class TerrainMesh {
       uFinishZ: { value: finishZ },
       uStart: { value: new THREE.Vector2(start.x, start.z) },
       uContours: { value: 1 },
+      uRelief: { value: 0 },
+      uLocalMean: { value: null },
+      uHalf: { value: new THREE.Vector2(hf.halfX, hf.halfZ) },
     };
+    // blurred copy of the terrain at 1/6 resolution: the "surroundings" the relief view
+    // compares each point against
+    this.ds = 6;
+    this.lx = Math.ceil(hf.nx / this.ds);
+    this.lz = Math.ceil(hf.nz / this.ds);
+    this.low = new Float32Array(this.lx * this.lz);
+    this.lowTmp = new Float32Array(this.lx * this.lz);
+    this.localMean = new Float32Array(this.lx * this.lz);
+    this.localTex = new THREE.DataTexture(this.localMean, this.lx, this.lz, THREE.RedFormat, THREE.FloatType);
+    this.localTex.magFilter = THREE.LinearFilter;
+    this.localTex.minFilter = THREE.LinearFilter;
+    this.uniforms.uLocalMean.value = this.localTex;
+    this.localDirty = true;
     this.material = new THREE.ShaderMaterial({
       vertexShader: vert,
       fragmentShader: frag,
@@ -274,6 +325,44 @@ export class TerrainMesh {
     this.updateAll();
   }
 
+  setRelief(on) {
+    this.uniforms.uRelief.value = on ? 1 : 0;
+    if (on) this.refreshLocalMean();
+  }
+
+  // Recompute the blurred surroundings (cheap: ~7k cells), at most once per frame
+  refreshLocalMean() {
+    if (!this.localDirty || this.uniforms.uRelief.value < 0.5) return;
+    this.localDirty = false;
+    const { hf, ds, lx, lz, low, lowTmp, localMean } = this;
+    for (let j = 0; j < lz; j++) {
+      for (let i = 0; i < lx; i++) low[j * lx + i] = hf.heightAtCell(i * ds + ds / 2, j * ds + ds / 2);
+    }
+    // separable box blur, radius ~4 cells (~36 m) x2 passes ≈ gaussian
+    const R = 4;
+    const pass = (src, dst, alongX) => {
+      for (let j = 0; j < lz; j++) {
+        for (let i = 0; i < lx; i++) {
+          let sum = 0;
+          let n = 0;
+          for (let d = -R; d <= R; d++) {
+            const ii = alongX ? i + d : i;
+            const jj = alongX ? j : j + d;
+            if (ii < 0 || jj < 0 || ii >= lx || jj >= lz) continue;
+            sum += src[jj * lx + ii];
+            n++;
+          }
+          dst[j * lx + i] = sum / n;
+        }
+      }
+    };
+    pass(low, lowTmp, true);
+    pass(lowTmp, localMean, false);
+    pass(localMean, lowTmp, true);
+    pass(lowTmp, localMean, false);
+    this.localTex.needsUpdate = true;
+  }
+
   setStart(x, z) {
     this.uniforms.uStart.value.set(x, z);
   }
@@ -313,6 +402,7 @@ export class TerrainMesh {
         nor[k * 3 + 2] = -dz / len;
       }
     }
+    this.localDirty = true;
     // upload only the touched rows: a full-mesh upload every frame stutters on phones
     const start = j0 * res * 3;
     const count = (j1 - j0 + 1) * res * 3;

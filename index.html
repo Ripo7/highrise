@@ -27,6 +27,11 @@
       <span class="brand-sub">Ski · prototype 0</span>
     </header>
 
+    <button id="relief" class="view-toggle" type="button" aria-pressed="false" title="Relief view (T)">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 19h20"/><path d="m3 19 5-8 4 5 3-4 6 7"/><path d="M8 11V5M12 16v-4M15 12V8"/></svg>
+      <span>Relief</span><kbd>T</kbd>
+    </button>
+
     <p class="hint">
       <span class="desktop-only">Drag to sculpt · Right-drag or Alt-drag to orbit · Scroll to zoom</span>
     </p>
@@ -53,7 +58,7 @@
       <div class="panel brush">
         <div class="slider">
           <span id="radius-label">Size <output id="radius-out"></output></span>
-          <div id="radius" class="range" aria-labelledby="radius-label" data-min="3" data-max="40" data-step="1"></div>
+          <div id="radius" class="range" aria-labelledby="radius-label" data-min="3" data-max="150" data-step="1" data-scale="log"></div>
         </div>
         <div class="slider">
           <span id="strength-label">Strength <output id="strength-out"></output></span>
@@ -132,8 +137,8 @@
         <ol class="intro-steps">
           <li>
             <b>Sculpt</b>
-            <span class="desktop-only">Drag on the snow. Hold still to keep building.</span>
-            <span class="touch-only">Drag one finger on the snow. Hold still to keep building.</span>
+            <span class="desktop-only">Drag on the snow. Hold still to keep building. Tap Relief (T) to see bumps and hollows in colour.</span>
+            <span class="touch-only">Drag one finger on the snow. Hold still to keep building. Tap Relief to see bumps and hollows in colour.</span>
           </li>
           <li>
             <b>Look around</b>

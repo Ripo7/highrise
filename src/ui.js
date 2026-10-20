@@ -112,6 +112,14 @@ export function createUI(opts) {
   });
   $('#reset').addEventListener('click', openPicker);
 
+  const reliefBtn = $('#relief');
+  reliefBtn.setAttribute('aria-pressed', String(!!opts.initial.relief));
+  reliefBtn.addEventListener('click', () => {
+    const on = reliefBtn.getAttribute('aria-pressed') !== 'true';
+    reliefBtn.setAttribute('aria-pressed', String(on));
+    opts.onRelief(on);
+  });
+
   // compact screens: secondary options open from the "more" button
   const moreBtn = $('#more');
   const setMenu = (open) => {
@@ -232,7 +240,11 @@ export function createUI(opts) {
       toastTimer = setTimeout(() => toastEl.classList.remove('show'), 3600);
     },
     nudgeRadius(d) {
-      radius.value = Math.max(+radius.min, Math.min(+radius.max, +radius.value + d));
+      // [ and ] scale the brush by ~15 % per press (at least 1 m)
+      const cur = +radius.value;
+      let next = Math.round(cur * (d > 0 ? 1.15 : 1 / 1.15));
+      if (next === cur) next = cur + Math.sign(d);
+      radius.value = Math.max(+radius.min, Math.min(+radius.max, next));
       radius.dispatchEvent(new Event('input'));
     },
     // speed vignette: 0 = none, 1 = full rush
@@ -254,6 +266,9 @@ export function createUI(opts) {
     showControl(name, on) {
       const pad = ride.querySelector(`[data-ctl="${name}"]`);
       if (pad) pad.classList.toggle('held', on);
+    },
+    toggleRelief() {
+      reliefBtn.click();
     },
     toggleContours() {
       contours.checked = !contours.checked;

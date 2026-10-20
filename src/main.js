@@ -23,12 +23,13 @@ const hf = new Heightfield();
 const history = new History(25);
 const state = {
   tool: 'raise',
-  radius: COARSE ? 16 : 12, // fingers are less precise and the phone camera sits further back
+  radius: COARSE ? 28 : 22, // a 480 m wide mountain; fingers are less precise on phones
   strength: 0.5,
   start: null,
   templateId: DEFAULT_TEMPLATE,
   rideCam: 'chase', // chase | helmet
   contours: true,
+  relief: false,
   best: null,
   runs: 0,
 };
@@ -75,6 +76,7 @@ sun.position.set(-0.55, 0.75, 0.35).multiplyScalar(200);
 scene.add(sun);
 
 const terrain = new TerrainMesh(hf, { finishZ: hf.finishZ, start: state.start });
+terrain.setRelief(state.relief);
 scene.add(terrain.group);
 
 const skierMesh = new SkierMesh();
@@ -118,6 +120,11 @@ const ui = createUI({
   onRideExit: () => exitRide(true),
   onRideCam: () => toggleRideCam(),
   onPickTemplate: (id) => chooseTemplate(id),
+  onRelief: (on) => {
+    state.relief = on;
+    terrain.setRelief(on);
+    scheduleSave();
+  },
   templates: TEMPLATES,
   onContours: (v) => {
     state.contours = v;
@@ -327,6 +334,7 @@ function scheduleSave() {
           best: state.best,
           rideCam: state.rideCam,
           templateId: state.templateId,
+          relief: state.relief,
         })
       );
     } catch {
@@ -345,6 +353,7 @@ function loadSave() {
     hf.set(h);
     state.start = data.start;
     if (data.templateId) state.templateId = data.templateId;
+    state.relief = !!data.relief;
     if (data.best) state.best = data.best;
     if (data.rideCam === 'helmet' || data.rideCam === 'chase') state.rideCam = data.rideCam;
     return true;
@@ -626,6 +635,7 @@ function frame() {
     }
   }
 
+  terrain.refreshLocalMean();
   const showBrush = !riding && hover.valid && isBrush(state.tool);
   terrain.setBrush(showBrush, hover.x, hover.y, hover.z, state.radius);
 
@@ -757,6 +767,7 @@ window.addEventListener('keydown', (e) => {
   else if (e.key === '[') ui.nudgeRadius(-2);
   else if (e.key === ']') ui.nudgeRadius(2);
   else if (e.key.toLowerCase() === 'c') ui.toggleContours();
+  else if (e.key.toLowerCase() === 't') ui.toggleRelief();
   else if (e.key.toLowerCase() === 'r') resetView();
 });
 

@@ -167,6 +167,50 @@ kbd {
   pointer-events: none;
 }
 
+/* ---------- relief view toggle ---------- */
+.view-toggle {
+  position: fixed;
+  top: calc(var(--gut) + 66px + var(--safe-t));
+  left: max(var(--gut), var(--safe-l));
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 40px;
+  padding: 0 12px 0 10px;
+  border: 1px solid var(--panel-line);
+  border-radius: 20px;
+  background: var(--panel);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  color: var(--paper);
+  font: 600 14px/1 var(--display);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+.view-toggle svg {
+  width: 20px;
+  height: 20px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.view-toggle[aria-pressed='true'] {
+  /* the button wears the relief ramp when it's on */
+  background: linear-gradient(90deg, #2154a8, #79b3e6 35%, #f1ead9 50%, #f9b061 68%, #cc4d1f);
+  color: #14202b;
+  border-color: transparent;
+}
+.view-toggle[aria-pressed='true'] kbd {
+  color: #14202b;
+  border-color: rgba(20, 32, 43, 0.35);
+}
+body.riding .view-toggle {
+  display: none;
+}
+
 /* ---------- buttons ---------- */
 .btn {
   font: 600 13px/1 var(--display);
@@ -739,6 +783,9 @@ kbd {
    Compact screens: phones (portrait or landscape), small tablets
    ========================================================= */
 @media (max-width: 720px), (max-height: 560px) {
+  .view-toggle {
+    top: calc(var(--gut) + 34px + var(--safe-t));
+  }
   kbd,
   .hint,
   .brand-sub {

@@ -14,7 +14,8 @@ This is **Phase 0**: a grey-box prototype to prove the core loop is fun before a
 | Orbit | Right-drag or Alt-drag | Orbit tool, one finger |
 | Pan / zoom | Shift+right-drag or middle-drag / scroll | Two fingers / pinch |
 | Tools | `1` Raise · `2` Lower · `3` Smooth · `4` Flatten · `5` Start gate · `V` Orbit | Tool bar |
-| Brush size | `[` `]` | Slider |
+| Brush size (3–150 m) | `[` `]` | Slider |
+| Relief view | `T` | Relief button |
 | Send skier | `Space` | Send skier |
 | Ride: steer | `←` `→` or `A` `D` | Hold ◀ ▶ |
 | Ride: tuck / brake | `↑` `W` / `↓` `S` | Hold Tuck / Brake |
@@ -44,6 +45,7 @@ Templates live in `src/core/templates.js`: each is a slope profile along the run
 - **Skier physics**: a point mass with gravity, snow friction and air drag. It leaves the ground on its own when the slope falls away faster than gravity can follow, so kickers and crests create real jumps. Landings are judged by impact speed into the slope: soft, rough (speed loss) or crash.
 - **Ride mode**: sending the skier drops the camera low behind him (chase cam or helmet cam) and you can steer, tuck and brake. Speed shows: the lens widens, the camera rumbles, snow sprays off the skis (rooster tails when carving, bursts on landing) and the screen edges streak. The skis have a heading and edge grip carves the velocity towards it; hands off, the skier simply follows the terrain. Land with the skis sideways and you crash.
 - **Run outcomes**: finish, crash, stopped (not enough slope), off the edge, too slow.
+- **Relief view** (Relief button or `T`): colours every point by how far it sits above or below its surroundings (a ~50 m blur) — crests warm orange, hollows cool blue — with low two-sun shading and 2 m / 10 m contours, so bumps, trenches and kickers read at any distance.
 - **Feedback**: live trail, the previous run as a dashed blue ghost line, topographic contours (2 m / 10 m), run stats and personal best.
 - **Diorama look**: the mountain is a block with stratified sides on a base slab.
 

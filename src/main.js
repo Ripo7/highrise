@@ -11,7 +11,10 @@ import { createUI } from './ui.js';
 
 // ---------- state ----------
 const isBrush = (t) => t in TOOLS;
+let altHeld = false; // Alt/Option held: left button orbits
 const SAVE_KEY = 'highrise.ski.v1';
+const INTRO_KEY = 'highrise.intro.v1';
+const COARSE = window.matchMedia('(pointer: coarse)').matches;
 const DEFAULT_START = { x: 0, z: -105 };
 
 const hf = new Heightfield();
@@ -32,7 +35,8 @@ loadSave();
 // ---------- renderer / scene ----------
 const canvas = document.getElementById('scene');
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+// phones: cap resolution a little to keep sculpting smooth
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, COARSE ? 1.75 : 2));
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 
 const scene = new THREE.Scene();
@@ -101,7 +105,21 @@ const ui = createUI({
     state.contours = v;
     terrain.uniforms.uContours.value = v ? 1 : 0;
   },
+  onIntroClosed: () => {
+    try {
+      localStorage.setItem(INTRO_KEY, '1');
+    } catch {
+      /* ignore */
+    }
+  },
 });
+let seenIntro = false;
+try {
+  seenIntro = localStorage.getItem(INTRO_KEY) === '1';
+} catch {
+  /* ignore */
+}
+if (!seenIntro) ui.openIntro();
 ui.setBest(state.best);
 setTool(state.tool);
 refreshHistoryButtons();
@@ -123,7 +141,7 @@ canvas.addEventListener('pointerdown', (e) => {
     if (stroke) cancelStroke();
     return;
   }
-  if (e.button !== 0) return;
+  if (e.button !== 0 || altHeld || e.altKey) return;
 
   if (state.tool === 'start' && hover.valid) {
     if (hover.z < PHYS.finishZ - 30) {
@@ -284,16 +302,28 @@ function loadSave() {
 }
 
 // ---------- tools ----------
+// Desktop: left = tool, right = orbit, middle = pan, scroll = zoom; holding Alt/Option turns
+// the left button into orbit (for trackpads). Touch: one finger = tool, two = orbit + pinch.
+// With the Orbit tool, one finger orbits and two fingers pan + pinch.
+function applyControlScheme() {
+  const t = state.tool;
+  const camOnly = t === 'view' || altHeld;
+  controls.mouseButtons = {
+    LEFT: camOnly ? THREE.MOUSE.ROTATE : null,
+    MIDDLE: THREE.MOUSE.PAN,
+    RIGHT: THREE.MOUSE.ROTATE,
+  };
+  controls.touches = {
+    ONE: t === 'view' ? THREE.TOUCH.ROTATE : null,
+    TWO: t === 'view' ? THREE.TOUCH.DOLLY_PAN : THREE.TOUCH.DOLLY_ROTATE,
+  };
+  document.body.classList.toggle('alt-orbit', altHeld);
+}
+
 function setTool(t) {
   state.tool = t;
   ui.setTool(t);
-  const L = isBrush(t) || t === 'start' ? null : THREE.MOUSE.ROTATE;
-  controls.mouseButtons = { LEFT: L, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.ROTATE };
-  controls.touches = {
-    ONE: L === null ? null : THREE.TOUCH.ROTATE,
-    TWO: THREE.TOUCH.DOLLY_ROTATE,
-  };
-  canvas.dataset.tool = t;
+  applyControlScheme();
 }
 
 // ---------- runs ----------
@@ -349,10 +379,13 @@ function resize() {
   const w = canvas.clientWidth;
   const h = canvas.clientHeight;
   if (canvas.width !== Math.floor(w * renderer.getPixelRatio()) || canvas.height !== Math.floor(h * renderer.getPixelRatio())) {
+    const wasPortrait = camera.aspect < 1;
     renderer.setSize(w, h, false);
     camera.aspect = w / h;
     camera.fov = w / h < 1 ? 58 : 40;
     camera.updateProjectionMatrix();
+    // phone rotated: re-frame the mountain for the new shape
+    if (wasPortrait !== camera.aspect < 1 && w > 0 && h > 0) resetView();
   }
 }
 
@@ -415,7 +448,23 @@ function frame() {
 requestAnimationFrame(frame);
 
 // ---------- keyboard ----------
+const setAlt = (v) => {
+  if (altHeld === v) return;
+  altHeld = v;
+  applyControlScheme();
+};
+window.addEventListener('keyup', (e) => {
+  if (e.key === 'Alt') setAlt(false);
+});
+window.addEventListener('blur', () => setAlt(false));
+
 window.addEventListener('keydown', (e) => {
+  if (e.key === 'Alt') {
+    e.preventDefault();
+    setAlt(true);
+    return;
+  }
+  if (ui.blocking) return;
   if (e.target instanceof HTMLInputElement && e.target.type !== 'range') return;
   const mod = e.ctrlKey || e.metaKey;
   if (mod && e.key.toLowerCase() === 'z') {
@@ -465,3 +514,7 @@ function placeGate() {
   const { x, z } = state.start;
   gate.position.set(x, hf.heightAt(x, z), z);
 }
+
+// iOS Safari ignores user-scalable=no for pinch gestures on the page chrome
+document.addEventListener('gesturestart', (e) => e.preventDefault());
+document.addEventListener('dblclick', (e) => e.preventDefault());

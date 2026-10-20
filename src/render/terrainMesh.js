@@ -267,8 +267,14 @@ export class TerrainMesh {
         nor[k * 3 + 2] = -dz / len;
       }
     }
-    this.geo.attributes.position.needsUpdate = true;
-    this.geo.attributes.normal.needsUpdate = true;
+    // upload only the touched rows: a full-mesh upload every frame stutters on phones
+    const start = j0 * res * 3;
+    const count = (j1 - j0 + 1) * res * 3;
+    for (const attr of [this.geo.attributes.position, this.geo.attributes.normal]) {
+      attr.clearUpdateRanges();
+      attr.addUpdateRange(start, count);
+      attr.needsUpdate = true;
+    }
     if (i0 === 0 || j0 === 0 || i1 === res - 1 || j1 === res - 1) this.updateSides();
   }
 

@@ -65,7 +65,7 @@ export function createUI(opts) {
   $('#send').addEventListener('click', opts.onSend);
   $('#undo').addEventListener('click', opts.onUndo);
   $('#redo').addEventListener('click', opts.onRedo);
-  $('#reset-view').addEventListener('click', opts.onResetView);
+  $('#reset-view').addEventListener('click', () => opts.onResetView());
 
   // reset needs a second press within 3 s (no blocking dialogs)
   const resetBtn = $('#reset');
@@ -85,6 +85,46 @@ export function createUI(opts) {
         resetBtn.classList.remove('armed');
         resetBtn.textContent = 'New mountain';
       }, 3000);
+    }
+  });
+
+  // compact screens: secondary options open from the "more" button
+  const moreBtn = $('#more');
+  const setMenu = (open) => {
+    document.body.classList.toggle('menu-open', open);
+    moreBtn.setAttribute('aria-expanded', String(open));
+  };
+  moreBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    setMenu(!document.body.classList.contains('menu-open'));
+  });
+  document.addEventListener('pointerdown', (e) => {
+    if (!document.body.classList.contains('menu-open')) return;
+    if (e.target.closest('#extras') || e.target.closest('#more')) return;
+    setMenu(false);
+  });
+  $('#reset-view').addEventListener('click', () => setMenu(false));
+
+  // how-to-play card
+  const intro = $('#intro');
+  const openIntro = () => {
+    setMenu(false);
+    intro.hidden = false;
+    $('#intro-go').focus();
+  };
+  const closeIntro = () => {
+    intro.hidden = true;
+    opts.onIntroClosed?.();
+  };
+  $('#help').addEventListener('click', openIntro);
+  $('#intro-go').addEventListener('click', closeIntro);
+  intro.addEventListener('click', (e) => {
+    if (e.target === intro) closeIntro();
+  });
+  window.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      if (!intro.hidden) closeIntro();
+      setMenu(false);
     }
   });
 
@@ -108,6 +148,10 @@ export function createUI(opts) {
   let toastTimer = 0;
 
   return {
+    openIntro,
+    get blocking() {
+      return !intro.hidden;
+    },
     setTool(id) {
       nav.querySelectorAll('[data-tool]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.tool === id)));
       document.body.dataset.tool = id;

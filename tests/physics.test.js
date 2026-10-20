@@ -53,3 +53,22 @@ test('undo and redo restore snapshots', () => {
   hf.set(h.redo(hf.copy()));
   assert.deepEqual(hf.h, edited);
 });
+
+import { strokeTo } from '../src/core/brushes.js';
+
+test('a fast swipe leaves a continuous ridge', () => {
+  const hf = new Heightfield();
+  hf.generateDefault();
+  const before = hf.copy();
+  const stroke = { last: null, carry: 0 };
+  // 80 m swipe in 0.15 s at 60 fps (≈ 9 frames)
+  for (let f = 0; f <= 9; f++) {
+    strokeTo(hf, stroke, { tool: 'raise', x: -40 + (80 * f) / 9, z: 0, radius: 12, strength: 0.5, dt: 1 / 60 });
+  }
+  for (const x of [-30, -10, 10, 30]) {
+    const [gx, gz] = hf.toGrid(x, 0);
+    const k = Math.round(gz) * hf.res + Math.round(gx);
+    const gain = hf.h[k] - before[k];
+    assert.ok(gain > 1, `ridge at x=${x} only ${gain.toFixed(2)} m`);
+  }
+});

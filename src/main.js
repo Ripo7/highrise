@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import './style.css';
 import { Heightfield, encodeHeights, decodeHeights } from './core/heightfield.js';
-import { applyBrush, TOOLS } from './core/brushes.js';
+import { strokeTo, TOOLS } from './core/brushes.js';
 import { History } from './core/history.js';
 import { Skier, PHYS } from './core/skier.js';
 import { TerrainMesh } from './render/terrainMesh.js';
@@ -11,10 +11,10 @@ import { createUI } from './ui.js';
 
 // ---------- state ----------
 const isBrush = (t) => t in TOOLS;
+const COARSE = window.matchMedia('(pointer: coarse)').matches;
 let altHeld = false; // Alt/Option held: left button orbits
 const SAVE_KEY = 'highrise.ski.v1';
 const INTRO_KEY = 'highrise.intro.v1';
-const COARSE = window.matchMedia('(pointer: coarse)').matches;
 const DEFAULT_START = { x: 0, z: -105 };
 
 const hf = new Heightfield();
@@ -22,7 +22,7 @@ hf.generateDefault();
 const history = new History();
 const state = {
   tool: 'raise',
-  radius: 12,
+  radius: COARSE ? 16 : 12, // fingers are less precise and the phone camera sits further back
   strength: 0.5,
   start: { ...DEFAULT_START },
   follow: true,
@@ -133,6 +133,9 @@ let saveTimer = 0;
 canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 
 canvas.addEventListener('pointerdown', (e) => {
+  // a fresh first finger means any touch we still track is stale (a lost pointerup
+  // would otherwise make every new touch look like a second finger and block sculpting)
+  if (e.pointerType === 'touch' && e.isPrimary) pointers.clear();
   pointers.set(e.pointerId, e);
   updateHover(e);
 
@@ -158,7 +161,7 @@ canvas.addEventListener('pointerdown', (e) => {
 
   if (isBrush(state.tool) && hover.valid) {
     history.push(hf.copy());
-    stroke = { pointerId: e.pointerId, targetHeight: hover.y, dirty: null };
+    stroke = { pointerId: e.pointerId, targetHeight: hover.y, last: null, carry: 0 };
     canvas.setPointerCapture(e.pointerId);
     refreshHistoryButtons();
   }
@@ -179,6 +182,9 @@ const endPointer = (e) => {
 };
 canvas.addEventListener('pointerup', endPointer);
 canvas.addEventListener('pointercancel', endPointer);
+canvas.addEventListener('lostpointercapture', (e) => {
+  if (stroke && stroke.pointerId === e.pointerId && !pointers.has(e.pointerId)) endPointer(e);
+});
 canvas.addEventListener('pointerleave', (e) => {
   if (e.pointerType === 'mouse' && !stroke) hover.valid = false;
 });
@@ -395,7 +401,7 @@ function frame() {
 
   // sculpt continuously while held, so holding still keeps building
   if (stroke && hover.valid && isBrush(state.tool)) {
-    const rect = applyBrush(hf, {
+    const rect = strokeTo(hf, stroke, {
       tool: state.tool,
       x: hover.x,
       z: hover.z,

@@ -90,3 +90,58 @@ export function applyBrush(hf, p) {
 function clamp(v) {
   return v < MIN_H ? MIN_H : v > MAX_H ? MAX_H : v;
 }
+
+// ---------- strokes ----------
+// A stroke deposits "dabs" along the path the pointer travelled, so a quick swipe
+// builds a continuous ridge/trench instead of almost nothing, plus a time-based
+// contribution while the pointer holds still.
+
+const DAB_DT = 0.1; // each dab acts like 100 ms of holding the brush still
+
+export function unionRect(a, b) {
+  if (!a) return b;
+  if (!b) return a;
+  return {
+    i0: Math.min(a.i0, b.i0),
+    i1: Math.max(a.i1, b.i1),
+    j0: Math.min(a.j0, b.j0),
+    j1: Math.max(a.j1, b.j1),
+  };
+}
+
+/**
+ * Advance a stroke to the pointer's current position.
+ * @param {object} stroke  mutable: { last: {x,z} | null, carry: number }
+ * @param {object} p       { tool, x, z, radius, strength, dt, targetHeight }
+ * @returns dirty rect or null
+ */
+export function strokeTo(hf, stroke, p) {
+  const spacing = Math.max(0.5, p.radius * 0.12);
+  let rect = null;
+  let moved = 0;
+  if (!stroke.last) {
+    rect = applyBrush(hf, { ...p, dt: DAB_DT });
+    stroke.last = { x: p.x, z: p.z };
+    stroke.carry = 0;
+  } else {
+    const dx = p.x - stroke.last.x;
+    const dz = p.z - stroke.last.z;
+    const dist = Math.hypot(dx, dz);
+    moved = dist;
+    if (dist > 1e-6) {
+      // walk the segment, dropping a dab every `spacing` metres
+      let travelled = spacing - stroke.carry;
+      while (travelled <= dist) {
+        const t = travelled / dist;
+        rect = unionRect(rect, applyBrush(hf, { ...p, x: stroke.last.x + dx * t, z: stroke.last.z + dz * t, dt: DAB_DT }));
+        travelled += spacing;
+      }
+      stroke.carry = dist - (travelled - spacing);
+      stroke.last = { x: p.x, z: p.z };
+    }
+  }
+  // holding (nearly) still keeps working the spot; skipped while moving so a
+  // swipe stays an even ridge instead of a string of lumps
+  if (moved < spacing * 0.5) rect = unionRect(rect, applyBrush(hf, p));
+  return rect;
+}

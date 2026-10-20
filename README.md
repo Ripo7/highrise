@@ -11,7 +11,8 @@ This is **Phase 0**: a grey-box prototype to prove the core loop is fun before a
 | Action | Mouse / keyboard | Touch |
 | --- | --- | --- |
 | Sculpt | Left-drag (hold to keep building) | One finger |
-| Orbit / zoom | Right-drag / scroll | Two fingers |
+| Orbit | Right-drag or Alt-drag | Orbit tool, one finger |
+| Pan / zoom | Shift+right-drag or middle-drag / scroll | Two fingers / pinch |
 | Tools | `1` Raise · `2` Lower · `3` Smooth · `4` Flatten · `5` Start gate · `V` Orbit | Tool bar |
 | Brush size | `[` `]` | Slider |
 | Send skier | `Space` | Send skier |

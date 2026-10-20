@@ -352,9 +352,9 @@ function loadSave() {
 }
 
 // ---------- tools ----------
-// Desktop: left = tool, right = orbit, middle = pan, scroll = zoom; holding Alt/Option turns
-// the left button into orbit (for trackpads). Touch: one finger = tool, two = orbit + pinch.
-// With the Orbit tool, one finger orbits and two fingers pan + pinch.
+// Desktop: left = tool, right = orbit, middle or Shift+right = pan, scroll = zoom; holding
+// Alt/Option turns the left button into orbit (for trackpads). Touch: one finger = tool,
+// two fingers = pan + pinch. With the Orbit tool, one finger orbits.
 function applyControlScheme() {
   const t = state.tool;
   const camOnly = t === 'view' || altHeld;
@@ -365,7 +365,9 @@ function applyControlScheme() {
   };
   controls.touches = {
     ONE: t === 'view' ? THREE.TOUCH.ROTATE : null,
-    TWO: t === 'view' ? THREE.TOUCH.DOLLY_PAN : THREE.TOUCH.DOLLY_ROTATE,
+    // the piste is long: two fingers slide along it and pinch to zoom; turning the
+    // view is the Orbit tool's job (one finger)
+    TWO: THREE.TOUCH.DOLLY_PAN,
   };
   document.body.classList.toggle('alt-orbit', altHeld);
 }

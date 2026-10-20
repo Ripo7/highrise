@@ -4,7 +4,8 @@ import './style.css';
 import { Heightfield, encodeHeights, decodeHeights } from './core/heightfield.js';
 import { strokeTo, TOOLS } from './core/brushes.js';
 import { History } from './core/history.js';
-import { Skier, PHYS } from './core/skier.js';
+import { Skier } from './core/skier.js';
+import { TEMPLATES, buildTemplate, getTemplate } from './core/templates.js';
 import { TerrainMesh } from './render/terrainMesh.js';
 import { SkierMesh, Trail } from './render/skierMesh.js';
 import { createUI } from './ui.js';
@@ -13,24 +14,25 @@ import { createUI } from './ui.js';
 const isBrush = (t) => t in TOOLS;
 const COARSE = window.matchMedia('(pointer: coarse)').matches;
 let altHeld = false; // Alt/Option held: left button orbits
-const SAVE_KEY = 'highrise.ski.v1';
+const SAVE_KEY = 'highrise.ski.v2'; // v2: 1.2 km piste (v1 saves were 240 m square)
 const INTRO_KEY = 'highrise.intro.v1';
-const DEFAULT_START = { x: 0, z: -105 };
+const DEFAULT_TEMPLATE = 'valley';
 
 const hf = new Heightfield();
-hf.generateDefault();
-const history = new History();
+const history = new History(25);
 const state = {
   tool: 'raise',
   radius: COARSE ? 16 : 12, // fingers are less precise and the phone camera sits further back
   strength: 0.5,
-  start: { ...DEFAULT_START },
+  start: null,
+  templateId: DEFAULT_TEMPLATE,
   rideCam: 'chase', // chase | helmet
   contours: true,
   best: null,
   runs: 0,
 };
-loadSave();
+const hadSave = loadSave();
+if (!hadSave) state.start = buildTemplate(hf, DEFAULT_TEMPLATE);
 
 // ---------- renderer / scene ----------
 const canvas = document.getElementById('scene');
@@ -40,20 +42,28 @@ renderer.setPixelRatio(Math.min(window.devicePixelRatio, COARSE ? 1.75 : 2));
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 
 const scene = new THREE.Scene();
-const camera = new THREE.PerspectiveCamera(42, 1, 1, 4000);
+const camera = new THREE.PerspectiveCamera(42, 1, 1, 9000);
 const HOME_CAM = new THREE.Vector3();
-const HOME_TARGET = new THREE.Vector3(0, 30, 8);
-// Frame the whole mountain: a 3/4 view on wide screens, looking up the fall line on phones
+const HOME_TARGET = new THREE.Vector3();
+// Frame the whole run from below the finish, looking up the piste so its full length
+// stays in view (3/4 on wide screens, straight up the fall line on phones)
 function computeHome() {
   const aspect = Math.max(0.3, canvas.clientWidth / Math.max(1, canvas.clientHeight));
   const portrait = aspect < 1;
   camera.fov = portrait ? 58 : 40;
   camera.aspect = aspect;
   camera.updateProjectionMatrix();
-  const hTan = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) * aspect;
-  const dir = portrait ? new THREE.Vector3(0.12, 0.62, 0.78) : new THREE.Vector3(0.48, 0.5, 0.72);
-  const d = THREE.MathUtils.clamp((portrait ? 135 : 190) / hTan, 360, 900);
-  HOME_CAM.copy(HOME_TARGET).addScaledVector(dir.normalize(), d);
+  if (portrait) {
+    // phones: straight up the fall line, the run stretches away up the screen
+    HOME_TARGET.set(0, hf.heightAt(0, -hf.halfZ * 0.15), -hf.halfZ * 0.15);
+    HOME_CAM.copy(HOME_TARGET).addScaledVector(new THREE.Vector3(0.08, 0.62, 0.78).normalize(), 1150);
+  } else {
+    // wide screens: side-on 3/4 view, start on the left and finish on the right
+    HOME_TARGET.set(0, hf.heightAt(0, 0), 0);
+    const hTan = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) * aspect;
+    const d = THREE.MathUtils.clamp((hf.halfZ * 1.12) / hTan, 800, 2800);
+    HOME_CAM.copy(HOME_TARGET).addScaledVector(new THREE.Vector3(-0.72, 0.64, 0.26).normalize(), d);
+  }
 }
 computeHome();
 camera.position.copy(HOME_CAM);
@@ -63,7 +73,7 @@ const sun = new THREE.DirectionalLight('#fff6ea', 2.2);
 sun.position.set(-0.55, 0.75, 0.35).multiplyScalar(200);
 scene.add(sun);
 
-const terrain = new TerrainMesh(hf, { finishZ: PHYS.finishZ, start: state.start });
+const terrain = new TerrainMesh(hf, { finishZ: hf.finishZ, start: state.start });
 scene.add(terrain.group);
 
 const skierMesh = new SkierMesh();
@@ -84,8 +94,10 @@ controls.target.copy(HOME_TARGET);
 controls.enableDamping = true;
 controls.dampingFactor = 0.08;
 controls.maxPolarAngle = Math.PI * 0.47;
-controls.minDistance = 25;
-controls.maxDistance = 1100;
+controls.minDistance = 20;
+controls.maxDistance = 3000;
+controls.zoomToCursor = true; // scroll / pinch zooms towards what you point at
+controls.screenSpacePanning = false; // panning slides along the ground, up and down the piste
 controls.update();
 
 // ---------- UI ----------
@@ -98,11 +110,12 @@ const ui = createUI({
   onSend: sendSkier,
   onUndo: undo,
   onRedo: redo,
-  onReset: resetTerrain,
   onResetView: resetView,
   onControl: (name, on) => setControl(name, on),
   onRideExit: () => exitRide(true),
   onRideCam: () => toggleRideCam(),
+  onPickTemplate: (id) => chooseTemplate(id),
+  templates: TEMPLATES,
   onContours: (v) => {
     state.contours = v;
     terrain.uniforms.uContours.value = v ? 1 : 0;
@@ -113,15 +126,23 @@ const ui = createUI({
     } catch {
       /* ignore */
     }
+    // first visit: go straight on to choosing a mountain
+    if (!hadSave && !pickedOnce) {
+      pickedOnce = true;
+      ui.openPicker();
+    }
   },
 });
+let pickedOnce = false;
 let seenIntro = false;
 try {
   seenIntro = localStorage.getItem(INTRO_KEY) === '1';
 } catch {
   /* ignore */
 }
+if (!hadSave) document.getElementById('intro-go').textContent = 'Choose a mountain';
 if (!seenIntro) ui.openIntro();
+else if (!hadSave) ui.openPicker();
 ui.setBest(state.best);
 setTool(state.tool);
 refreshHistoryButtons();
@@ -150,7 +171,7 @@ canvas.addEventListener('pointerdown', (e) => {
   if (e.button !== 0 || altHeld || e.altKey) return;
 
   if (state.tool === 'start' && hover.valid) {
-    if (hover.z < PHYS.finishZ - 30) {
+    if (hover.z < hf.finishZ - 60) {
       state.start = { x: hover.x, z: hover.z };
       terrain.setStart(hover.x, hover.z);
       placeGate();
@@ -212,9 +233,9 @@ function updateHover(e) {
   const o = ray.ray.origin;
   const d = ray.ray.direction;
   let prevT = 0;
-  const step = 1.0;
   hover.valid = false;
-  for (let t = 0; t < 1400; t += step) {
+  // step grows with distance: fine near the camera, quick across the far piste
+  for (let t = 0, step = 0.75; t < 6000; t += step, step = Math.max(0.75, t * 0.003)) {
     const x = o.x + d.x * t;
     const y = o.y + d.y * t;
     const z = o.z + d.z * t;
@@ -266,16 +287,25 @@ function redo() {
   scheduleSave();
 }
 
-function resetTerrain() {
+function chooseTemplate(id) {
+  if (riding) exitRide(true);
   history.push(hf.copy());
-  hf.generateDefault();
-  state.start = { ...DEFAULT_START };
+  state.start = buildTemplate(hf, id);
+  state.templateId = id;
+  state.best = null;
   terrain.setStart(state.start.x, state.start.z);
   terrain.updateAll();
   placeGate();
+  skier = null;
+  skierMesh.visible = false;
+  trail.clear();
+  ghost.clear();
+  ui.setBest(null);
+  ui.setStatus('idle');
   refreshHistoryButtons();
   scheduleSave();
-  ui.toast('Fresh mountain. Undo brings yours back.');
+  resetView();
+  ui.toast(`${getTemplate(id).name} loaded. Undo brings your old mountain back.`);
 }
 
 function refreshHistoryButtons() {
@@ -288,7 +318,13 @@ function scheduleSave() {
     try {
       localStorage.setItem(
         SAVE_KEY,
-        JSON.stringify({ h: encodeHeights(hf.h), start: state.start, best: state.best, rideCam: state.rideCam })
+        JSON.stringify({
+          h: encodeHeights(hf.h),
+          start: state.start,
+          best: state.best,
+          rideCam: state.rideCam,
+          templateId: state.templateId,
+        })
       );
     } catch {
       /* storage unavailable: fine, the session still works */
@@ -299,15 +335,19 @@ function scheduleSave() {
 function loadSave() {
   try {
     const raw = localStorage.getItem(SAVE_KEY);
-    if (!raw) return;
+    if (!raw) return false;
     const data = JSON.parse(raw);
-    const h = data.h && decodeHeights(data.h, hf.res * hf.res);
-    if (h) hf.set(h);
-    if (data.start) state.start = data.start;
+    const h = data.h && decodeHeights(data.h, hf.nx * hf.nz);
+    if (!h || !data.start) return false;
+    hf.set(h);
+    state.start = data.start;
+    if (data.templateId) state.templateId = data.templateId;
     if (data.best) state.best = data.best;
     if (data.rideCam === 'helmet' || data.rideCam === 'chase') state.rideCam = data.rideCam;
+    return true;
   } catch {
     /* ignore corrupt saves */
+    return false;
   }
 }
 
@@ -575,7 +615,7 @@ function frame() {
     skier.update(dt);
     skierMesh.sync(skier, hf, dt);
     trail.setPath(skier.path);
-    ui.setStats(skier);
+    ui.setStats(skier, (skier.pos[2] - state.start.z) / (hf.finishZ - state.start.z));
     if (skier.status !== lastStatus) {
       lastStatus = skier.status;
       ui.setStatus(skier.status);

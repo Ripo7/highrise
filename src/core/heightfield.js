@@ -2,51 +2,65 @@
 // Pure JS (no Three.js) so the physics and brushes can be tested in Node.
 //
 // World axes: x = across the slope, z = down the slope (start at -z, finish at +z), y = up.
+// The piste is a long strip: 240 m wide, 1200 m from top to bottom.
 
-export const WORLD_SIZE = 240; // metres, square
-export const RES = 257; // vertices per side (256 cells)
-export const CELL = WORLD_SIZE / (RES - 1);
-export const HALF = WORLD_SIZE / 2;
-export const MIN_H = -25;
-export const MAX_H = 220;
+export const SIZE_X = 240; // metres across
+export const SIZE_Z = 1200; // metres from top to bottom
+export const CELL = 1.25; // metres between height samples
+export const MIN_H = -30;
+export const MAX_H = 620;
+export const START_MARGIN = 20; // start line this far below the top edge
+export const FINISH_MARGIN = 18; // finish line this far above the bottom edge
 
 export class Heightfield {
-  constructor(res = RES, size = WORLD_SIZE) {
-    this.res = res;
-    this.size = size;
-    this.half = size / 2;
-    this.cell = size / (res - 1);
-    this.h = new Float32Array(res * res);
+  constructor(sizeX = SIZE_X, sizeZ = SIZE_Z, cell = CELL) {
+    this.cell = cell;
+    this.nx = Math.round(sizeX / cell) + 1;
+    this.nz = Math.round(sizeZ / cell) + 1;
+    this.sizeX = (this.nx - 1) * cell;
+    this.sizeZ = (this.nz - 1) * cell;
+    this.halfX = this.sizeX / 2;
+    this.halfZ = this.sizeZ / 2;
+    this.h = new Float32Array(this.nx * this.nz);
+  }
+
+  get startZ() {
+    return -this.halfZ + START_MARGIN;
+  }
+
+  get finishZ() {
+    return this.halfZ - FINISH_MARGIN;
   }
 
   idx(i, j) {
-    return j * this.res + i;
+    return j * this.nx + i;
   }
 
   // grid coords (float) from world coords
   toGrid(x, z) {
-    return [(x + this.half) / this.cell, (z + this.half) / this.cell];
+    return [(x + this.halfX) / this.cell, (z + this.halfZ) / this.cell];
   }
 
   toWorld(i, j) {
-    return [i * this.cell - this.half, j * this.cell - this.half];
+    return [i * this.cell - this.halfX, j * this.cell - this.halfZ];
   }
 
   inside(x, z) {
-    return x >= -this.half && x <= this.half && z >= -this.half && z <= this.half;
+    return x >= -this.halfX && x <= this.halfX && z >= -this.halfZ && z <= this.halfZ;
   }
 
   heightAtCell(i, j) {
-    const r = this.res - 1;
-    i = i < 0 ? 0 : i > r ? r : i;
-    j = j < 0 ? 0 : j > r ? r : j;
-    return this.h[j * this.res + i];
+    const rx = this.nx - 1;
+    const rz = this.nz - 1;
+    i = i < 0 ? 0 : i > rx ? rx : i;
+    j = j < 0 ? 0 : j > rz ? rz : j;
+    return this.h[j * this.nx + i];
   }
 
   // Bilinear height at world position
   heightAt(x, z) {
-    const gx = (x + this.half) / this.cell;
-    const gz = (z + this.half) / this.cell;
+    const gx = (x + this.halfX) / this.cell;
+    const gz = (z + this.halfZ) / this.cell;
     const i = Math.floor(gx);
     const j = Math.floor(gz);
     const fx = gx - i;
@@ -70,6 +84,28 @@ export class Heightfield {
     return out;
   }
 
+  // Exact normal of the interpolated surface at this point (no smoothing across
+  // cells), used by the physics so a skier only bends over an edge once he reaches it
+  normalExactAt(x, z, out = [0, 1, 0]) {
+    const gx = (x + this.halfX) / this.cell;
+    const gz = (z + this.halfZ) / this.cell;
+    const i = Math.floor(gx);
+    const j = Math.floor(gz);
+    const fx = gx - i;
+    const fz = gz - j;
+    const a = this.heightAtCell(i, j);
+    const b = this.heightAtCell(i + 1, j);
+    const c = this.heightAtCell(i, j + 1);
+    const d = this.heightAtCell(i + 1, j + 1);
+    const dx = ((b - a) * (1 - fz) + (d - c) * fz) / this.cell;
+    const dz = ((c - a) * (1 - fx) + (d - b) * fx) / this.cell;
+    const len = Math.hypot(dx, 1, dz);
+    out[0] = -dx / len;
+    out[1] = 1 / len;
+    out[2] = -dz / len;
+    return out;
+  }
+
   copy() {
     return new Float32Array(this.h);
   }
@@ -78,25 +114,13 @@ export class Heightfield {
     this.h.set(data);
   }
 
-  // The default mountain: a concave run (steep at the top, easing out at the bottom),
-  // channelled between two valley walls, with a little natural undulation.
-  generateDefault(seed = 7) {
-    const noise = makeValueNoise(seed);
-    const { res, half } = this;
-    for (let j = 0; j < res; j++) {
-      for (let i = 0; i < res; i++) {
+  // Fill from a function of world position
+  fill(fn) {
+    for (let j = 0; j < this.nz; j++) {
+      for (let i = 0; i < this.nx; i++) {
         const [x, z] = this.toWorld(i, j);
-        const t = (half - z) / (2 * half); // 1 at top, 0 at bottom
-        let h = 95 * Math.pow(t, 1.35);
-        // valley walls
-        const ax = Math.abs(x);
-        h += 28 * smoothstep(55, 118, ax) + 6 * smoothstep(30, 90, ax);
-        // undulation
-        h += 2.2 * noise(x * 0.025, z * 0.025) + 0.8 * noise(x * 0.07 + 31, z * 0.07 - 12);
-        // gentle start plateau at the height of the start line (no ledge to drop off)
-        const plateau = 88.5 + 28 * smoothstep(55, 118, ax) + 6 * smoothstep(30, 90, ax) + 2.2 * noise(x * 0.025, z * 0.025);
-        h = mix(h, plateau, smoothstep(-98, -114, z));
-        this.h[this.idx(i, j)] = h;
+        const v = fn(x, z);
+        this.h[j * this.nx + i] = v < MIN_H ? MIN_H : v > MAX_H ? MAX_H : v;
       }
     }
   }
@@ -143,9 +167,13 @@ export function makeValueNoise(seed = 1) {
   };
 }
 
-// Encode/decode for autosave (Float32 -> base64)
+// Autosave encoding: heights quantised to 1 cm in 16 bits, then base64 (~0.5 MB)
 export function encodeHeights(arr) {
-  const bytes = new Uint8Array(arr.buffer, arr.byteOffset, arr.byteLength);
+  const q = new Uint16Array(arr.length);
+  for (let i = 0; i < arr.length; i++) {
+    q[i] = Math.max(0, Math.min(65535, Math.round((arr[i] - MIN_H) * 100)));
+  }
+  const bytes = new Uint8Array(q.buffer);
   let bin = '';
   const chunk = 0x8000;
   for (let i = 0; i < bytes.length; i += chunk) {
@@ -156,8 +184,11 @@ export function encodeHeights(arr) {
 
 export function decodeHeights(str, expectedLength) {
   const bin = atob(str);
-  if (bin.length !== expectedLength * 4) return null;
+  if (bin.length !== expectedLength * 2) return null;
   const bytes = new Uint8Array(bin.length);
   for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-  return new Float32Array(bytes.buffer);
+  const q = new Uint16Array(bytes.buffer);
+  const out = new Float32Array(expectedLength);
+  for (let i = 0; i < expectedLength; i++) out[i] = q[i] / 100 + MIN_H;
+  return out;
 }

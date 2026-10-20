@@ -1,5 +1,6 @@
 // DOM overlay: tools, brush settings, run HUD, toasts.
 import { makeSlider } from './slider.js';
+import { drawTemplateThumb } from './thumbs.js';
 
 const ICONS = {
   raise: '<path d="M3 19h18M5 19c2-6 4-9 7-9s5 3 7 9"/><path d="M12 3v5M9.5 5.5 12 3l2.5 2.5"/>',
@@ -68,26 +69,48 @@ export function createUI(opts) {
   $('#redo').addEventListener('click', opts.onRedo);
   $('#reset-view').addEventListener('click', () => opts.onResetView());
 
-  // reset needs a second press within 3 s (no blocking dialogs)
-  const resetBtn = $('#reset');
-  let armed = 0;
-  resetBtn.addEventListener('click', () => {
-    if (armed) {
-      clearTimeout(armed);
-      armed = 0;
-      resetBtn.classList.remove('armed');
-      resetBtn.textContent = 'New mountain';
-      opts.onReset();
-    } else {
-      resetBtn.classList.add('armed');
-      resetBtn.textContent = 'Press again';
-      armed = setTimeout(() => {
-        armed = 0;
-        resetBtn.classList.remove('armed');
-        resetBtn.textContent = 'New mountain';
-      }, 3000);
+  // mountain picker: blank slope or a ready-made template, each with a relief preview
+  const picker = $('#picker');
+  const pickerList = $('#picker-list');
+  pickerList.innerHTML = opts.templates
+    .map(
+      (t) => `
+      <button class="tpl" type="button" data-id="${t.id}">
+        <canvas class="tpl-thumb" width="480" height="84" aria-hidden="true"></canvas>
+        <span class="tpl-meta"><b>${t.name}</b><span class="tpl-level" data-level="${t.id}">${t.level}</span></span>
+        <span class="tpl-blurb">${t.blurb}</span>
+      </button>`
+    )
+    .join('');
+  let thumbsDrawn = false;
+  const openPicker = () => {
+    setMenu(false);
+    picker.hidden = false;
+    if (!thumbsDrawn) {
+      thumbsDrawn = true;
+      // draw one preview per frame so the dialog appears immediately
+      const items = [...pickerList.querySelectorAll('.tpl')];
+      const next = () => {
+        const b = items.shift();
+        if (!b) return;
+        drawTemplateThumb(b.querySelector('canvas'), b.dataset.id);
+        requestAnimationFrame(next);
+      };
+      requestAnimationFrame(next);
     }
+  };
+  const closePicker = () => (picker.hidden = true);
+  pickerList.addEventListener('click', (e) => {
+    const b = e.target.closest('[data-id]');
+    if (!b) return;
+    closePicker();
+    opts.onPickTemplate(b.dataset.id);
   });
+  $('#picker-close').addEventListener('click', closePicker);
+  picker.addEventListener('click', (e) => {
+    if (e.target === picker) closePicker();
+  });
+  $('#reset').addEventListener('click', openPicker);
 
   // compact screens: secondary options open from the "more" button
   const moreBtn = $('#more');
@@ -125,6 +148,7 @@ export function createUI(opts) {
   window.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
       if (!intro.hidden) closeIntro();
+      else if (!picker.hidden) closePicker();
       setMenu(false);
     }
   });
@@ -162,13 +186,15 @@ export function createUI(opts) {
     jumps: $('#s-jumps'),
   };
   const bestEl = $('#s-best');
+  const progressFill = $('#progress-fill');
   const toastEl = $('#toast');
   let toastTimer = 0;
 
   return {
     openIntro,
+    openPicker,
     get blocking() {
-      return !intro.hidden;
+      return !intro.hidden || !picker.hidden;
     },
     setTool(id) {
       nav.querySelectorAll('[data-tool]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.tool === id)));
@@ -182,7 +208,8 @@ export function createUI(opts) {
       statusEl.textContent = STATUS_LABEL[s] || s;
       statusEl.dataset.status = s;
     },
-    setStats(sk) {
+    setStats(sk, progress = 0) {
+      progressFill.style.transform = `scaleX(${Math.min(1, Math.max(0, progress)).toFixed(3)})`;
       stat.time.textContent = sk.time.toFixed(2);
       stat.speed.textContent = Math.round(sk.speed * 3.6);
       stat.top.textContent = Math.round(sk.maxSpeed * 3.6);

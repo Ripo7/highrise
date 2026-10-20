@@ -10,7 +10,7 @@ export const TOOLS = {
   flatten: { label: 'Flatten', key: '4' },
 };
 
-const RAISE_RATE = 14; // metres per second at full strength, brush centre
+const RAISE_RATE = 16; // metres per second at full strength, brush centre
 
 function falloff(d, r) {
   if (d >= r) return 0;
@@ -23,13 +23,13 @@ function falloff(d, r) {
  */
 export function applyBrush(hf, p) {
   const { tool, x, z, radius, strength, dt } = p;
-  const { res, cell, h } = hf;
+  const { nx: res, nz, cell, h } = hf;
   const [gx, gz] = hf.toGrid(x, z);
   const gr = radius / cell;
   const i0 = Math.max(0, Math.floor(gx - gr));
   const i1 = Math.min(res - 1, Math.ceil(gx + gr));
   const j0 = Math.max(0, Math.floor(gz - gr));
-  const j1 = Math.min(res - 1, Math.ceil(gz + gr));
+  const j1 = Math.min(nz - 1, Math.ceil(gz + gr));
   if (i0 > i1 || j0 > j1) return null;
 
   if (tool === 'raise' || tool === 'lower') {

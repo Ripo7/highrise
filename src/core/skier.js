@@ -17,8 +17,7 @@ export const PHYS = {
   minJumpAir: 0.25, // seconds of air to count as a jump
   stuckSpeed: 0.6,
   stuckTime: 1.5,
-  maxTime: 120,
-  finishZ: 108,
+  maxTime: 300,
   edgeMargin: 2,
   turnRate: 2.4, // rad/s at low speed, eases off as speed rises
   airSpin: 3.2, // rad/s of heading rotation in the air
@@ -116,7 +115,7 @@ export class Skier {
 
     const ground = hf.heightAt(pos[0], pos[2]);
     const gap = pos[1] - ground;
-    const n = hf.normalAt(pos[0], pos[2], this.n);
+    const n = hf.normalExactAt(pos[0], pos[2], this.n);
 
     if (this.grounded) {
       if (gap > P.liftoffGap) {
@@ -188,9 +187,9 @@ export class Skier {
     }
 
     if (this.status !== 'running') return;
-    if (pos[2] >= P.finishZ) {
+    if (pos[2] >= hf.finishZ) {
       this.status = 'finished';
-    } else if (Math.abs(pos[0]) > hf.half - P.edgeMargin || pos[2] < -hf.half + 0.5) {
+    } else if (Math.abs(pos[0]) > hf.halfX - P.edgeMargin || pos[2] < -hf.halfZ + 0.5) {
       this.status = 'out';
     } else if (this.time > P.maxTime) {
       this.status = 'timeout';

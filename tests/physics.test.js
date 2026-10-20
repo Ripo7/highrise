@@ -1,48 +1,58 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { Heightfield } from '../src/core/heightfield.js';
+import { Heightfield, encodeHeights, decodeHeights } from '../src/core/heightfield.js';
 import { Skier } from '../src/core/skier.js';
-import { applyBrush } from '../src/core/brushes.js';
+import { applyBrush, strokeTo } from '../src/core/brushes.js';
 import { History } from '../src/core/history.js';
+import { TEMPLATES, buildTemplate } from '../src/core/templates.js';
 
-const START = { x: 0, z: -105 };
-
-test('default mountain is skiable to the finish', () => {
+function mountain(id = 'blank') {
   const hf = new Heightfield();
-  hf.generateDefault();
-  const s = new Skier(hf, START).simulate();
-  assert.equal(s.status, 'finished');
-  assert.ok(s.time > 5 && s.time < 30, `time ${s.time}`);
-  assert.ok(s.maxSpeed * 3.6 < 160, 'speeds stay plausible');
+  const start = buildTemplate(hf, id);
+  return { hf, start };
+}
+
+for (const tpl of TEMPLATES) {
+  test(`template "${tpl.name}" is skiable hands-off and takes a long run`, () => {
+    const { hf, start } = mountain(tpl.id);
+    const s = new Skier(hf, start).simulate();
+    assert.equal(s.status, 'finished', `${tpl.id} ended ${s.status} at z=${s.pos[2].toFixed(0)}`);
+    assert.ok(s.time > 40, `${tpl.id} run only ${s.time.toFixed(1)} s`);
+    assert.ok(s.maxSpeed * 3.6 < 160, 'speeds stay plausible');
+  });
+}
+
+test('the kicker line produces five clean jumps', () => {
+  const { hf, start } = mountain('kickers');
+  const s = new Skier(hf, start).simulate();
+  assert.equal(s.jumps, 5);
+  assert.ok(s.airTime > 5, `air ${s.airTime.toFixed(1)} s`);
+  assert.ok(!s.events.some((e) => e.type === 'rough' || e.type === 'crash'));
 });
 
-test('a kicker in the line produces a jump', () => {
-  const hf = new Heightfield();
-  hf.generateDefault();
-  for (let k = 0; k < 25; k++) applyBrush(hf, { tool: 'raise', x: 0, z: -20, radius: 8, strength: 1, dt: 1 / 60 });
-  const s = new Skier(hf, START).simulate();
+test('a kicker sculpted on the blank slope produces a jump', () => {
+  const { hf, start } = mountain('blank');
+  for (let k = 0; k < 25; k++) applyBrush(hf, { tool: 'raise', x: 0, z: -300, radius: 8, strength: 1, dt: 1 / 60 });
+  const s = new Skier(hf, start).simulate();
   assert.ok(s.jumps >= 1, 'at least one jump');
-  assert.ok(s.events.some((e) => e.type === 'jump'));
 });
 
 test('a flat field stops the skier', () => {
   const hf = new Heightfield();
   hf.h.fill(10);
-  const s = new Skier(hf, START).simulate();
+  const s = new Skier(hf, { x: 0, z: hf.startZ }).simulate();
   assert.equal(s.status, 'stuck');
 });
 
-test('smooth and flatten converge', () => {
-  const hf = new Heightfield();
-  hf.generateDefault();
-  const before = hf.heightAt(0, 0);
-  for (let k = 0; k < 200; k++) applyBrush(hf, { tool: 'flatten', x: 0, z: 0, radius: 10, strength: 1, dt: 1 / 60, targetHeight: before + 5 });
-  assert.ok(Math.abs(hf.heightAt(0, 0) - (before + 5)) < 0.2);
+test('flatten converges on its target', () => {
+  const { hf } = mountain('valley');
+  const target = hf.heightAt(0, 0) + 5;
+  for (let k = 0; k < 200; k++) applyBrush(hf, { tool: 'flatten', x: 0, z: 0, radius: 10, strength: 1, dt: 1 / 60, targetHeight: target });
+  assert.ok(Math.abs(hf.heightAt(0, 0) - target) < 0.2);
 });
 
 test('undo and redo restore snapshots', () => {
-  const hf = new Heightfield();
-  hf.generateDefault();
+  const { hf } = mountain('blank');
   const h = new History();
   const orig = hf.copy();
   h.push(hf.copy());
@@ -54,11 +64,16 @@ test('undo and redo restore snapshots', () => {
   assert.deepEqual(hf.h, edited);
 });
 
-import { strokeTo } from '../src/core/brushes.js';
+test('autosave round-trips heights to the centimetre', () => {
+  const { hf } = mountain('couloir');
+  const back = decodeHeights(encodeHeights(hf.h), hf.h.length);
+  let worst = 0;
+  for (let i = 0; i < hf.h.length; i++) worst = Math.max(worst, Math.abs(back[i] - hf.h[i]));
+  assert.ok(worst <= 0.006, `worst error ${worst}`);
+});
 
 test('a fast swipe leaves a continuous ridge', () => {
-  const hf = new Heightfield();
-  hf.generateDefault();
+  const { hf } = mountain('blank');
   const before = hf.copy();
   const stroke = { last: null, carry: 0 };
   // 80 m swipe in 0.15 s at 60 fps (≈ 9 frames)
@@ -67,35 +82,32 @@ test('a fast swipe leaves a continuous ridge', () => {
   }
   for (const x of [-30, -10, 10, 30]) {
     const [gx, gz] = hf.toGrid(x, 0);
-    const k = Math.round(gz) * hf.res + Math.round(gx);
+    const k = Math.round(gz) * hf.nx + Math.round(gx);
     const gain = hf.h[k] - before[k];
     assert.ok(gain > 1, `ridge at x=${x} only ${gain.toFixed(2)} m`);
   }
 });
 
 test('steering right carves the skier to his right', () => {
-  const hf = new Heightfield();
-  hf.generateDefault();
-  const a = new Skier(hf, START);
-  const b = new Skier(hf, START);
-  b.input.steer = 1;
-  for (let k = 0; k < 240 * 2; k++) {
+  const { hf, start } = mountain('blank');
+  const a = new Skier(hf, start);
+  const b = new Skier(hf, start);
+  for (let k = 0; k < 240 * 3; k++) {
+    b.input.steer = k > 240 ? 1 : 0;
     a.step(1 / 240);
-    if (k > 120) b.step(1 / 240);
-    else b.input.steer = 0, b.step(1 / 240), (b.input.steer = 1);
+    b.step(1 / 240);
   }
   // facing downhill (+z), the skier's right is -x
   assert.ok(b.pos[0] < a.pos[0] - 1, `steered x ${b.pos[0].toFixed(2)} vs ${a.pos[0].toFixed(2)}`);
 });
 
 test('braking is slower than tucking', () => {
-  const hf = new Heightfield();
-  hf.generateDefault();
-  const tuck = new Skier(hf, START);
+  const { hf, start } = mountain('blank');
+  const tuck = new Skier(hf, start);
   tuck.input.tuck = true;
-  const brake = new Skier(hf, START);
+  const brake = new Skier(hf, start);
   brake.input.brake = true;
-  for (let k = 0; k < 240 * 4; k++) {
+  for (let k = 0; k < 240 * 6; k++) {
     tuck.step(1 / 240);
     brake.step(1 / 240);
   }

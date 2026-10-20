@@ -58,7 +58,6 @@
           <div id="strength" class="range" aria-labelledby="strength-label" data-min="5" data-max="100" data-step="5"></div>
         </div>
         <div id="extras" class="extras">
-          <label class="check"><input id="follow" type="checkbox" /> Follow skier <kbd>F</kbd></label>
           <label class="check"><input id="contours" type="checkbox" /> Contours <kbd>C</kbd></label>
           <button id="reset-view" class="btn btn-quiet" type="button" title="Reset view (R)">Reset view</button>
           <button id="reset" class="btn btn-quiet" type="button">New mountain</button>
@@ -83,6 +82,30 @@
       </div>
     </footer>
 
+    <div id="ride" class="ride" hidden>
+      <div class="ride-top">
+        <button id="ride-exit" class="btn ride-btn" type="button" title="Back to sculpting (Esc)" aria-label="Back to sculpting">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 18 9 12l6-6"/></svg><span class="ride-label">Sculpt</span>
+        </button>
+        <button id="ride-cam" class="btn ride-btn" type="button" title="Switch camera (C)">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 8h3l2-3h8l2 3h3v11H3z"/><circle cx="12" cy="13" r="3.5"/></svg><span id="ride-cam-label" class="ride-label">Chase cam</span>
+        </button>
+      </div>
+      <div class="ride-pad">
+        <button class="pad pad-steer" type="button" data-ctl="left" aria-label="Steer left">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5 8 12l7 7"/></svg>
+        </button>
+        <div class="pad-mid">
+          <button class="pad pad-small" type="button" data-ctl="tuck">Tuck<kbd>↑</kbd></button>
+          <button class="pad pad-small" type="button" data-ctl="brake">Brake<kbd>↓</kbd></button>
+        </div>
+        <button class="pad pad-steer" type="button" data-ctl="right" aria-label="Steer right">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 5 7 7-7 7"/></svg>
+        </button>
+      </div>
+      <p class="ride-keys desktop-only">← → or A D steer · ↑ W tuck · ↓ S brake · C camera · Space restart · Esc sculpt</p>
+    </div>
+
     <div id="toast" class="toast" role="status" hidden></div>
 
     <div id="intro" class="intro" hidden>
@@ -102,9 +125,9 @@
             <span class="touch-only">Two fingers to orbit and pinch to zoom.</span>
           </li>
           <li>
-            <b>Send the skier</b>
-            <span class="desktop-only">Press Send skier or Space. The dashed blue line is your last run.</span>
-            <span class="touch-only">Tap Send skier. The dashed blue line is your last run.</span>
+            <b>Send and ride</b>
+            <span class="desktop-only">Press Send skier or Space, then ride: arrow keys steer, ↑ tucks, ↓ brakes. Or let go and watch the terrain do the work.</span>
+            <span class="touch-only">Tap Send skier, then ride: hold ◀ ▶ to steer, Tuck to go faster, Brake to slow down. Or let go and watch the terrain do the work.</span>
           </li>
         </ol>
         <button id="intro-go" class="send intro-go" type="button">Start sculpting</button>

@@ -25,7 +25,7 @@ const state = {
   radius: COARSE ? 16 : 12, // fingers are less precise and the phone camera sits further back
   strength: 0.5,
   start: { ...DEFAULT_START },
-  follow: true,
+  rideCam: 'chase', // chase | helmet
   contours: true,
   best: null,
   runs: 0,
@@ -100,7 +100,9 @@ const ui = createUI({
   onRedo: redo,
   onReset: resetTerrain,
   onResetView: resetView,
-  onFollow: (v) => (state.follow = v),
+  onControl: (name, on) => setControl(name, on),
+  onRideExit: () => exitRide(true),
+  onRideCam: () => toggleRideCam(),
   onContours: (v) => {
     state.contours = v;
     terrain.uniforms.uContours.value = v ? 1 : 0;
@@ -136,6 +138,7 @@ canvas.addEventListener('pointerdown', (e) => {
   // a fresh first finger means any touch we still track is stale (a lost pointerup
   // would otherwise make every new touch look like a second finger and block sculpting)
   if (e.pointerType === 'touch' && e.isPrimary) pointers.clear();
+  if (riding) return;
   pointers.set(e.pointerId, e);
   updateHover(e);
 
@@ -285,7 +288,7 @@ function scheduleSave() {
     try {
       localStorage.setItem(
         SAVE_KEY,
-        JSON.stringify({ h: encodeHeights(hf.h), start: state.start, best: state.best })
+        JSON.stringify({ h: encodeHeights(hf.h), start: state.start, best: state.best, rideCam: state.rideCam })
       );
     } catch {
       /* storage unavailable: fine, the session still works */
@@ -302,6 +305,7 @@ function loadSave() {
     if (h) hf.set(h);
     if (data.start) state.start = data.start;
     if (data.best) state.best = data.best;
+    if (data.rideCam === 'helmet' || data.rideCam === 'chase') state.rideCam = data.rideCam;
   } catch {
     /* ignore corrupt saves */
   }
@@ -336,15 +340,155 @@ function setTool(t) {
 let skier = null;
 let lastStatus = null;
 
+// ---------- ride mode: camera behind the skier, player steers ----------
+let riding = false;
+let rideEndTimer = 0;
+const editView = { pos: new THREE.Vector3(), target: new THREE.Vector3() };
+const rig = { pos: new THREE.Vector3(), look: new THREE.Vector3(), snap: true };
+const held = { left: false, right: false, tuck: false, brake: false };
+
+function setControl(name, on) {
+  held[name] = on;
+  applyInput();
+}
+
+function applyInput() {
+  if (!skier) return;
+  skier.input.steer = (held.right ? 1 : 0) - (held.left ? 1 : 0);
+  skier.input.tuck = held.tuck;
+  skier.input.brake = held.brake;
+}
+
 function sendSkier() {
+  if (ui.blocking) return;
   if (skier && skier.path.length > 2) ghost.setPath(skier.path, 0.25);
+  if (stroke) {
+    stroke = null;
+    scheduleSave();
+  }
   skier = new Skier(hf, state.start);
+  applyInput();
   skierMesh.reset();
   skierMesh.visible = true;
   trail.clear();
   lastStatus = 'running';
   state.runs++;
   ui.setStatus('running');
+  rideEndTimer = 0;
+  if (!riding) enterRide();
+  rig.snap = true;
+}
+
+function enterRide() {
+  riding = true;
+  viewAnim = null;
+  editView.pos.copy(camera.position);
+  editView.target.copy(controls.target);
+  controls.enabled = false;
+  camera.near = 0.2;
+  hover.valid = false;
+  ui.setRiding(true);
+  ui.setRideCam(state.rideCam);
+  skierMesh.setFirstPerson(state.rideCam === 'helmet');
+}
+
+function exitRide(abort) {
+  if (!riding) return;
+  if (abort && skier && skier.status === 'running') {
+    skier.status = 'aborted';
+    lastStatus = 'aborted';
+    ui.setStatus('idle');
+  }
+  riding = false;
+  for (const k in held) held[k] = false;
+  applyInput();
+  ui.setRiding(false);
+  skierMesh.setFirstPerson(false);
+  camera.near = 1;
+  camera.fov = camera.aspect < 1 ? 58 : 40;
+  camera.updateProjectionMatrix();
+  controls.enabled = true;
+  viewAnim = {
+    t: 0,
+    fromPos: camera.position.clone(),
+    fromTarget: rig.look.clone(),
+    toPos: editView.pos.clone(),
+    toTarget: editView.target.clone(),
+  };
+}
+
+function toggleRideCam() {
+  state.rideCam = state.rideCam === 'chase' ? 'helmet' : 'chase';
+  ui.setRideCam(state.rideCam);
+  skierMesh.setFirstPerson(riding && state.rideCam === 'helmet');
+  rig.snap = true;
+  scheduleSave();
+}
+
+// Is the skier (chest height) visible from the camera, or does the snow get in the way?
+function lineOfSight(from, to) {
+  for (let i = 1; i < 10; i++) {
+    const t = i / 10;
+    const x = from.x + (to.x - from.x) * t;
+    const z = from.z + (to.z - from.z) * t;
+    const y = from.y + (to.y + 2 - from.y) * t;
+    if (y < hf.heightAt(x, z) + 0.3) return false;
+  }
+  return true;
+}
+
+const _h = new THREE.Vector3();
+const _flat = new THREE.Vector3();
+const _p = new THREE.Vector3();
+const _want = new THREE.Vector3();
+const _look = new THREE.Vector3();
+function updateRideCamera(dt) {
+  const [x, y, z] = skier.pos;
+  _p.set(x, y, z);
+  _h.set(skier.heading[0], skier.heading[1], skier.heading[2]).normalize();
+  // a level version of the heading keeps the chase cam steady over bumps
+  _flat.set(_h.x, 0, _h.z);
+  if (_flat.lengthSq() < 1e-4) _flat.set(0, 0, 1);
+  _flat.normalize();
+  const speed = skier.speed;
+  let posRate;
+  let lookRate;
+  if (state.rideCam === 'helmet') {
+    _want.copy(_p).addScaledVector(_flat, 0.4);
+    _want.y += 3.4;
+    _look.copy(_want).addScaledVector(_h, 24);
+    _look.y -= 3;
+    posRate = 30;
+    lookRate = 12;
+    camera.fov = 74 + Math.min(14, speed * 0.3);
+  } else {
+    // portrait screens are narrow: sit further back so the line ahead stays in frame
+    const portrait = camera.aspect < 1;
+    _want.copy(_p).addScaledVector(_flat, portrait ? -15 : -11);
+    _want.y += portrait ? 6.5 : 4.5;
+    _look.copy(_p).addScaledVector(_flat, 9);
+    _look.y += 1;
+    posRate = 5;
+    lookRate = 9;
+    camera.fov = 60 + Math.min(14, speed * 0.25);
+  }
+  // never dip under the snow, and rise until the skier isn't hidden behind a crest
+  const ground = hf.heightAt(_want.x, _want.z);
+  if (_want.y < ground + 1.5) _want.y = ground + 1.5;
+  if (state.rideCam === 'chase') {
+    for (let tries = 0; tries < 8 && !lineOfSight(_want, _p); tries++) _want.y += 2;
+  }
+  if (rig.snap) {
+    rig.pos.copy(_want);
+    rig.look.copy(_look);
+    rig.snap = false;
+  } else {
+    rig.pos.lerp(_want, 1 - Math.exp(-dt * posRate));
+    rig.look.lerp(_look, 1 - Math.exp(-dt * lookRate));
+  }
+  camera.position.copy(rig.pos);
+  camera.lookAt(rig.look);
+  camera.updateProjectionMatrix();
 }
 
 function onRunEnd(s) {
@@ -360,8 +504,9 @@ function onRunEnd(s) {
     }
     ui.toast(`${isBest ? 'New best! ' : ''}Finished in ${t} s · top ${kmh} km/h · ${jumps}`, isBest ? 'good' : '');
   } else if (s.status === 'crashed') {
-    const ev = s.events.findLast((e) => e.type === 'crash');
-    ui.toast(`Crashed: landed at ${ev ? ev.value.toFixed(1) : '?'} m/s into the slope. Soften the landing.`, 'bad');
+    const ev = s.events.findLast((e) => e.type === 'crash' || e.type === 'sideways');
+    if (ev && ev.type === 'sideways') ui.toast('Crashed: landed sideways. Straighten the skis before touchdown.', 'bad');
+    else ui.toast(`Crashed: landed at ${ev ? ev.value.toFixed(1) : '?'} m/s into the slope. Soften the landing.`, 'bad');
   } else if (s.status === 'stuck') {
     ui.toast('Stopped: not enough slope to keep moving.', 'bad');
   } else if (s.status === 'out') {
@@ -372,14 +517,20 @@ function onRunEnd(s) {
 }
 
 function resetView() {
+  if (riding) return;
   computeHome();
-  viewAnim = { t: 0, fromPos: camera.position.clone(), fromTarget: controls.target.clone() };
+  viewAnim = {
+    t: 0,
+    fromPos: camera.position.clone(),
+    fromTarget: controls.target.clone(),
+    toPos: HOME_CAM.clone(),
+    toTarget: HOME_TARGET.clone(),
+  };
 }
 let viewAnim = null;
 
 // ---------- loop ----------
 const clock = new THREE.Clock();
-const tmp = new THREE.Vector3();
 
 function resize() {
   const w = canvas.clientWidth;
@@ -388,7 +539,7 @@ function resize() {
     const wasPortrait = camera.aspect < 1;
     renderer.setSize(w, h, false);
     camera.aspect = w / h;
-    camera.fov = w / h < 1 ? 58 : 40;
+    if (!riding) camera.fov = w / h < 1 ? 58 : 40;
     camera.updateProjectionMatrix();
     // phone rotated: re-frame the mountain for the new shape
     if (wasPortrait !== camera.aspect < 1 && w > 0 && h > 0) resetView();
@@ -400,7 +551,7 @@ function frame() {
   resize();
 
   // sculpt continuously while held, so holding still keeps building
-  if (stroke && hover.valid && isBrush(state.tool)) {
+  if (!riding && stroke && hover.valid && isBrush(state.tool)) {
     const rect = strokeTo(hf, stroke, {
       tool: state.tool,
       x: hover.x,
@@ -417,7 +568,7 @@ function frame() {
     }
   }
 
-  const showBrush = hover.valid && isBrush(state.tool);
+  const showBrush = !riding && hover.valid && isBrush(state.tool);
   terrain.setBrush(showBrush, hover.x, hover.y, hover.z, state.radius);
 
   if (skier) {
@@ -430,24 +581,25 @@ function frame() {
       ui.setStatus(skier.status);
       if (skier.status !== 'running') onRunEnd(skier);
     }
-    if (state.follow && skier.status === 'running') {
-      tmp.set(skier.pos[0], skier.pos[1], skier.pos[2]).sub(controls.target);
-      const k = 1 - Math.exp(-dt * 3);
-      tmp.multiplyScalar(k);
-      controls.target.add(tmp);
-      camera.position.add(tmp);
+    if (riding) {
+      updateRideCamera(dt);
+      // after the run ends, hold the shot a moment, then fly back to the sculpting view
+      if (skier.status !== 'running') {
+        rideEndTimer += dt;
+        if (rideEndTimer > 2.4) exitRide(false);
+      }
     }
   }
 
   if (viewAnim) {
     viewAnim.t = Math.min(1, viewAnim.t + dt * 1.6);
     const e = 1 - Math.pow(1 - viewAnim.t, 3);
-    camera.position.lerpVectors(viewAnim.fromPos, HOME_CAM, e);
-    controls.target.lerpVectors(viewAnim.fromTarget, HOME_TARGET, e);
+    camera.position.lerpVectors(viewAnim.fromPos, viewAnim.toPos, e);
+    controls.target.lerpVectors(viewAnim.fromTarget, viewAnim.toTarget, e);
     if (viewAnim.t >= 1) viewAnim = null;
   }
 
-  controls.update();
+  if (!riding) controls.update();
   renderer.render(scene, camera);
   requestAnimationFrame(frame);
 }
@@ -459,10 +611,30 @@ const setAlt = (v) => {
   altHeld = v;
   applyControlScheme();
 };
+const RIDE_KEYS = {
+  ArrowLeft: 'left',
+  KeyA: 'left',
+  ArrowRight: 'right',
+  KeyD: 'right',
+  ArrowUp: 'tuck',
+  KeyW: 'tuck',
+  ArrowDown: 'brake',
+  KeyS: 'brake',
+};
 window.addEventListener('keyup', (e) => {
   if (e.key === 'Alt') setAlt(false);
+  const ctl = RIDE_KEYS[e.code];
+  if (ctl && held[ctl]) {
+    setControl(ctl, false);
+    ui.showControl(ctl, false);
+  }
 });
-window.addEventListener('blur', () => setAlt(false));
+window.addEventListener('blur', () => {
+  setAlt(false);
+  for (const k in held) if (held[k]) ui.showControl(k, false);
+  for (const k in held) held[k] = false;
+  applyInput();
+});
 
 window.addEventListener('keydown', (e) => {
   if (e.key === 'Alt') {
@@ -472,6 +644,25 @@ window.addEventListener('keydown', (e) => {
   }
   if (ui.blocking) return;
   if (e.target instanceof HTMLInputElement && e.target.type !== 'range') return;
+  if (riding && !e.ctrlKey && !e.metaKey) {
+    const ctl = RIDE_KEYS[e.code];
+    if (ctl) {
+      e.preventDefault();
+      if (!e.repeat) {
+        setControl(ctl, true);
+        ui.showControl(ctl, true);
+      }
+      return;
+    }
+    if (e.key === 'Escape') {
+      exitRide(true);
+      return;
+    }
+    if (e.key.toLowerCase() === 'c') {
+      toggleRideCam();
+      return;
+    }
+  }
   const mod = e.ctrlKey || e.metaKey;
   if (mod && e.key.toLowerCase() === 'z') {
     e.preventDefault();
@@ -495,7 +686,6 @@ window.addEventListener('keydown', (e) => {
   else if (e.key.toLowerCase() === 'v') setTool('view');
   else if (e.key === '[') ui.nudgeRadius(-2);
   else if (e.key === ']') ui.nudgeRadius(2);
-  else if (e.key.toLowerCase() === 'f') ui.toggleFollow();
   else if (e.key.toLowerCase() === 'c') ui.toggleContours();
   else if (e.key.toLowerCase() === 'r') resetView();
 });
@@ -534,3 +724,12 @@ document.addEventListener(
   },
   { passive: false }
 );
+
+// read-only handle for debugging in the browser console
+window.__highrise = {
+  get skier() {
+    return skier;
+  },
+  camera,
+  hf,
+};

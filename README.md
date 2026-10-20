@@ -15,8 +15,12 @@ This is **Phase 0**: a grey-box prototype to prove the core loop is fun before a
 | Tools | `1` Raise · `2` Lower · `3` Smooth · `4` Flatten · `5` Start gate · `V` Orbit | Tool bar |
 | Brush size | `[` `]` | Slider |
 | Send skier | `Space` | Send skier |
+| Ride: steer | `←` `→` or `A` `D` | Hold ◀ ▶ |
+| Ride: tuck / brake | `↑` `W` / `↓` `S` | Hold Tuck / Brake |
+| Ride: camera | `C` (chase ↔ helmet) | Camera button |
+| Ride: back to sculpting | `Esc` | ‹ button |
 | Undo / redo | `Ctrl+Z` / `Ctrl+Shift+Z` | Buttons |
-| Follow cam, contours, reset view | `F`, `C`, `R` | — |
+| Contours, reset view | `C`, `R` | ••• menu |
 
 Your mountain, start gate and best time autosave in the browser.
 
@@ -24,6 +28,7 @@ Your mountain, start gate and best time autosave in the browser.
 
 - **Heightfield terrain** (257 × 257, 240 m square) with raise, lower, smooth and flatten brushes, soft cosine falloff and a live cursor ring.
 - **Skier physics**: a point mass with gravity, snow friction and air drag. It leaves the ground on its own when the slope falls away faster than gravity can follow, so kickers and crests create real jumps. Landings are judged by impact speed into the slope: soft, rough (speed loss) or crash.
+- **Ride mode**: sending the skier drops the camera behind him (chase cam or helmet cam) and you can steer, tuck and brake. The skis have a heading and edge grip carves the velocity towards it; hands off, the skier simply follows the terrain. Land with the skis sideways and you crash.
 - **Run outcomes**: finish, crash, stopped (not enough slope), off the edge, too slow.
 - **Feedback**: live trail, the previous run as a dashed blue ghost line, topographic contours (2 m / 10 m), run stats and personal best.
 - **Diorama look**: the mountain is a block with stratified sides on a base slab.

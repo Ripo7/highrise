@@ -72,3 +72,32 @@ test('a fast swipe leaves a continuous ridge', () => {
     assert.ok(gain > 1, `ridge at x=${x} only ${gain.toFixed(2)} m`);
   }
 });
+
+test('steering right carves the skier to his right', () => {
+  const hf = new Heightfield();
+  hf.generateDefault();
+  const a = new Skier(hf, START);
+  const b = new Skier(hf, START);
+  b.input.steer = 1;
+  for (let k = 0; k < 240 * 2; k++) {
+    a.step(1 / 240);
+    if (k > 120) b.step(1 / 240);
+    else b.input.steer = 0, b.step(1 / 240), (b.input.steer = 1);
+  }
+  // facing downhill (+z), the skier's right is -x
+  assert.ok(b.pos[0] < a.pos[0] - 1, `steered x ${b.pos[0].toFixed(2)} vs ${a.pos[0].toFixed(2)}`);
+});
+
+test('braking is slower than tucking', () => {
+  const hf = new Heightfield();
+  hf.generateDefault();
+  const tuck = new Skier(hf, START);
+  tuck.input.tuck = true;
+  const brake = new Skier(hf, START);
+  brake.input.brake = true;
+  for (let k = 0; k < 240 * 4; k++) {
+    tuck.step(1 / 240);
+    brake.step(1 / 240);
+  }
+  assert.ok(tuck.speed > brake.speed * 2, `tuck ${tuck.speed.toFixed(1)} brake ${brake.speed.toFixed(1)}`);
+});

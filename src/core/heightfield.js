@@ -93,8 +93,9 @@ export class Heightfield {
         h += 28 * smoothstep(55, 118, ax) + 6 * smoothstep(30, 90, ax);
         // undulation
         h += 2.2 * noise(x * 0.025, z * 0.025) + 0.8 * noise(x * 0.07 + 31, z * 0.07 - 12);
-        // flat start plateau and finish area
-        h = mix(h, 95 + 2.2 * noise(x * 0.025, z * 0.025), smoothstep(-100, -112, z) * (1 - smoothstep(60, 100, ax)));
+        // gentle start plateau at the height of the start line (no ledge to drop off)
+        const plateau = 88.5 + 28 * smoothstep(55, 118, ax) + 6 * smoothstep(30, 90, ax) + 2.2 * noise(x * 0.025, z * 0.025);
+        h = mix(h, plateau, smoothstep(-98, -114, z));
         this.h[this.idx(i, j)] = h;
       }
     }

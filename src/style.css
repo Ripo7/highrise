@@ -788,6 +788,168 @@ kbd {
   }
 }
 
+/* ---------- ride mode ---------- */
+body.riding .dock,
+body.riding .hint,
+body.riding .brand {
+  display: none !important;
+}
+.ride-top {
+  position: fixed;
+  top: calc(var(--gut) + var(--safe-t));
+  left: max(var(--gut), var(--safe-l));
+  display: flex;
+  gap: 8px;
+}
+.ride-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 44px;
+  padding: 0 14px 0 10px;
+  background: var(--panel);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  font-size: 14px;
+}
+.ride-btn svg {
+  width: 20px;
+  height: 20px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.ride-pad {
+  position: fixed;
+  left: max(var(--gut), var(--safe-l));
+  right: max(var(--gut), var(--safe-r));
+  bottom: calc(var(--gut) + 26px + var(--safe-b));
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 12px;
+  pointer-events: none;
+}
+.ride-pad > * {
+  pointer-events: auto;
+}
+.pad {
+  display: inline-grid;
+  place-items: center;
+  border: 1px solid var(--panel-line);
+  background: var(--panel);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  color: var(--paper);
+  cursor: pointer;
+  font: 700 16px/1 var(--display);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  transition: background 0.08s ease, transform 0.08s ease;
+}
+.pad.held {
+  background: var(--signal);
+  border-color: transparent;
+  color: #fff;
+  transform: scale(0.96);
+}
+.pad[data-ctl='brake'].held {
+  background: var(--piste);
+}
+.pad-steer {
+  width: 96px;
+  height: 96px;
+  border-radius: 50%;
+}
+.pad-steer svg {
+  width: 40px;
+  height: 40px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.pad-mid {
+  display: flex;
+  gap: 10px;
+}
+.pad-small {
+  grid-auto-flow: column;
+  gap: 8px;
+  min-width: 96px;
+  height: 56px;
+  padding: 0 14px;
+  border-radius: 28px;
+}
+.ride-keys {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: calc(6px + var(--safe-b));
+  margin: 0;
+  text-align: center;
+  font-size: 13px;
+  color: #3d4f5e;
+  pointer-events: none;
+}
+@media (max-width: 720px) {
+  .pad-steer {
+    width: 84px;
+    height: 84px;
+  }
+  .pad-mid {
+    flex-direction: column;
+    gap: 8px;
+  }
+  /* icon-only column on the left so the scoreboard stays clear */
+  .ride-top {
+    flex-direction: column;
+  }
+  .ride-btn {
+    width: 44px;
+    padding: 0;
+    justify-content: center;
+  }
+  .ride-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+  }
+  .pad-small {
+    min-width: 0;
+    width: 120px;
+    height: 48px;
+  }
+  .ride-pad {
+    bottom: calc(var(--gut) + var(--safe-b));
+  }
+  .toast {
+    top: calc(var(--gut) + 82px + var(--safe-t));
+  }
+  body.riding .toast {
+    top: calc(var(--gut) + 140px + var(--safe-t));
+  }
+}
+@media (max-height: 560px) and (min-width: 721px) {
+  .ride-pad {
+    bottom: calc(var(--gut) + var(--safe-b));
+  }
+  .pad-steer {
+    width: 80px;
+    height: 80px;
+  }
+}
+@media (hover: none) and (pointer: coarse) {
+  .pad kbd {
+    display: none;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .send,
   .toast {

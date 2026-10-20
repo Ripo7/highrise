@@ -31,6 +31,7 @@ export class SkierMesh {
     const skiR = skiL.clone();
     skiR.position.x = 0.13;
     this.body.add(legs, torso, head, hat, skiL, skiR);
+    this.person = [legs, torso, head, hat];
     this.body.scale.setScalar(SCALE);
 
     this.shadow = new THREE.Mesh(
@@ -65,9 +66,13 @@ export class SkierMesh {
     const up = this._up;
     if (skier.grounded) up.set(n[0], n[1], n[2]);
     else up.lerp(new THREE.Vector3(0, 1, 0), 0.05).normalize();
-    const v = skier.vel;
-    const sp = Math.hypot(v[0], v[1], v[2]);
-    if (sp > 0.3) this._fwd.set(v[0], v[1], v[2]).normalize();
+    // face where the skis point (the steering heading), not just the direction of travel
+    const h = skier.heading;
+    if (h) this._fwd.set(h[0], h[1], h[2]).normalize();
+    else {
+      const v = skier.vel;
+      if (Math.hypot(v[0], v[1], v[2]) > 0.3) this._fwd.set(v[0], v[1], v[2]).normalize();
+    }
     // build an orthonormal basis: right = fwd x up, fwd' = up x right
     const right = this._right.crossVectors(up, this._fwd).normalize();
     const fwd = new THREE.Vector3().crossVectors(right, up).normalize();
@@ -87,6 +92,11 @@ export class SkierMesh {
     const s = 1 + air * 0.04;
     this.shadow.scale.setScalar(s);
     this.shadow.material.opacity = 0.28 / (1 + air * 0.08);
+  }
+
+  // helmet cam: hide the body so only the skis show below the camera
+  setFirstPerson(on) {
+    for (const m of this.person) m.visible = !on;
   }
 
   reset() {

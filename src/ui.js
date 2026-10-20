@@ -129,11 +129,28 @@ export function createUI(opts) {
     }
   });
 
-  const follow = $('#follow');
   const contours = $('#contours');
-  follow.checked = opts.initial.follow;
   contours.checked = opts.initial.contours;
-  follow.addEventListener('change', () => opts.onFollow(follow.checked));
+  // ride controls: hold-to-act pads, several at once (steer + tuck)
+  const ride = $('#ride');
+  ride.querySelectorAll('[data-ctl]').forEach((pad) => {
+    const name = pad.dataset.ctl;
+    const press = (on) => {
+      pad.classList.toggle('held', on);
+      opts.onControl(name, on);
+    };
+    pad.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      pad.setPointerCapture(e.pointerId);
+      press(true);
+    });
+    for (const ev of ['pointerup', 'pointercancel', 'lostpointercapture']) {
+      pad.addEventListener(ev, () => pad.classList.contains('held') && press(false));
+    }
+    pad.addEventListener('contextmenu', (e) => e.preventDefault());
+  });
+  $('#ride-exit').addEventListener('click', () => opts.onRideExit());
+  $('#ride-cam').addEventListener('click', () => opts.onRideCam());
   contours.addEventListener('change', () => opts.onContours(contours.checked));
 
   const statusEl = $('#status');
@@ -189,9 +206,18 @@ export function createUI(opts) {
       radius.value = Math.max(+radius.min, Math.min(+radius.max, +radius.value + d));
       radius.dispatchEvent(new Event('input'));
     },
-    toggleFollow() {
-      follow.checked = !follow.checked;
-      follow.dispatchEvent(new Event('change'));
+    setRiding(on) {
+      ride.hidden = !on;
+      document.body.classList.toggle('riding', on);
+      if (on) setMenu(false);
+      if (!on) ride.querySelectorAll('.held').forEach((p) => p.classList.remove('held'));
+    },
+    setRideCam(mode) {
+      $('#ride-cam-label').textContent = mode === 'helmet' ? 'Helmet cam' : 'Chase cam';
+    },
+    showControl(name, on) {
+      const pad = ride.querySelector(`[data-ctl="${name}"]`);
+      if (pad) pad.classList.toggle('held', on);
     },
     toggleContours() {
       contours.checked = !contours.checked;

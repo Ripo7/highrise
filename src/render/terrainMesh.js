@@ -51,6 +51,21 @@ const frag = /* glsl */ `
   uniform float uRelief;
   uniform sampler2D uLocalMean;
   uniform vec2 uHalf;
+  uniform vec2 uLocalSize;
+
+  // Manual bilinear lookup: iPhones can't filter float textures in hardware (they read
+  // back as zero with linear filtering), so the texture uses nearest and we blend here.
+  float localMeanAt(vec2 uv) {
+    vec2 p = uv * uLocalSize - 0.5;
+    vec2 f = fract(p);
+    vec2 b = (floor(p) + 0.5) / uLocalSize;
+    vec2 t = 1.0 / uLocalSize;
+    float a = texture2D(uLocalMean, b).r;
+    float c = texture2D(uLocalMean, b + vec2(t.x, 0.0)).r;
+    float d = texture2D(uLocalMean, b + vec2(0.0, t.y)).r;
+    float e = texture2D(uLocalMean, b + t).r;
+    return mix(mix(a, c, f.x), mix(d, e, f.x), f.y);
+  }
   varying vec3 vWorld;
   varying vec3 vNormal;
 
@@ -101,7 +116,7 @@ const frag = /* glsl */ `
       // Relief view: colour by height above/below the surrounding terrain (a ~50 m blur),
       // shade from two low suns so every bump casts a readable shadow
       vec2 uv = clamp((vWorld.xz + uHalf) / (2.0 * uHalf), 0.0, 1.0);
-      float local = vWorld.y - texture2D(uLocalMean, uv).r;
+      float local = vWorld.y - localMeanAt(uv);
       float k = clamp(local / 8.0, -1.0, 1.0);
       k = sign(k) * pow(abs(k), 0.7);
       vec3 tint = reliefRamp(k);
@@ -260,6 +275,7 @@ export class TerrainMesh {
       uRelief: { value: 0 },
       uLocalMean: { value: null },
       uHalf: { value: new THREE.Vector2(hf.halfX, hf.halfZ) },
+      uLocalSize: { value: new THREE.Vector2(1, 1) },
     };
     // blurred copy of the terrain at 1/6 resolution: the "surroundings" the relief view
     // compares each point against
@@ -270,8 +286,10 @@ export class TerrainMesh {
     this.lowTmp = new Float32Array(this.lx * this.lz);
     this.localMean = new Float32Array(this.lx * this.lz);
     this.localTex = new THREE.DataTexture(this.localMean, this.lx, this.lz, THREE.RedFormat, THREE.FloatType);
-    this.localTex.magFilter = THREE.LinearFilter;
-    this.localTex.minFilter = THREE.LinearFilter;
+    this.localTex.magFilter = THREE.NearestFilter;
+    this.localTex.minFilter = THREE.NearestFilter;
+    this.localTex.generateMipmaps = false;
+    this.uniforms.uLocalSize.value.set(this.lx, this.lz);
     this.uniforms.uLocalMean.value = this.localTex;
     this.localDirty = true;
     this.material = new THREE.ShaderMaterial({

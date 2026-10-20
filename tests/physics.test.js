@@ -5,6 +5,7 @@ import { Skier } from '../src/core/skier.js';
 import { applyBrush, strokeTo } from '../src/core/brushes.js';
 import { History } from '../src/core/history.js';
 import { TEMPLATES, buildTemplate } from '../src/core/templates.js';
+import { ScoreKeeper, judgeLanding } from '../src/core/score.js';
 
 function mountain(id = 'blank') {
   const hf = new Heightfield();
@@ -20,7 +21,7 @@ for (const tpl of TEMPLATES) {
     assert.ok(s.time > 30, `${tpl.id} run only ${s.time.toFixed(1)} s`);
     assert.ok(s.maxSpeed * 3.6 > 110, `${tpl.id} too slow: ${(s.maxSpeed * 3.6).toFixed(0)} km/h`);
     assert.ok(s.maxSpeed * 3.6 < 200, 'speeds stay plausible');
-    assert.ok(!s.events.some((e) => e.type === 'crash'), 'no crash hands-off');
+    assert.equal(s.wipeouts, 0, 'no wipeout hands-off');
   });
 }
 
@@ -29,7 +30,101 @@ test('the kicker line produces five clean jumps', () => {
   const s = new Skier(hf, start).simulate();
   assert.equal(s.jumps, 5);
   assert.ok(s.airTime > 5, `air ${s.airTime.toFixed(1)} s`);
-  assert.ok(!s.events.some((e) => e.type === 'rough' || e.type === 'crash'));
+  const lands = s.events.filter((e) => e.type === 'land');
+  assert.ok(lands.every((e) => e.quality === 'clean'), lands.map((e) => e.quality).join(','));
+});
+
+// ride a skier with a per-step controller until the run ends
+function ride(id, control) {
+  const { hf, start } = mountain(id);
+  const s = new Skier(hf, start);
+  const score = new ScoreKeeper();
+  while (s.status === 'running') {
+    control(s, hf);
+    s.step(1 / 240);
+    score.update(s, 1 / 240);
+  }
+  score.finish(s);
+  return { s, score };
+}
+
+test('releasing a crouch pops the skier into the air', () => {
+  const { hf, start } = mountain('blank');
+  const s = new Skier(hf, start);
+  for (let k = 0; k < 240 * 2; k++) s.step(1 / 240);
+  s.input.crouch = true;
+  for (let k = 0; k < 240 * 0.5; k++) s.step(1 / 240);
+  s.input.crouch = false;
+  s.step(1 / 240);
+  assert.equal(s.grounded, false);
+  let air = 0;
+  while (!s.grounded) {
+    s.step(1 / 240);
+    air += 1 / 240;
+  }
+  assert.ok(air > 0.5, `air ${air.toFixed(2)} s`);
+  assert.ok(s.events.some((e) => e.type === 'pop'));
+});
+
+test('a backflip off a kicker lands clean and scores', () => {
+  const kick = 260;
+  const { s, score } = ride('kickers', (s, hf) => {
+    const u = s.pos[2] + hf.halfZ;
+    s.input.crouch = (u > kick - 12 && u < kick - 0.5) || (!s.grounded && s.curAir > 2.4);
+    s.input.pitch = !s.grounded && u > kick && u < kick + 200 && s.flipTotal < 2 * Math.PI - 0.5 ? -1 : 0;
+  });
+  const flip = s.events.find((e) => e.type === 'land' && e.flips === 1);
+  assert.ok(flip, 'landed a flip');
+  assert.equal(flip.flipDir, 'back');
+  assert.equal(flip.quality, 'clean');
+  assert.ok(score.tricks.some((t) => t.name === 'Backflip'));
+  assert.ok(score.total > 3000, `score ${score.total}`);
+});
+
+test('landing sideways wipes out, then the skier gets up and finishes', () => {
+  const kick = 260;
+  const { s, score } = ride('kickers', (s, hf) => {
+    const u = s.pos[2] + hf.halfZ;
+    // quarter turn in the air: skis across the slope on touchdown
+    s.input.steer = !s.grounded && u > kick && u < kick + 200 && Math.abs(s.spin) < Math.PI / 2 ? 1 : 0;
+  });
+  assert.ok(s.events.some((e) => e.type === 'wipeout' && e.reason === 'sideways'));
+  assert.ok(s.events.some((e) => e.type === 'recover'));
+  assert.equal(s.status, 'finished');
+  assert.ok(score.feed.some((f) => f.kind === 'wipeout'));
+});
+
+test('an absorbing crouch does not pop on release', () => {
+  const { hf, start } = mountain('kickers');
+  const s = new Skier(hf, start);
+  while (s.grounded) s.step(1 / 240); // reach the first kicker
+  s.input.crouch = true;
+  while (!s.grounded) s.step(1 / 240);
+  const pops = s.events.filter((e) => e.type === 'pop').length;
+  s.input.crouch = false;
+  for (let k = 0; k < 10; k++) s.step(1 / 240);
+  assert.equal(s.events.filter((e) => e.type === 'pop').length, pops);
+});
+
+test('tricks are named and combos multiply', () => {
+  assert.equal(judgeLanding({ air: 1.2, spin: 360, flips: 0, quality: 'clean', switch: false }).name, '360');
+  assert.equal(judgeLanding({ air: 1.6, spin: 0, flips: 2, flipDir: 'back', quality: 'clean' }).name, 'Double Backflip');
+  assert.equal(judgeLanding({ air: 1.2, spin: 540, flips: 0, quality: 'clean', switch: true }).name, 'Switch 540');
+  assert.equal(judgeLanding({ air: 0.4, spin: 0, flips: 0, quality: 'clean' }), null);
+  const sk = new ScoreKeeper();
+  const fake = { events: [], grounded: true, wipeout: 0, status: 'finished' };
+  fake.events.push({ type: 'land', air: 1.2, spin: 360, flips: 0, quality: 'clean' });
+  fake.events.push({ type: 'land', air: 1.2, spin: 360, flips: 0, quality: 'clean' });
+  sk.update(fake, 0);
+  assert.equal(sk.multiplier, 1.5);
+  const pending = sk.pending;
+  sk.update(fake, 10); // combo window runs out: banked
+  assert.equal(sk.total, pending);
+  fake.events.push({ type: 'land', air: 1.2, spin: 360, flips: 0, quality: 'clean' });
+  fake.events.push({ type: 'wipeout', reason: 'impact' });
+  sk.update(fake, 0);
+  assert.equal(sk.pending, 0, 'wipeout loses the combo');
+  assert.equal(sk.total, pending);
 });
 
 test('a kicker sculpted on the blank slope produces a jump', () => {
@@ -114,4 +209,28 @@ test('braking is slower than tucking', () => {
     brake.step(1 / 240);
   }
   assert.ok(tuck.speed > brake.speed * 2, `tuck ${tuck.speed.toFixed(1)} brake ${brake.speed.toFixed(1)}`);
+});
+
+import { applyStamp, restoreRect } from '../src/core/stamps.js';
+
+test('a kicker stamped on the blank slope launches the skier', () => {
+  const { hf, start } = mountain('blank');
+  const base = hf.copy();
+  // a 24 m kicker straight down the fall line, lip at z = -300
+  applyStamp(hf, base, 'kicker', 0, -324, 0, -300, 22, 0.5);
+  const s = new Skier(hf, start).simulate();
+  const land = s.events.find((e) => e.type === 'land');
+  assert.ok(land && land.air > 0.8, `air ${land?.air}`);
+  assert.equal(s.wipeouts, 0);
+});
+
+test('stamps are undone exactly by restoring their rect', () => {
+  const { hf } = mountain('valley');
+  const base = hf.copy();
+  for (const kind of ['kicker', 'table', 'berm', 'rollers']) {
+    const r = applyStamp(hf, base, kind, 10, -100, 30, -40, 30, 0.6);
+    assert.ok(r, kind);
+    restoreRect(hf, base, r);
+    assert.deepEqual(hf.h, base, kind);
+  }
 });

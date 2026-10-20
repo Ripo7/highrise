@@ -79,7 +79,7 @@ export class Spray {
     const ry = h[2] * n[0] - h[0] * n[2];
     const rz = h[0] * n[1] - h[1] * n[0];
     const steer = skier.input.steer;
-    const brake = skier.input.brake;
+    const brake = skier.input.brake || skier.input.pitch < -0.4;
     const carve = Math.abs(steer) + (brake ? 1.5 : 0);
     const rate = sp * 3 + carve * sp * 7;
     this.carry += rate * dt;

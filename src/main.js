@@ -5,10 +5,16 @@ import { Heightfield, encodeHeights, decodeHeights } from './core/heightfield.js
 import { strokeTo, TOOLS } from './core/brushes.js';
 import { History } from './core/history.js';
 import { Skier } from './core/skier.js';
+import { ScoreKeeper } from './core/score.js';
+import { STAMPS, applyStamp, restoreRect } from './core/stamps.js';
 import { TEMPLATES, buildTemplate, getTemplate } from './core/templates.js';
 import { TerrainMesh } from './render/terrainMesh.js';
 import { SkierMesh, Trail } from './render/skierMesh.js';
 import { Spray } from './render/spray.js';
+import { LinePreview } from './render/preview.js';
+import { GhostRider, packPath } from './render/ghost.js';
+import { Sound } from './audio.js';
+import { RideControls } from './rideControls.js';
 import { createUI } from './ui.js';
 
 // ---------- state ----------
@@ -16,13 +22,14 @@ const isBrush = (t) => t in TOOLS;
 const COARSE = window.matchMedia('(pointer: coarse)').matches;
 let altHeld = false; // Alt/Option held: left button orbits
 const SAVE_KEY = 'highrise.ski.v2'; // v2: 1.2 km piste (v1 saves were 240 m square)
-const INTRO_KEY = 'highrise.intro.v1';
-const DEFAULT_TEMPLATE = 'valley';
+const INTRO_KEY = 'highrise.intro.v2';
+const DEFAULT_TEMPLATE = 'kickers';
 
 const hf = new Heightfield();
 const history = new History(25);
 const state = {
   tool: 'raise',
+  buildKind: 'kicker',
   radius: COARSE ? 28 : 22, // a 480 m wide mountain; fingers are less precise on phones
   strength: 0.5,
   start: null,
@@ -30,8 +37,10 @@ const state = {
   rideCam: 'chase', // chase | helmet
   contours: true,
   relief: false,
-  best: null,
-  runs: 0,
+  line: true,
+  muted: false,
+  best: null, // { score, time }
+  bestPath: null, // packed path of the best run, for the ghost
 };
 const hadSave = loadSave();
 if (!hadSave) state.start = buildTemplate(hf, DEFAULT_TEMPLATE);
@@ -47,8 +56,7 @@ const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(42, 1, 1, 9000);
 const HOME_CAM = new THREE.Vector3();
 const HOME_TARGET = new THREE.Vector3();
-// Frame the whole run from below the finish, looking up the piste so its full length
-// stays in view (3/4 on wide screens, straight up the fall line on phones)
+// Frame the whole run (3/4 side-on on wide screens, straight up the fall line on phones)
 function computeHome() {
   const aspect = Math.max(0.3, canvas.clientWidth / Math.max(1, canvas.clientHeight));
   const portrait = aspect < 1;
@@ -56,11 +64,9 @@ function computeHome() {
   camera.aspect = aspect;
   camera.updateProjectionMatrix();
   if (portrait) {
-    // phones: straight up the fall line, the run stretches away up the screen
     HOME_TARGET.set(0, hf.heightAt(0, -hf.halfZ * 0.15), -hf.halfZ * 0.15);
     HOME_CAM.copy(HOME_TARGET).addScaledVector(new THREE.Vector3(0.08, 0.62, 0.78).normalize(), 1150);
   } else {
-    // wide screens: side-on 3/4 view, start on the left and finish on the right
     HOME_TARGET.set(0, hf.heightAt(0, 0), 0);
     const hTan = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) * aspect;
     const d = THREE.MathUtils.clamp((hf.halfZ * 1.12) / hTan, 800, 2800);
@@ -77,17 +83,24 @@ scene.add(sun);
 
 const terrain = new TerrainMesh(hf, { finishZ: hf.finishZ, start: state.start });
 terrain.setRelief(state.relief);
+terrain.uniforms.uContours.value = state.contours ? 1 : 0;
 scene.add(terrain.group);
 
 const skierMesh = new SkierMesh();
 skierMesh.addTo(scene);
 skierMesh.visible = false;
+const ghostRider = new GhostRider(hf);
+ghostRider.addTo(scene);
 
 const trail = new Trail({ color: '#ff5a1f' });
-const ghost = new Trail({ color: '#2f6fd6', opacity: 0.75, dashed: true });
-scene.add(trail.line, ghost.line);
+scene.add(trail.line);
 const spray = new Spray();
 scene.add(spray.points);
+const linePreview = new LinePreview(hf);
+scene.add(linePreview.group);
+
+const sound = new Sound();
+sound.muted = state.muted;
 
 // start gate: two little poles with a banner
 const gate = makeGate();
@@ -108,15 +121,22 @@ controls.update();
 // ---------- UI ----------
 const ui = createUI({
   tools: TOOLS,
+  stamps: STAMPS,
+  templates: TEMPLATES,
   initial: state,
   onTool: setTool,
+  onKind: (k) => {
+    state.buildKind = k;
+    ui.setKind(k);
+    if (state.tool !== 'build') setTool('build');
+    ui.toast(STAMPS[k].hint);
+  },
   onRadius: (v) => (state.radius = v),
   onStrength: (v) => (state.strength = v),
   onSend: sendSkier,
   onUndo: undo,
   onRedo: redo,
   onResetView: resetView,
-  onControl: (name, on) => setControl(name, on),
   onRideExit: () => exitRide(true),
   onRideCam: () => toggleRideCam(),
   onPickTemplate: (id) => chooseTemplate(id),
@@ -125,7 +145,17 @@ const ui = createUI({
     terrain.setRelief(on);
     scheduleSave();
   },
-  templates: TEMPLATES,
+  onLine: (on) => {
+    state.line = on;
+    if (on) schedulePreview(0);
+    else ui.setPreview(null);
+    scheduleSave();
+  },
+  onMute: (m) => {
+    state.muted = m;
+    sound.setMuted(m);
+    scheduleSave();
+  },
   onContours: (v) => {
     state.contours = v;
     terrain.uniforms.uContours.value = v ? 1 : 0;
@@ -154,16 +184,23 @@ if (!hadSave) document.getElementById('intro-go').textContent = 'Choose a mounta
 if (!seenIntro) ui.openIntro();
 else if (!hadSave) ui.openPicker();
 ui.setBest(state.best);
+ui.setKind(state.buildKind);
 setTool(state.tool);
 refreshHistoryButtons();
+
+const rideControls = new RideControls({ onPress: () => sound.unlock() });
 
 // ---------- sculpting input ----------
 const pointers = new Map();
 const hover = { valid: false, x: 0, y: 0, z: 0 };
-let stroke = null; // { pointerId, targetHeight, dirty }
+let stroke = null; // brush stroke in progress
+let build = null; // Build drag in progress: { pointerId, ax, az, base, rect }
+const baseField = new Heightfield(); // shares nothing: its .h points at the build snapshot
 let saveTimer = 0;
 
 canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+// browsers only start audio from a gesture
+document.addEventListener('pointerdown', () => sound.unlock());
 
 canvas.addEventListener('pointerdown', (e) => {
   // a fresh first finger means any touch we still track is stale (a lost pointerup
@@ -173,9 +210,10 @@ canvas.addEventListener('pointerdown', (e) => {
   pointers.set(e.pointerId, e);
   updateHover(e);
 
-  // a second finger turns the gesture into camera control: cancel the stroke
+  // a second finger turns the gesture into camera control: cancel the edit
   if (pointers.size > 1) {
     if (stroke) cancelStroke();
+    if (build) cancelBuild();
     return;
   }
   if (e.button !== 0 || altHeld || e.altKey) return;
@@ -186,10 +224,22 @@ canvas.addEventListener('pointerdown', (e) => {
       terrain.setStart(hover.x, hover.z);
       placeGate();
       scheduleSave();
+      schedulePreview(0);
       ui.toast('Start gate moved');
     } else {
       ui.toast('Put the start higher up the slope');
     }
+    return;
+  }
+
+  if (state.tool === 'build' && hover.valid) {
+    const base = hf.copy();
+    history.push(base);
+    baseField.h = base;
+    build = { pointerId: e.pointerId, ax: hover.x, az: hover.z, bx: hover.x, bz: hover.z, base, rect: null, moved: false };
+    applyBuild();
+    canvas.setPointerCapture(e.pointerId);
+    refreshHistoryButtons();
     return;
   }
 
@@ -203,7 +253,16 @@ canvas.addEventListener('pointerdown', (e) => {
 
 canvas.addEventListener('pointermove', (e) => {
   if (pointers.has(e.pointerId)) pointers.set(e.pointerId, e);
-  if (e.pointerType === 'mouse' || pointers.size === 1) updateHover(e);
+  if (e.pointerType === 'mouse' || pointers.size === 1) {
+    // while building, aim at the ground as it was, not at the feature being drawn
+    updateHover(e, build ? baseField : hf);
+    if (build && hover.valid) {
+      build.bx = hover.x;
+      build.bz = hover.z;
+      if (Math.hypot(build.bx - build.ax, build.bz - build.az) > 4) build.moved = true;
+      build.dirty = true;
+    }
+  }
 });
 
 const endPointer = (e) => {
@@ -211,16 +270,25 @@ const endPointer = (e) => {
   if (stroke && stroke.pointerId === e.pointerId) {
     stroke = null;
     scheduleSave();
+    schedulePreview(0);
+  }
+  if (build && build.pointerId === e.pointerId) {
+    if (build.dirty) applyBuild();
+    build = null;
+    sound.stamp();
+    scheduleSave();
+    schedulePreview(0);
   }
   if (e.pointerType !== 'mouse') hover.valid = false;
 };
 canvas.addEventListener('pointerup', endPointer);
 canvas.addEventListener('pointercancel', endPointer);
 canvas.addEventListener('lostpointercapture', (e) => {
-  if (stroke && stroke.pointerId === e.pointerId && !pointers.has(e.pointerId)) endPointer(e);
+  const mine = (stroke && stroke.pointerId === e.pointerId) || (build && build.pointerId === e.pointerId);
+  if (mine && !pointers.has(e.pointerId)) endPointer(e);
 });
 canvas.addEventListener('pointerleave', (e) => {
-  if (e.pointerType === 'mouse' && !stroke) hover.valid = false;
+  if (e.pointerType === 'mouse' && !stroke && !build) hover.valid = false;
 });
 
 function cancelStroke() {
@@ -233,10 +301,35 @@ function cancelStroke() {
   refreshHistoryButtons();
 }
 
-// Ray-march the heightfield (much cheaper than raycasting 130k triangles)
+function cancelBuild() {
+  restoreRect(hf, build.base, build.rect);
+  terrain.update(build.rect);
+  history.discardLast();
+  build = null;
+  refreshHistoryButtons();
+}
+
+// Redraw the feature being dragged out: put back the ground it covered, draw it again
+function applyBuild() {
+  const b = build;
+  restoreRect(hf, b.base, b.rect);
+  const old = b.rect;
+  b.rect = applyStamp(hf, b.base, state.buildKind, b.ax, b.az, b.bx, b.bz, state.radius, state.strength);
+  b.dirty = false;
+  const r = old && b.rect ? unionRect(old, b.rect) : b.rect || old;
+  if (r) terrain.update(r);
+  placeGate();
+  schedulePreview(300);
+}
+
+function unionRect(a, b) {
+  return { i0: Math.min(a.i0, b.i0), i1: Math.max(a.i1, b.i1), j0: Math.min(a.j0, b.j0), j1: Math.max(a.j1, b.j1) };
+}
+
+// Ray-march the heightfield (much cheaper than raycasting the mesh)
 const ray = new THREE.Raycaster();
 const ndc = new THREE.Vector2();
-function updateHover(e) {
+function updateHover(e, field = hf) {
   const rect = canvas.getBoundingClientRect();
   ndc.set(((e.clientX - rect.left) / rect.width) * 2 - 1, -((e.clientY - rect.top) / rect.height) * 2 + 1);
   ray.setFromCamera(ndc, camera);
@@ -249,19 +342,16 @@ function updateHover(e) {
     const x = o.x + d.x * t;
     const y = o.y + d.y * t;
     const z = o.z + d.z * t;
-    if (!hf.inside(x, z)) {
+    if (!field.inside(x, z)) {
       prevT = t;
       continue;
     }
-    if (y <= hf.heightAt(x, z)) {
-      // refine by bisection
+    if (y <= field.heightAt(x, z)) {
       let a = prevT;
       let b = t;
       for (let k = 0; k < 12; k++) {
         const m = (a + b) / 2;
-        const mx = o.x + d.x * m;
-        const mz = o.z + d.z * m;
-        if (o.y + d.y * m <= hf.heightAt(mx, mz)) b = m;
+        if (o.y + d.y * m <= field.heightAt(o.x + d.x * m, o.z + d.z * m)) b = m;
         else a = m;
       }
       hover.x = o.x + d.x * b;
@@ -274,9 +364,17 @@ function updateHover(e) {
   }
 }
 
+// ---------- line preview ----------
+let previewDue = 0; // timestamp when the next preview should run (0 = none pending)
+function schedulePreview(delay = 120) {
+  if (!state.line) return;
+  const due = performance.now() + delay;
+  previewDue = previewDue ? Math.min(previewDue, due) : due;
+}
+
 // ---------- history / save ----------
 function undo() {
-  if (stroke) return;
+  if (stroke || build) return;
   const prev = history.undo(hf.copy());
   if (!prev) return;
   hf.set(prev);
@@ -284,10 +382,11 @@ function undo() {
   placeGate();
   refreshHistoryButtons();
   scheduleSave();
+  schedulePreview(0);
 }
 
 function redo() {
-  if (stroke) return;
+  if (stroke || build) return;
   const next = history.redo(hf.copy());
   if (!next) return;
   hf.set(next);
@@ -295,6 +394,7 @@ function redo() {
   placeGate();
   refreshHistoryButtons();
   scheduleSave();
+  schedulePreview(0);
 }
 
 function chooseTemplate(id) {
@@ -303,17 +403,19 @@ function chooseTemplate(id) {
   state.start = buildTemplate(hf, id);
   state.templateId = id;
   state.best = null;
+  state.bestPath = null;
   terrain.setStart(state.start.x, state.start.z);
   terrain.updateAll();
   placeGate();
   skier = null;
   skierMesh.visible = false;
   trail.clear();
-  ghost.clear();
   ui.setBest(null);
   ui.setStatus('idle');
+  ui.clearStats();
   refreshHistoryButtons();
   scheduleSave();
+  schedulePreview(0);
   resetView();
   ui.toast(`${getTemplate(id).name} loaded. Undo brings your old mountain back.`);
 }
@@ -332,9 +434,13 @@ function scheduleSave() {
           h: encodeHeights(hf.h),
           start: state.start,
           best: state.best,
+          bestPath: state.bestPath,
           rideCam: state.rideCam,
           templateId: state.templateId,
           relief: state.relief,
+          line: state.line,
+          muted: state.muted,
+          buildKind: state.buildKind,
         })
       );
     } catch {
@@ -354,19 +460,25 @@ function loadSave() {
     state.start = data.start;
     if (data.templateId) state.templateId = data.templateId;
     state.relief = !!data.relief;
-    if (data.best) state.best = data.best;
+    state.line = data.line !== false;
+    state.muted = !!data.muted;
+    if (data.buildKind in STAMPS) state.buildKind = data.buildKind;
+    // best runs are scored on style now (older saves stored a time)
+    if (data.best && typeof data.best.score === 'number') {
+      state.best = data.best;
+      state.bestPath = Array.isArray(data.bestPath) ? data.bestPath : null;
+    }
     if (data.rideCam === 'helmet' || data.rideCam === 'chase') state.rideCam = data.rideCam;
     return true;
   } catch {
-    /* ignore corrupt saves */
     return false;
   }
 }
 
 // ---------- tools ----------
-// Desktop: left = tool, right = orbit, middle or Shift+right = pan, scroll = zoom; holding
-// Alt/Option turns the left button into orbit (for trackpads). Touch: one finger = tool,
-// two fingers = pan + pinch. With the Orbit tool, one finger orbits.
+// Desktop: left = tool, right = orbit, middle = pan, scroll = zoom; holding Alt/Option turns
+// the left button into orbit (for trackpads). Touch: one finger = tool, two fingers = pan +
+// pinch. With the Orbit tool, one finger orbits.
 function applyControlScheme() {
   const t = state.tool;
   const camOnly = t === 'view' || altHeld;
@@ -377,8 +489,6 @@ function applyControlScheme() {
   };
   controls.touches = {
     ONE: t === 'view' ? THREE.TOUCH.ROTATE : null,
-    // the piste is long: two fingers slide along it and pinch to zoom; turning the
-    // view is the Orbit tool's job (one finger)
     TWO: THREE.TOUCH.DOLLY_PAN,
   };
   document.body.classList.toggle('alt-orbit', altHeld);
@@ -392,48 +502,45 @@ function setTool(t) {
 
 // ---------- runs ----------
 let skier = null;
+let score = null;
 let lastStatus = null;
 let lastEventCount = 0;
+let lastFeedCount = 0;
 
-// ---------- ride mode: camera behind the skier, player steers ----------
+// ---------- ride mode: camera behind the skier, player rides ----------
 let riding = false;
-let rideEndTimer = 0;
 const editView = { pos: new THREE.Vector3(), target: new THREE.Vector3() };
-const rig = { pos: new THREE.Vector3(), look: new THREE.Vector3(), snap: true };
-const held = { left: false, right: false, tuck: false, brake: false };
-
-function setControl(name, on) {
-  held[name] = on;
-  applyInput();
-}
-
-function applyInput() {
-  if (!skier) return;
-  skier.input.steer = (held.right ? 1 : 0) - (held.left ? 1 : 0);
-  skier.input.tuck = held.tuck;
-  skier.input.brake = held.brake;
-}
+const rig = { pos: new THREE.Vector3(), look: new THREE.Vector3(), snap: true, shake: 0, air: 0 };
 
 function sendSkier() {
   if (ui.blocking) return;
-  if (skier && skier.path.length > 2) ghost.setPath(skier.path, 0.25);
+  sound.unlock();
   if (stroke) {
     stroke = null;
     scheduleSave();
   }
+  if (build) {
+    build = null;
+    scheduleSave();
+  }
   skier = new Skier(hf, state.start);
+  score = new ScoreKeeper();
   lastEventCount = 0;
+  lastFeedCount = 0;
   spray.clear();
-  applyInput();
   skierMesh.reset();
   skierMesh.visible = true;
   trail.clear();
+  ghostRider.setPath(state.bestPath);
   lastStatus = 'running';
-  state.runs++;
   ui.setStatus('running');
-  rideEndTimer = 0;
+  ui.hideResults();
+  ui.clearStats();
+  ui.clearTricks();
   if (!riding) enterRide();
   rig.snap = true;
+  rig.shake = 0;
+  trail.line.visible = false; // behind the chase cam the trail climbs past the lens
 }
 
 function enterRide() {
@@ -444,6 +551,9 @@ function enterRide() {
   controls.enabled = false;
   camera.near = 0.2;
   hover.valid = false;
+  linePreview.visible = false;
+  ui.setPreview(null);
+  rideControls.reset();
   ui.setRiding(true);
   ui.setRideCam(state.rideCam);
   skierMesh.setFirstPerson(state.rideCam === 'helmet');
@@ -457,14 +567,21 @@ function exitRide(abort) {
     ui.setStatus('idle');
   }
   riding = false;
-  for (const k in held) held[k] = false;
-  applyInput();
+  rideControls.reset();
   ui.setRiding(false);
+  ui.clearTricks();
+  ui.setRush(0);
   skierMesh.setFirstPerson(false);
+  ghostRider.update(0, 0, false);
   camera.near = 1;
   camera.fov = camera.aspect < 1 ? 58 : 40;
   camera.updateProjectionMatrix();
   controls.enabled = true;
+  trail.line.visible = true;
+  if (state.line) {
+    linePreview.visible = true;
+    if (linePreview.stats) ui.setPreview(linePreview.stats);
+  }
   viewAnim = {
     t: 0,
     fromPos: camera.position.clone(),
@@ -499,34 +616,40 @@ const _flat = new THREE.Vector3();
 const _p = new THREE.Vector3();
 const _want = new THREE.Vector3();
 const _look = new THREE.Vector3();
+const _vel = new THREE.Vector3();
 function updateRideCamera(dt) {
   const [x, y, z] = skier.pos;
   _p.set(x, y, z);
+  // follow the direction of travel (not the skis), so spins don't whip the camera around
+  _vel.set(skier.vel[0], 0, skier.vel[2]);
+  if (_vel.lengthSq() > 4) _flat.copy(_vel).normalize();
+  else {
+    _flat.set(skier.heading[0], 0, skier.heading[2]);
+    if (_flat.lengthSq() < 1e-4) _flat.set(0, 0, 1);
+    _flat.normalize();
+  }
   _h.set(skier.heading[0], skier.heading[1], skier.heading[2]).normalize();
-  // a level version of the heading keeps the chase cam steady over bumps
-  _flat.set(_h.x, 0, _h.z);
-  if (_flat.lengthSq() < 1e-4) _flat.set(0, 0, 1);
-  _flat.normalize();
   const speed = skier.speed;
+  // airborne: ease the camera back and up to show the trick
+  const airTarget = !skier.grounded && skier.curAir > 0.2 ? 1 : 0;
+  rig.air += (airTarget - rig.air) * Math.min(1, dt * 3);
   let posRate;
   let lookRate;
-  // the faster you go, the wider the lens: speed you can feel
   const kick = Math.min(1, Math.max(0, (speed - 8) / 32));
   if (state.rideCam === 'helmet') {
     _want.copy(_p).addScaledVector(_flat, 0.4);
     _want.y += 3.2;
-    _look.copy(_want).addScaledVector(_h, 24);
+    _look.copy(_want).addScaledVector(_flat, 24);
     _look.y -= 3;
     posRate = 30;
     lookRate = 12;
     camera.fov = 72 + 22 * kick;
   } else {
-    // low and close behind; portrait screens sit a little further back
     const portrait = camera.aspect < 1;
-    const back = (portrait ? 10 : 7.5) + 2.5 * kick; // the camera lags further back as you speed up
+    const back = (portrait ? 10 : 7.5) + 2.5 * kick + 5 * rig.air;
     _want.copy(_p).addScaledVector(_flat, -back);
-    _want.y += portrait ? 4.2 : 3.2;
-    _look.copy(_p).addScaledVector(_flat, 10);
+    _want.y += (portrait ? 4.2 : 3.2) + 2.5 * rig.air;
+    _look.copy(_p).addScaledVector(_flat, 10 - 4 * rig.air);
     _look.y += 1;
     posRate = 7;
     lookRate = 10;
@@ -539,7 +662,6 @@ function updateRideCamera(dt) {
     _look.x += Math.sin(t * 37.1) * amp;
     _look.y += Math.sin(t * 43.7 + 1.3) * amp;
   }
-  // never dip under the snow, and rise until the skier isn't hidden behind a crest
   const ground = hf.heightAt(_want.x, _want.z);
   if (_want.y < ground + 1.5) _want.y = ground + 1.5;
   if (state.rideCam === 'chase') {
@@ -554,32 +676,66 @@ function updateRideCamera(dt) {
     rig.look.lerp(_look, 1 - Math.exp(-dt * lookRate));
   }
   camera.position.copy(rig.pos);
+  // landing / wipeout shake
+  if (rig.shake > 0.001) {
+    const s = rig.shake;
+    camera.position.x += (Math.random() - 0.5) * s;
+    camera.position.y += (Math.random() - 0.5) * s;
+    rig.shake *= Math.exp(-dt * 7);
+  }
   camera.lookAt(rig.look);
   camera.updateProjectionMatrix();
 }
 
-function onRunEnd(s) {
-  const t = s.time.toFixed(2);
-  const kmh = (s.maxSpeed * 3.6).toFixed(0);
-  const jumps = s.jumps === 1 ? '1 jump' : `${s.jumps} jumps`;
-  if (s.status === 'finished') {
-    const isBest = !state.best || s.time < state.best.time;
-    if (isBest) {
-      state.best = { time: s.time, jumps: s.jumps, air: s.airTime };
-      ui.setBest(state.best);
-      scheduleSave();
+// sound, spray and shake for what just happened
+function onSkierEvent(ev) {
+  if (ev.type === 'pop') {
+    sound.pop(ev.value);
+  } else if (ev.type === 'land') {
+    const k = Math.min(1, ev.impact / 16);
+    if (ev.air > 0.2) {
+      sound.land(ev.impact, ev.quality);
+      spray.burst(skier, 0.4 + k);
+      rig.shake = Math.max(rig.shake, 0.15 + 0.7 * k * k);
     }
-    ui.toast(`${isBest ? 'New best! ' : ''}Finished in ${t} s · top ${kmh} km/h · ${jumps}`, isBest ? 'good' : '');
-  } else if (s.status === 'crashed') {
-    const ev = s.events.findLast((e) => e.type === 'crash' || e.type === 'sideways');
-    if (ev && ev.type === 'sideways') ui.toast('Crashed: landed sideways. Straighten the skis before touchdown.', 'bad');
-    else ui.toast(`Crashed: landed at ${ev ? ev.value.toFixed(1) : '?'} m/s into the slope. Soften the landing.`, 'bad');
-  } else if (s.status === 'stuck') {
-    ui.toast('Stopped: not enough slope to keep moving.', 'bad');
-  } else if (s.status === 'out') {
-    ui.toast('Off the side of the mountain. Raise a berm to hold the line.', 'bad');
-  } else {
-    ui.toast('Too slow: no finish after 2 minutes.', 'bad');
+  } else if (ev.type === 'wipeout') {
+    sound.wipeout();
+    spray.burst(skier, 2);
+    rig.shake = Math.max(rig.shake, 1.2);
+  }
+}
+
+function onRunEnd(s) {
+  score.finish(s);
+  drainFeed();
+  const finished = s.status === 'finished';
+  const isBest = finished && (!state.best || score.total > state.best.score);
+  if (isBest) {
+    state.best = { score: score.total, time: s.time };
+    state.bestPath = packPath(s.path);
+    ui.setBest(state.best);
+    scheduleSave();
+  }
+  if (finished) sound.finish();
+  ui.showResults({
+    eyebrow: finished ? 'Run complete' : s.status === 'stuck' ? 'Stopped: not enough slope' : 'Out of time',
+    score: score.total,
+    isBest,
+    time: s.time,
+    top: s.maxSpeed * 3.6,
+    tricks: score.tricks.length,
+    wipeouts: s.wipeouts,
+    bestTrick: score.bestTrick,
+    bestCombo: score.bestCombo,
+  });
+}
+
+function drainFeed() {
+  for (; lastFeedCount < score.feed.length; lastFeedCount++) {
+    const item = score.feed[lastFeedCount];
+    ui.trick(item);
+    if (item.kind === 'combo') sound.combo();
+    else if (item.kind !== 'wipeout') sound.trick(item.points);
   }
 }
 
@@ -608,7 +764,6 @@ function resize() {
     camera.aspect = w / h;
     if (!riding) camera.fov = w / h < 1 ? 58 : 40;
     camera.updateProjectionMatrix();
-    // phone rotated: re-frame the mountain for the new shape
     if (wasPortrait !== camera.aspect < 1 && w > 0 && h > 0) resetView();
   }
 }
@@ -632,44 +787,55 @@ function frame() {
       terrain.update(rect);
       hover.y = hf.heightAt(hover.x, hover.z);
       if (Math.hypot(hover.x - state.start.x, hover.z - state.start.z) < state.radius + 4) placeGate();
+      schedulePreview(300);
     }
   }
+  if (!riding && build && build.dirty) applyBuild();
+
+  // live line preview
+  if (!riding && state.line && previewDue && performance.now() >= previewDue) {
+    previewDue = 0;
+    linePreview.visible = true;
+    linePreview.request(state.start, (stats) => {
+      if (!riding && state.line) ui.setPreview(stats);
+    });
+  }
+  if (!state.line) linePreview.visible = false;
 
   terrain.refreshLocalMean();
-  const showBrush = !riding && hover.valid && isBrush(state.tool);
-  terrain.setBrush(showBrush, hover.x, hover.y, hover.z, state.radius);
+  const showRing = !riding && hover.valid && (isBrush(state.tool) || (state.tool === 'build' && !build));
+  const ringR = state.tool === 'build' ? Math.max(3, Math.min(state.radius, 90) / 2) : state.radius;
+  terrain.setBrush(showRing, hover.x, hover.y, hover.z, ringR);
 
   if (skier) {
+    if (riding && skier.status === 'running') {
+      const inp = rideControls.update(dt);
+      skier.input.steer = inp.steer;
+      skier.input.pitch = inp.pitch;
+      skier.input.crouch = inp.crouch;
+    }
     skier.update(dt);
+    if (score) score.update(skier, skier.status === 'running' ? dt : 0);
+    for (; lastEventCount < skier.events.length; lastEventCount++) onSkierEvent(skier.events[lastEventCount]);
+    if (score) drainFeed();
     skierMesh.sync(skier, hf, dt);
     trail.setPath(skier.path);
-    ui.setStats(skier, (skier.pos[2] - state.start.z) / (hf.finishZ - state.start.z));
+    if (score) ui.setStats(skier, (skier.pos[2] - state.start.z) / (hf.finishZ - state.start.z), score);
+    rideControls.setCharge(skier.charge, !skier.grounded);
     if (skier.status !== lastStatus) {
       lastStatus = skier.status;
       ui.setStatus(skier.status);
-      if (skier.status !== 'running') onRunEnd(skier);
+      if (skier.status !== 'running' && skier.status !== 'aborted') onRunEnd(skier);
     }
-    // snow spray and landing bursts
     spray.fromSkier(skier, dt);
-    if (skier.events.length !== lastEventCount) {
-      for (let i = lastEventCount; i < skier.events.length; i++) {
-        const ev = skier.events[i];
-        spray.burst(skier, ev.type === 'jump' ? Math.min(1.5, 0.5 + ev.value * 0.4) : 1.5);
-      }
-      lastEventCount = skier.events.length;
-    }
     ui.setRush(riding && skier.status === 'running' ? (skier.speed - 16) / 22 : 0);
-    if (riding) {
-      updateRideCamera(dt);
-      // after the run ends, hold the shot a moment, then fly back to the sculpting view
-      if (skier.status !== 'running') {
-        rideEndTimer += dt;
-        if (rideEndTimer > 2.4) exitRide(false);
-      }
-    }
+    ghostRider.update(skier.time, dt, riding && skier.status === 'running');
+    if (riding) updateRideCamera(dt);
   }
 
   spray.update(dt);
+  const sculpting = !riding && (stroke || (build && build.moved)) ? 0.6 + 0.4 * state.strength : 0;
+  sound.update({ skier: riding ? skier : null, sculpt: sculpting });
 
   if (viewAnim) {
     viewAnim.t = Math.min(1, viewAnim.t + dt * 1.6);
@@ -684,6 +850,7 @@ function frame() {
   requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);
+schedulePreview(400);
 
 // ---------- keyboard ----------
 const setAlt = (v) => {
@@ -691,65 +858,54 @@ const setAlt = (v) => {
   altHeld = v;
   applyControlScheme();
 };
-const RIDE_KEYS = {
-  ArrowLeft: 'left',
-  KeyA: 'left',
-  ArrowRight: 'right',
-  KeyD: 'right',
-  ArrowUp: 'tuck',
-  KeyW: 'tuck',
-  ArrowDown: 'brake',
-  KeyS: 'brake',
-};
 window.addEventListener('keyup', (e) => {
   if (e.key === 'Alt') setAlt(false);
-  const ctl = RIDE_KEYS[e.code];
-  if (ctl && held[ctl]) {
-    setControl(ctl, false);
-    ui.showControl(ctl, false);
-  }
+  if (rideControls.key(e.code, false)) e.preventDefault();
 });
 window.addEventListener('blur', () => {
   setAlt(false);
-  for (const k in held) if (held[k]) ui.showControl(k, false);
-  for (const k in held) held[k] = false;
-  applyInput();
+  rideControls.reset();
 });
 
+const KIND_ORDER = Object.keys(STAMPS);
+
 window.addEventListener('keydown', (e) => {
+  sound.unlock();
   if (e.key === 'Alt') {
     e.preventDefault();
     setAlt(true);
     return;
   }
   if (ui.blocking) return;
-  if (e.target instanceof HTMLInputElement && e.target.type !== 'range') return;
-  if (riding && !e.ctrlKey && !e.metaKey) {
-    const ctl = RIDE_KEYS[e.code];
-    if (ctl) {
-      e.preventDefault();
-      if (!e.repeat) {
-        setControl(ctl, true);
-        ui.showControl(ctl, true);
-      }
-      return;
-    }
-    if (e.key === 'Escape') {
-      exitRide(true);
-      return;
-    }
-    if (e.key.toLowerCase() === 'c') {
-      toggleRideCam();
-      return;
-    }
-  }
+  const key = e.key.toLowerCase();
   const mod = e.ctrlKey || e.metaKey;
-  if (mod && e.key.toLowerCase() === 'z') {
+  if (riding && !mod) {
+    if (ui.resultsOpen) {
+      if (key === 'r' || e.key === 'Enter' || e.code === 'Space') {
+        e.preventDefault();
+        if (!e.repeat) sendSkier();
+      } else if (e.key === 'Escape') exitRide(false);
+      else if (key === 'c') toggleRideCam();
+      else if (key === 'm') ui.toggleMute();
+      return;
+    }
+    if (rideControls.key(e.code, true)) {
+      e.preventDefault();
+      return;
+    }
+    if (key === 'r') sendSkier();
+    else if (e.key === 'Escape') exitRide(true);
+    else if (key === 'c') toggleRideCam();
+    else if (key === 'm') ui.toggleMute();
+    return;
+  }
+  if (e.target instanceof HTMLInputElement && e.target.type !== 'checkbox') return;
+  if (mod && key === 'z') {
     e.preventDefault();
     e.shiftKey ? redo() : undo();
     return;
   }
-  if (mod && e.key.toLowerCase() === 'y') {
+  if (mod && key === 'y') {
     e.preventDefault();
     redo();
     return;
@@ -757,18 +913,28 @@ window.addEventListener('keydown', (e) => {
   if (mod) return;
   if (e.code === 'Space') {
     e.preventDefault();
-    sendSkier();
+    if (!e.repeat) sendSkier();
     return;
   }
   const byKey = Object.entries(TOOLS).find(([, v]) => v.key === e.key);
   if (byKey) setTool(byKey[0]);
-  else if (e.key === '5' || e.key.toLowerCase() === 'g') setTool('start');
-  else if (e.key.toLowerCase() === 'v') setTool('view');
+  else if (key === 'b') {
+    // B again cycles what to build
+    if (state.tool === 'build') {
+      const next = KIND_ORDER[(KIND_ORDER.indexOf(state.buildKind) + 1) % KIND_ORDER.length];
+      state.buildKind = next;
+      ui.setKind(next);
+      ui.toast(`Build: ${STAMPS[next].label}`);
+    } else setTool('build');
+  } else if (e.key === '5' || key === 'g') setTool('start');
+  else if (key === 'v') setTool('view');
   else if (e.key === '[') ui.nudgeRadius(-2);
   else if (e.key === ']') ui.nudgeRadius(2);
-  else if (e.key.toLowerCase() === 'c') ui.toggleContours();
-  else if (e.key.toLowerCase() === 't') ui.toggleRelief();
-  else if (e.key.toLowerCase() === 'r') resetView();
+  else if (key === 'c') ui.toggleContours();
+  else if (key === 't') ui.toggleRelief();
+  else if (key === 'l') ui.toggleLine();
+  else if (key === 'm') ui.toggleMute();
+  else if (key === 'r') resetView();
 });
 
 // ---------- helpers ----------
@@ -793,13 +959,13 @@ function placeGate() {
 }
 
 // Nothing on this page scrolls. iOS Safari still rubber-bands the page and ignores
-// user-scalable=no, so block page panning/zooming everywhere except the help card text.
+// user-scalable=no, so block page panning/zooming everywhere except dialog text.
 document.addEventListener('gesturestart', (e) => e.preventDefault());
 document.addEventListener('dblclick', (e) => e.preventDefault());
 document.addEventListener(
   'touchmove',
   (e) => {
-    const card = e.target.closest?.('.intro-card');
+    const card = e.target.closest?.('.intro-card, .results-card');
     if (card && card.scrollHeight > card.clientHeight && e.touches.length === 1) return;
     e.preventDefault();
   },
@@ -810,6 +976,9 @@ document.addEventListener(
 window.__highrise = {
   get skier() {
     return skier;
+  },
+  get score() {
+    return score;
   },
   camera,
   hf,

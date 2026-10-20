@@ -4,17 +4,28 @@ import * as THREE from 'three';
 // plus a ground shadow disc and a fading speed trail.
 
 const SCALE = 2.2;
+const CY = 1.0 * SCALE; // flip pivot height (around the hips)
 
 export class SkierMesh {
-  constructor() {
+  // ghost: a see-through, untextured copy used to replay the best run
+  constructor({ ghost = false } = {}) {
+    this.ghost = ghost;
     this.group = new THREE.Group();
+    this.flipper = new THREE.Group(); // pivot for flips and tumbles
+    this.flipper.position.y = CY;
     this.body = new THREE.Group();
-    this.group.add(this.body);
+    this.body.position.y = -CY;
+    this.flipper.add(this.body);
+    this.group.add(this.flipper);
 
-    const jacket = new THREE.MeshLambertMaterial({ color: '#ff5a1f' });
-    const pants = new THREE.MeshLambertMaterial({ color: '#1d2733' });
-    const skin = new THREE.MeshLambertMaterial({ color: '#f1c9a5' });
-    const ski = new THREE.MeshLambertMaterial({ color: '#2f6fd6' });
+    const mat = (color) =>
+      ghost
+        ? new THREE.MeshLambertMaterial({ color: '#9cc6f2', transparent: true, opacity: 0.38, depthWrite: false })
+        : new THREE.MeshLambertMaterial({ color });
+    const jacket = mat('#ff5a1f');
+    const pants = mat('#1d2733');
+    const skin = mat('#f1c9a5');
+    const ski = mat('#2f6fd6');
 
     const legs = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.7, 0.32), pants);
     legs.position.y = 0.45;
@@ -33,6 +44,7 @@ export class SkierMesh {
     this.body.add(legs, torso, head, hat, skiL, skiR);
     this.person = [legs, torso, head, hat];
     this.body.scale.setScalar(SCALE);
+    if (ghost) this.group.traverse((o) => (o.renderOrder = 5));
 
     this.shadow = new THREE.Mesh(
       new THREE.CircleGeometry(1.4, 24),
@@ -40,50 +52,68 @@ export class SkierMesh {
     );
     this.shadow.rotation.x = -Math.PI / 2;
     this.shadow.renderOrder = 2;
+    if (ghost) this.shadow.visible = false;
 
     this._q = new THREE.Quaternion();
     this._m = new THREE.Matrix4();
-    this._up = new THREE.Vector3();
+    this._up = new THREE.Vector3(0, 1, 0);
     this._fwd = new THREE.Vector3(0, 0, 1);
     this._right = new THREE.Vector3();
-    this.crashed = false;
+    this._fwd2 = new THREE.Vector3();
+    this._worldUp = new THREE.Vector3(0, 1, 0);
+    this.crouch = 0;
   }
 
   addTo(scene) {
-    scene.add(this.group, this.shadow);
+    scene.add(this.group);
+    if (!this.ghost) scene.add(this.shadow);
   }
 
   set visible(v) {
     this.group.visible = v;
-    this.shadow.visible = v;
+    this.shadow.visible = v && !this.ghost;
   }
 
-  // Place + orient from simulation state
+  get visible() {
+    return this.group.visible;
+  }
+
+  orient(up, fwd, dt) {
+    const right = this._right.crossVectors(up, fwd).normalize();
+    const f = this._fwd2.crossVectors(right, up).normalize();
+    this._m.makeBasis(right, up, f);
+    this._q.setFromRotationMatrix(this._m);
+    this.group.quaternion.slerp(this._q, Math.min(1, dt * 14));
+  }
+
+  // Place + pose from simulation state
   sync(skier, hf, dt) {
     const [x, y, z] = skier.pos;
     this.group.position.set(x, y, z);
     const n = skier.n;
     const up = this._up;
     if (skier.grounded) up.set(n[0], n[1], n[2]);
-    else up.lerp(new THREE.Vector3(0, 1, 0), 0.05).normalize();
+    else up.lerp(this._worldUp, Math.min(1, dt * 4)).normalize();
     // face where the skis point (the steering heading), not just the direction of travel
     const h = skier.heading;
-    if (h) this._fwd.set(h[0], h[1], h[2]).normalize();
-    else {
-      const v = skier.vel;
-      if (Math.hypot(v[0], v[1], v[2]) > 0.3) this._fwd.set(v[0], v[1], v[2]).normalize();
-    }
-    // build an orthonormal basis: right = fwd x up, fwd' = up x right
-    const right = this._right.crossVectors(up, this._fwd).normalize();
-    const fwd = new THREE.Vector3().crossVectors(right, up).normalize();
-    this._m.makeBasis(right, up, fwd);
-    this._q.setFromRotationMatrix(this._m);
-    this.group.quaternion.slerp(this._q, Math.min(1, dt * 12));
+    this._fwd.set(h[0], h[1], h[2]).normalize();
+    this.orient(up, this._fwd, dt);
 
-    if (skier.status === 'crashed' && !this.crashed) {
-      this.crashed = true;
-      this.body.rotation.z = Math.PI / 2.2;
-      this.body.position.y = 0.4;
+    // crouch (loading a jump, tucking, absorbing a landing)
+    const wantCrouch = skier.crouching ? 1 : skier.grounded && skier.input.pitch > 0.4 ? 0.6 : 0;
+    this.crouch += (wantCrouch - this.crouch) * Math.min(1, dt * 14);
+    this.body.scale.set(SCALE, SCALE * (1 - 0.24 * this.crouch), SCALE);
+
+    if (skier.wipeout > 0) {
+      // tumble: a couple of rolls, then lying in the snow
+      const t = 1 - skier.wipeout / skier.P.wipeoutTime;
+      const roll = Math.min(1, t / 0.45);
+      this.flipper.rotation.set(-roll * Math.PI * 3, 0, 1.35 * Math.min(1, t * 3));
+      this.flipper.position.y = CY * (1 - 0.6 * Math.min(1, t * 3));
+    } else {
+      // flips: the body pitches around the hips (+pitch = backflip, nose up and over)
+      this.flipper.rotation.set(-skier.pitch, 0, 0);
+      this.flipper.position.y = CY;
     }
 
     const gy = hf.heightAt(x, z);
@@ -94,15 +124,22 @@ export class SkierMesh {
     this.shadow.material.opacity = 0.28 / (1 + air * 0.08);
   }
 
+  // Ghost replay: position and facing from a recorded path
+  place(x, y, z, fx, fz, up, dt) {
+    this.group.position.set(x, y, z);
+    if (Math.hypot(fx, fz) > 1e-4) this._fwd.set(fx, 0, fz).normalize();
+    this.orient(up, this._fwd, dt);
+  }
+
   // helmet cam: hide the body so only the skis show below the camera
   setFirstPerson(on) {
     for (const m of this.person) m.visible = !on;
   }
 
   reset() {
-    this.crashed = false;
-    this.body.rotation.set(0, 0, 0);
-    this.body.position.set(0, 0, 0);
+    this.flipper.rotation.set(0, 0, 0);
+    this.flipper.position.y = CY;
+    this.crouch = 0;
     this._fwd.set(0, 0, 1);
   }
 }

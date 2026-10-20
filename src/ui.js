@@ -1,4 +1,4 @@
-// DOM overlay: tools, brush settings, run HUD, toasts.
+// DOM overlay: tools, brush settings, run HUD, trick pop-ups, results, dialogs, toasts.
 import { makeSlider } from './slider.js';
 import { drawTemplateThumb } from './thumbs.js';
 
@@ -7,24 +7,34 @@ const ICONS = {
   lower: '<path d="M3 9h18M5 9c2 6 4 9 7 9s5-3 7-9"/><path d="M12 2v5M9.5 4.5 12 7l2.5-2.5"/>',
   smooth: '<path d="M3 9c3-3 5 3 9 0s6 3 9 0"/><path d="M3 15c3-1.5 5 1.5 9 0s6 1.5 9 0"/>',
   flatten: '<path d="M3 15h18"/><path d="M6 11h12"/><path d="M8 7l4-3 4 3"/>',
+  build: '<path d="M2 19h20"/><path d="M4 19c6 0 10-3 13-9l1 9"/><path d="M17 10h3"/>',
   start: '<path d="M6 21V4"/><path d="M6 4h11l-2.5 3.5L17 11H6"/>',
   view: '<circle cx="12" cy="12" r="3"/><path d="M21 12c0 2.2-4 4-9 4s-9-1.8-9-4 4-4 9-4"/><path d="m18.5 6.5 2.5 1.5-1.5 2.5"/>',
+};
+
+const KIND_ICONS = {
+  kicker: '<path d="M2 18h20"/><path d="M4 18c7 0 11-2 14-8v8"/>',
+  table: '<path d="M2 18h20"/><path d="M3 18 8 11h7l6 7"/>',
+  berm: '<path d="M2 18h20"/><path d="M5 18c2-9 12-9 14 0"/>',
+  rollers: '<path d="M2 18h20"/><path d="M2 18c2-5 4-5 6 0s4-5 6 0 4-5 6 0"/>',
 };
 
 const STATUS_LABEL = {
   idle: 'Ready',
   running: 'On the slope',
   finished: 'Finished',
-  crashed: 'Crashed',
   stuck: 'Stopped',
-  out: 'Off the edge',
   timeout: 'Too slow',
+  aborted: 'Ready',
 };
+
+const fmt = (n) => Math.round(n).toLocaleString('en-US');
 
 export function createUI(opts) {
   const $ = (s) => document.querySelector(s);
   const toolList = [
     ...Object.entries(opts.tools).map(([id, t]) => ({ id, label: t.label, key: t.key })),
+    { id: 'build', label: 'Build', key: 'B' },
     { id: 'start', label: 'Start', key: '5' },
     { id: 'view', label: 'Orbit', key: 'V' },
   ];
@@ -43,6 +53,21 @@ export function createUI(opts) {
   nav.addEventListener('click', (e) => {
     const b = e.target.closest('[data-tool]');
     if (b) opts.onTool(b.dataset.tool);
+  });
+
+  // Build tool: what to build
+  const kinds = $('#build-kinds');
+  kinds.innerHTML = Object.entries(opts.stamps)
+    .map(
+      ([id, k]) => `
+      <button class="kind" type="button" role="radio" data-kind="${id}" aria-checked="false" title="${k.hint}">
+        <svg viewBox="0 0 24 24" aria-hidden="true">${KIND_ICONS[id]}</svg><span>${k.label}</span>
+      </button>`
+    )
+    .join('');
+  kinds.addEventListener('click', (e) => {
+    const b = e.target.closest('[data-kind]');
+    if (b) opts.onKind(b.dataset.kind);
   });
 
   const radius = makeSlider($('#radius'));
@@ -112,12 +137,28 @@ export function createUI(opts) {
   });
   $('#reset').addEventListener('click', openPicker);
 
-  const reliefBtn = $('#relief');
-  reliefBtn.setAttribute('aria-pressed', String(!!opts.initial.relief));
-  reliefBtn.addEventListener('click', () => {
-    const on = reliefBtn.getAttribute('aria-pressed') !== 'true';
-    reliefBtn.setAttribute('aria-pressed', String(on));
-    opts.onRelief(on);
+  const toggle = (sel, initial, cb) => {
+    const btn = $(sel);
+    btn.setAttribute('aria-pressed', String(!!initial));
+    btn.addEventListener('click', () => {
+      const on = btn.getAttribute('aria-pressed') !== 'true';
+      btn.setAttribute('aria-pressed', String(on));
+      cb(on);
+    });
+    return btn;
+  };
+  const reliefBtn = toggle('#relief', opts.initial.relief, opts.onRelief);
+  const lineBtn = toggle('#line', opts.initial.line, opts.onLine);
+  const muteBtn = $('#mute');
+  const showMute = (m) => {
+    muteBtn.textContent = m ? 'Sound off' : 'Sound on';
+    muteBtn.setAttribute('aria-pressed', String(m));
+  };
+  showMute(opts.initial.muted);
+  muteBtn.addEventListener('click', () => {
+    const m = muteBtn.getAttribute('aria-pressed') !== 'true';
+    showMute(m);
+    opts.onMute(m);
   });
 
   // compact screens: secondary options open from the "more" button
@@ -153,6 +194,20 @@ export function createUI(opts) {
   intro.addEventListener('click', (e) => {
     if (e.target === intro) closeIntro();
   });
+
+  const contours = $('#contours');
+  contours.checked = opts.initial.contours;
+  contours.addEventListener('change', () => opts.onContours(contours.checked));
+
+  $('#ride-exit').addEventListener('click', () => opts.onRideExit());
+  $('#ride-cam').addEventListener('click', () => opts.onRideCam());
+  $('#ride-retry').addEventListener('click', () => opts.onSend());
+
+  // results card
+  const results = $('#results');
+  $('#res-retry').addEventListener('click', () => opts.onSend());
+  $('#res-sculpt').addEventListener('click', () => opts.onRideExit());
+
   window.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
       if (!intro.hidden) closeIntro();
@@ -161,44 +216,26 @@ export function createUI(opts) {
     }
   });
 
-  const contours = $('#contours');
-  contours.checked = opts.initial.contours;
-  // ride controls: hold-to-act pads, several at once (steer + tuck)
-  const ride = $('#ride');
-  ride.querySelectorAll('[data-ctl]').forEach((pad) => {
-    const name = pad.dataset.ctl;
-    const press = (on) => {
-      pad.classList.toggle('held', on);
-      opts.onControl(name, on);
-    };
-    pad.addEventListener('pointerdown', (e) => {
-      e.preventDefault();
-      pad.setPointerCapture(e.pointerId);
-      press(true);
-    });
-    for (const ev of ['pointerup', 'pointercancel', 'lostpointercapture']) {
-      pad.addEventListener(ev, () => pad.classList.contains('held') && press(false));
-    }
-    pad.addEventListener('contextmenu', (e) => e.preventDefault());
-  });
-  $('#ride-exit').addEventListener('click', () => opts.onRideExit());
-  $('#ride-cam').addEventListener('click', () => opts.onRideCam());
-  contours.addEventListener('change', () => opts.onContours(contours.checked));
-
   const statusEl = $('#status');
   const stat = {
+    score: $('#s-score'),
     time: $('#s-time'),
     speed: $('#s-speed'),
-    top: $('#s-top'),
     air: $('#s-air'),
-    jumps: $('#s-jumps'),
   };
+  const comboEl = $('#combo');
+  const comboPts = $('#combo-pts');
+  const comboMult = $('#combo-mult');
+  const comboTimer = $('#combo-timer');
   const bestEl = $('#s-best');
   const rush = $('#rush');
   let lastRush = -1;
   const progressFill = $('#progress-fill');
+  const previewInfo = $('#preview-info');
+  const tricksEl = $('#tricks');
   const toastEl = $('#toast');
   let toastTimer = 0;
+  let lastScoreText = '';
 
   return {
     openIntro,
@@ -206,9 +243,19 @@ export function createUI(opts) {
     get blocking() {
       return !intro.hidden || !picker.hidden;
     },
+    get resultsOpen() {
+      return !results.hidden;
+    },
     setTool(id) {
       nav.querySelectorAll('[data-tool]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.tool === id)));
       document.body.dataset.tool = id;
+      kinds.hidden = id !== 'build';
+      // in Build mode the sliders size the feature
+      $('#radius-name').textContent = id === 'build' ? 'Width' : 'Size';
+      $('#strength-name').textContent = id === 'build' ? 'Height' : 'Strength';
+    },
+    setKind(kind) {
+      kinds.querySelectorAll('[data-kind]').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.kind === kind)));
     },
     setHistory(canUndo, canRedo) {
       $('#undo').disabled = !canUndo;
@@ -218,16 +265,84 @@ export function createUI(opts) {
       statusEl.textContent = STATUS_LABEL[s] || s;
       statusEl.dataset.status = s;
     },
-    setStats(sk, progress = 0) {
+    setStats(sk, progress, score) {
       progressFill.style.transform = `scaleX(${Math.min(1, Math.max(0, progress)).toFixed(3)})`;
-      stat.time.textContent = sk.time.toFixed(2);
+      stat.time.textContent = sk.time.toFixed(1);
       stat.speed.textContent = Math.round(sk.speed * 3.6);
-      stat.top.textContent = Math.round(sk.maxSpeed * 3.6);
       stat.air.textContent = (sk.airTime + (sk.grounded ? 0 : sk.curAir)).toFixed(1);
-      stat.jumps.textContent = sk.jumps;
+      const txt = fmt(score.total);
+      if (txt !== lastScoreText) {
+        lastScoreText = txt;
+        stat.score.textContent = txt;
+        stat.score.classList.remove('bump');
+        void stat.score.offsetWidth;
+        stat.score.classList.add('bump');
+      }
+      if (score.combo) {
+        comboEl.hidden = false;
+        comboPts.textContent = fmt(score.combo.points);
+        comboMult.textContent = `×${score.multiplier}`;
+        comboTimer.style.transform = `scaleX(${Math.max(0, score.combo.timer / score.window).toFixed(3)})`;
+      } else comboEl.hidden = true;
+    },
+    clearStats() {
+      lastScoreText = '';
+      stat.score.textContent = '0';
+      stat.time.textContent = '0.0';
+      stat.speed.textContent = '0';
+      stat.air.textContent = '0.0';
+      comboEl.hidden = true;
+      progressFill.style.transform = 'scaleX(0)';
     },
     setBest(best) {
-      bestEl.textContent = best ? `${best.time.toFixed(2)} s` : '—';
+      bestEl.textContent = best ? fmt(best.score) : '—';
+    },
+    setPreview(stats) {
+      if (!stats) {
+        previewInfo.hidden = true;
+        return;
+      }
+      previewInfo.hidden = false;
+      const bits = [];
+      if (stats.status === 'finished') bits.push(`${stats.time.toFixed(0)} s to the finish`);
+      else if (stats.status === 'stuck') bits.push('stops before the finish');
+      else bits.push('too slow to finish');
+      bits.push(stats.jumps === 1 ? '1 jump' : `${stats.jumps} jumps`);
+      if (stats.wipeouts) bits.push(`<b class="bad">${stats.wipeouts} wipeout${stats.wipeouts > 1 ? 's' : ''}</b>`);
+      else if (stats.sketchy) bits.push(`<b class="warn">${stats.sketchy} sketchy</b>`);
+      else if (stats.jumps) bits.push('<b class="ok">all clean</b>');
+      previewInfo.innerHTML = `<span>Line</span> ${bits.join(' · ')}`;
+    },
+    // big trick call-outs in the middle of the screen
+    trick(item) {
+      const el = document.createElement('div');
+      el.className = `trick trick-${item.kind}`;
+      el.innerHTML = `<b>${item.text}</b>${item.points ? `<em>+${fmt(item.points)}</em>` : ''}${
+        item.sub ? `<small>${item.sub}</small>` : ''
+      }`;
+      tricksEl.prepend(el);
+      while (tricksEl.children.length > 3) tricksEl.lastChild.remove();
+      setTimeout(() => el.classList.add('out'), 1500);
+      setTimeout(() => el.remove(), 1900);
+    },
+    clearTricks() {
+      tricksEl.innerHTML = '';
+    },
+    showResults(r) {
+      $('#res-eyebrow').textContent = r.eyebrow;
+      $('#res-score').textContent = fmt(r.score);
+      $('#res-best').hidden = !r.isBest;
+      $('#res-time').textContent = `${r.time.toFixed(1)} s`;
+      $('#res-top').textContent = `${Math.round(r.top)} km/h`;
+      $('#res-tricks').textContent = r.tricks;
+      $('#res-wipeouts').textContent = r.wipeouts;
+      $('#res-trick').textContent = r.bestTrick ? `${r.bestTrick.name} · ${fmt(r.bestTrick.points)}` : '—';
+      $('#res-combo').textContent = r.bestCombo ? fmt(r.bestCombo) : '—';
+      results.hidden = false;
+      $('#res-retry').focus({ preventScroll: true });
+    },
+    hideResults() {
+      results.hidden = true;
     },
     toast(msg, kind = '') {
       toastEl.textContent = msg;
@@ -255,20 +370,22 @@ export function createUI(opts) {
       rush.style.opacity = v.toFixed(2);
     },
     setRiding(on) {
-      ride.hidden = !on;
+      $('#ride').hidden = !on;
       document.body.classList.toggle('riding', on);
       if (on) setMenu(false);
-      if (!on) ride.querySelectorAll('.held').forEach((p) => p.classList.remove('held'));
+      if (!on) results.hidden = true;
     },
     setRideCam(mode) {
       $('#ride-cam-label').textContent = mode === 'helmet' ? 'Helmet cam' : 'Chase cam';
     },
-    showControl(name, on) {
-      const pad = ride.querySelector(`[data-ctl="${name}"]`);
-      if (pad) pad.classList.toggle('held', on);
-    },
     toggleRelief() {
       reliefBtn.click();
+    },
+    toggleLine() {
+      lineBtn.click();
+    },
+    toggleMute() {
+      muteBtn.click();
     },
     toggleContours() {
       contours.checked = !contours.checked;

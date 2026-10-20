@@ -8,23 +8,40 @@ This is **Phase 0**: a grey-box prototype to prove the core loop is fun before a
 
 ## Play
 
+**Build** a playground on the mountain, **ride** it, and score on **style**.
+
+### Building
+
 | Action | Mouse / keyboard | Touch |
 | --- | --- | --- |
-| Sculpt | Left-drag (hold to keep building) | One finger |
+| Raise / lower / smooth / flatten | `1`–`4`, left-drag (hold to keep building) | Tool bar, one finger |
+| Build a feature | `B` (press again to cycle Kicker → Table → Berm → Rollers), drag along the run | Build, then pick a feature and drag |
+| Feature width / height | Size and Strength sliders (they read Width / Height in Build) | Same |
+| Move the start gate | `5` then click | Start |
 | Orbit | Right-drag or Alt-drag | Orbit tool, one finger |
-| Pan / zoom | Shift+right-drag or middle-drag / scroll | Two fingers / pinch |
-| Tools | `1` Raise · `2` Lower · `3` Smooth · `4` Flatten · `5` Start gate · `V` Orbit | Tool bar |
-| Brush size (3–150 m) | `[` `]` | Slider |
+| Pan / zoom | Middle-drag / scroll | Two fingers / pinch |
+| Predicted line | `L` | Line button |
 | Relief view | `T` | Relief button |
-| Send skier | `Space` | Send skier |
-| Ride: steer | `←` `→` or `A` `D` | Hold ◀ ▶ |
-| Ride: tuck / brake | `↑` `W` / `↓` `S` | Hold Tuck / Brake |
-| Ride: camera | `C` (chase ↔ helmet) | Camera button |
-| Ride: back to sculpting | `Esc` | ‹ button |
 | Undo / redo | `Ctrl+Z` / `Ctrl+Shift+Z` | Buttons |
-| Contours, reset view | `C`, `R` | ••• menu |
+| Brush size | `[` `]` | Slider |
 
-Your mountain, start gate and best time autosave in the browser. **New mountain** opens the picker.
+The **predicted line** reruns a hands-off skier every time you change the terrain (in a background thread) and draws where he'd go: blue dashes on the snow, orange arcs through the air, and a ring at each landing (green clean, amber sketchy, red wipeout).
+
+### Riding
+
+| Action | Keyboard | Touch |
+| --- | --- | --- |
+| Steer / spin in the air | `←` `→` or `A` `D` | Left thumb: slide left/right |
+| Brake | `↓` / `S` on the snow | Left thumb: drag down |
+| Flip in the air | `↑` front flip, `↓` backflip | Left thumb: drag up/down in the air |
+| Crouch, then jump | Hold `Space`, release | Hold Jump, release |
+| Absorb a big landing | Hold `Space` before touchdown | Hold Jump before touchdown |
+| Restart / camera / back to building | `R` / `C` / `Esc` | Buttons top left |
+| Sound | `M` | ••• menu |
+
+Hold to load a jump (the ring fills) and release at a kicker's lip to fly higher. Land with the skis straight and upright: clean landings score full points, sketchy ones half and cost speed, and a bad one is a wipeout (you lose the combo, tumble, get up and carry on). Tricks landed within 2.6 s of each other chain into a combo (×1.5, ×2, … up to ×5). A see-through ghost replays your best run.
+
+Your mountain, start gate, best score and ghost autosave in the browser. **New mountain** opens the picker.
 
 ## Mountains
 
@@ -43,6 +60,7 @@ Templates live in `src/core/templates.js`: each is a slope profile along the run
 
 - **Heightfield terrain** (321 × 801 samples, 1.5 m apart: a 480 m × 1200 m piste) with raise, lower, smooth and flatten brushes, soft cosine falloff and a live cursor ring.
 - **Skier physics**: a point mass with gravity, snow friction and air drag. It leaves the ground on its own when the slope falls away faster than gravity can follow, so kickers and crests create real jumps. Landings are judged by impact speed into the slope: soft, rough (speed loss) or crash.
+- **Tricks and style**: crouch-and-pop jumps with a short grace window after the lip, spins and front/back flips in the air, landings judged on impact, ski angle and balance, named tricks ("Switch Double Backflip 540"), combos, a results card and a ghost of your best run (`src/core/score.js`, tested).
 - **Ride mode**: sending the skier drops the camera low behind him (chase cam or helmet cam) and you can steer, tuck and brake. Speed shows: the lens widens, the camera rumbles, snow sprays off the skis (rooster tails when carving, bursts on landing) and the screen edges streak. The skis have a heading and edge grip carves the velocity towards it; hands off, the skier simply follows the terrain. Land with the skis sideways and you crash.
 - **Run outcomes**: finish, crash, stopped (not enough slope), off the edge, too slow.
 - **Relief view** (Relief button or `T`): colours every point by how far it sits above or below its surroundings (a ~50 m blur) — crests warm orange, hollows cool blue — with low two-sun shading and 2 m / 10 m contours, so bumps, trenches and kickers read at any distance.

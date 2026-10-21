@@ -68,6 +68,29 @@ STYLES = {
         jacket=(0.98, 0.82, 0.15), pants=(0.07, 0.12, 0.27), flag=(0.93, 0.3, 0.32),
         lens=38, dof=False, outline=True, ink=(0.05, 0.06, 0.16), crease=True, look='None',
     ),
+    # A x C pushed to cartoon: chunky shapes, snow blobs, icing over the block edge, thick ink
+    'cartoon': dict(
+        smooth=True, facets=10, cell=2.0, toon=True, bands=3, cuts=(0.3, 0.74), cartoon=True,
+        puff=0.78, blunt=0.07, tilt=0.08, icing=True, line=2.8,
+        sun_elev=16, sun_az=-62, sun_color=(1.0, 0.88, 0.7), sun_strength=5.0, sun_angle=0.3,
+        sky_top=(0.32, 0.42, 0.95), sky_horizon=(1.0, 0.72, 0.45), sky_strength=0.3, exposure=0.0, tree_snow=0.1,
+        snow=(1.0, 0.96, 0.88), shadow_snow=(0.46, 0.55, 0.98), rock=(0.6, 0.46, 0.68), needles=(0.08, 0.55, 0.42),
+        bark=(0.62, 0.3, 0.14),
+        strata=[(0.85, 0.42, 0.28), (0.99, 0.66, 0.32), (0.7, 0.3, 0.32), (0.97, 0.52, 0.3)],
+        jacket=(1.0, 0.28, 0.12), pants=(0.14, 0.22, 0.62), flag=(1.0, 0.22, 0.22), hat=(0.15, 0.75, 0.85),
+        lens=38, dof=False, outline=True, ink=(0.14, 0.08, 0.24), crease=False, look='None',
+    ),
+    'cartoon_ink': dict(
+        smooth=True, facets=10, cell=2.0, toon=True, bands=3, cuts=(0.3, 0.74), cartoon=True,
+        puff=0.78, blunt=0.07, tilt=0.08, icing=True, line=2.8,
+        sun_elev=16, sun_az=-62, sun_color=(1, 0.95, 0.88), sun_strength=5.0, sun_angle=0.3,
+        sky_top=(0.96, 0.3, 0.4), sky_horizon=(1.0, 0.76, 0.36), sky_strength=0.3, exposure=0.0, tree_snow=0.1,
+        snow=(1.0, 0.96, 0.86), shadow_snow=(0.4, 0.46, 0.92), rock=(0.3, 0.26, 0.5), needles=(0.1, 0.2, 0.48),
+        bark=(0.1, 0.2, 0.48),
+        strata=[(0.24, 0.2, 0.42), (0.98, 0.34, 0.38), (0.24, 0.2, 0.42), (1.0, 0.62, 0.3)],
+        jacket=(1.0, 0.84, 0.12), pants=(0.1, 0.18, 0.42), flag=(0.98, 0.32, 0.38), hat=(0.98, 0.32, 0.38),
+        lens=38, dof=False, outline=True, ink=(0.06, 0.06, 0.2), crease=False, look='None',
+    ),
     'poster': dict(
         smooth=True, facets=8, cell=2.2, toon=True,
         sun_elev=24, sun_az=-75, sun_color=(1, 1, 1), sun_strength=4.0, sun_angle=0.2, exposure=0.0, tree_snow=0.22,
@@ -153,6 +176,8 @@ M_BARK = mat('Bark', S['bark'], rough=0.9)
 M_JACKET = mat('Jacket', S['jacket'], rough=0.5)
 M_PANTS = mat('Pants', S['pants'], rough=0.7)
 M_FLAG = mat('Flag', S['flag'], rough=0.6)
+M_HAT = mat('Hat', S.get('hat', S['flag']), rough=0.7)
+M_INK = mat('Goggles', (0.06, 0.06, 0.12), rough=0.3)
 M_STRATA = [mat(f'Strata{i}', c, rough=0.9) for i, c in enumerate(S['strata'])]
 
 # terrain: snow with rock showing on steep faces
@@ -266,7 +291,7 @@ def tree_factory():
     step = g.math('DIVIDE', g.math('SUBTRACT', canopy, g.math('MULTIPLY', tier_h, 0.5)), g.math('SUBTRACT', layers, 1))
 
     # one tier: a cone centred on its own origin; faces above the snow line get the Snow material
-    cone = g.node('GeometryNodeMeshCone', {'Vertices': facets, 'Side Segments': 3, 'Radius Top': 0.0,
+    cone = g.node('GeometryNodeMeshCone', {'Vertices': facets, 'Side Segments': 3, 'Radius Top': S.get('blunt', 0.0),
                                            'Radius Bottom': 1.0, 'Depth': 1.0}, fill_type='NGON')
     pos = g.node('GeometryNodeInputPosition')
     pz = g.node('ShaderNodeSeparateXYZ', {'Vector': pos.outputs[0]})
@@ -288,20 +313,34 @@ def tree_factory():
     wobble = g.node('FunctionNodeRandomValue', {'Min': 0.88, 'Max': 1.1, 'Seed': g.math('ADD', seed, 11)}, data_type='FLOAT')
     radius = g.math('MULTIPLY', g.math('MULTIPLY', g.math('MULTIPLY', canopy, width), g.math('SUBTRACT', 1.0, g.math('MULTIPLY', t, 0.72))), wobble.outputs[0])
     scale = g.node('ShaderNodeCombineXYZ', {'X': radius, 'Y': radius, 'Z': tier_h})
-    spin = g.node('FunctionNodeRandomValue', {'Min': (0, 0, 0), 'Max': (0, 0, 6.283), 'Seed': g.math('ADD', seed, 23)}, data_type='FLOAT_VECTOR')
+    tilt = S.get('tilt', 0.0)
+    spin = g.node('FunctionNodeRandomValue', {'Min': (-tilt, -tilt, 0), 'Max': (tilt, tilt, 6.283), 'Seed': g.math('ADD', seed, 23)}, data_type='FLOAT_VECTOR')
     rot = g.node('FunctionNodeEulerToRotation', {'Euler': spin.outputs[0]})
     tiers = g.node('GeometryNodeInstanceOnPoints', {'Points': line.outputs[0], 'Instance': m_snow.outputs[0],
                                                     'Rotation': rot.outputs[0], 'Scale': scale.outputs[0]})
     tiers_r = g.node('GeometryNodeRealizeInstances', {'Geometry': tiers.outputs[0]})
+    blobs_r = None
+    if S.get('puff'):
+        # a pillow of snow resting on every tier, poking out past the branches
+        puff = g.param('Puff', 'NodeSocketFloat', S['puff'], 0, 1.5)
+        ball = g.node('GeometryNodeMeshUVSphere', {'Segments': 16, 'Rings': 8, 'Radius': 1.0})
+        ball_m = g.node('GeometryNodeSetMaterial', {'Geometry': ball.outputs['Mesh'], 'Material': M_SNOW})
+        bscale = g.node('ShaderNodeCombineXYZ', {'X': g.math('MULTIPLY', radius, puff), 'Y': g.math('MULTIPLY', radius, puff),
+                                                 'Z': g.math('MULTIPLY', tier_h, 0.3)})
+        blobs = g.node('GeometryNodeInstanceOnPoints', {'Points': line.outputs[0], 'Instance': ball_m.outputs[0],
+                                                        'Rotation': rot.outputs[0], 'Scale': bscale.outputs[0]})
+        blobs_r = g.node('GeometryNodeRealizeInstances', {'Geometry': blobs.outputs[0]})
 
     trunk = g.node('GeometryNodeMeshCylinder', {'Vertices': g.math('MAXIMUM', g.math('FLOOR', g.math('MULTIPLY', facets, 0.6)), 4),
-                                                'Radius': g.math('MULTIPLY', height, 0.035), 'Depth': g.math('MULTIPLY', trunk_h, 1.6)})
+                                                'Radius': g.math('MULTIPLY', height, 0.055 if S.get('cartoon') else 0.035), 'Depth': g.math('MULTIPLY', trunk_h, 1.6)})
     trunk_up = g.node('GeometryNodeTransform', {'Geometry': trunk.outputs['Mesh'],
                                                 'Translation': g.node('ShaderNodeCombineXYZ', {'Z': g.math('MULTIPLY', trunk_h, 0.8)}).outputs[0]})
     trunk_m = g.node('GeometryNodeSetMaterial', {'Geometry': trunk_up.outputs[0], 'Material': M_BARK})
     join = g.node('GeometryNodeJoinGeometry')
     g.nt.links.new(trunk_m.outputs[0], join.inputs[0])
     g.nt.links.new(tiers_r.outputs[0], join.inputs[0])
+    if blobs_r:
+        g.nt.links.new(blobs_r.outputs[0], join.inputs[0])
     sm = g.node('GeometryNodeSetShadeSmooth', {'Geometry': join.outputs[0], 'Shade Smooth': smooth})
     return g.finish(sm.outputs[0])
 
@@ -369,13 +408,17 @@ factory_coll = bpy.data.collections.new('Factory')
 scene.collection.children.link(factory_coll)
 tree_meshes = []
 for i in range(6):
-    ob = factory_object(f'tree_{chr(97 + i)}', TREE_NG, Seed=i * 7 + 1, Height=9 + (i % 3) * 2.5,
-                        Layers=3 + (i % 3) + (1 if STYLE == 'faceted' else 0), Width=0.34 + 0.04 * (i % 2),
+    ob = factory_object(f'tree_{chr(97 + i)}', TREE_NG, Seed=i * 7 + 1,
+                        Height=(7.5 + (i % 3) * 1.6) if S.get('cartoon') else 9 + (i % 3) * 2.5,
+                        Layers=(3 + (i % 2)) if S.get('cartoon') else 3 + (i % 3) + (1 if STYLE == 'faceted' else 0),
+                        Width=(0.56 + 0.06 * (i % 2)) if S.get('cartoon') else 0.34 + 0.04 * (i % 2),
                         Snow=S['tree_snow'] + 0.05 * (i % 3))
     tree_meshes.append(bake(ob))
 rock_meshes = []
 for i in range(5):
-    ob = factory_object(f'rock_{chr(97 + i)}', ROCK_NG, Seed=i * 3.7 + 0.5, Size=1.0, Roughness=0.4 + 0.08 * i)
+    ob = factory_object(f'rock_{chr(97 + i)}', ROCK_NG, Seed=i * 3.7 + 0.5, Size=1.0,
+                        Roughness=(0.18 + 0.04 * i) if S.get('cartoon') else 0.4 + 0.08 * i,
+                        Snow=0.75 if S.get('cartoon') else 0.55)
     rock_meshes.append(bake(ob))
 
 # ---------------------------------------------------------------- the slope block
@@ -426,8 +469,19 @@ def slope_block():
            + [grid[ny][i] for i in range(nx - 1, -1, -1)] + [grid[j][0] for j in range(ny - 1, 0, -1)])
     low = [bm.verts.new((v.co.x, v.co.y, BASE)) for v in rim]
     n = len(rim)
+    upper = rim
+    if S.get('icing'):
+        # a band of snow hangs over the edge with a wavy, drippy bottom
+        drip = []
+        for k, v in enumerate(rim):
+            d = 4.5 + 1.6 * math.sin(k * 0.21) + 5.0 * max(0.0, math.sin(k * 0.73 + 1.0)) ** 6
+            drip.append(bm.verts.new((v.co.x, v.co.y, v.co.z - d)))
+        for k in range(n):
+            f = bm.faces.new((rim[(k + 1) % n], rim[k], drip[k], drip[(k + 1) % n]))
+            f.material_index = 2
+        upper = drip
     for k in range(n):
-        a, b = rim[k], rim[(k + 1) % n]
+        a, b = upper[k], upper[(k + 1) % n]
         la, lb = low[k], low[(k + 1) % n]
         f = bm.faces.new((b, a, la, lb))
         f.material_index = 1
@@ -438,8 +492,9 @@ def slope_block():
     bm.free()
     me.materials.append(M_TERRAIN)
     me.materials.append(strata_material())
+    me.materials.append(M_SNOW)
     for p in me.polygons:
-        p.use_smooth = S['smooth'] and p.material_index == 0
+        p.use_smooth = S['smooth'] and p.material_index in (0, 2)
     ob = bpy.data.objects.new('Slope', me)
     scene.collection.objects.link(ob)
     return ob
@@ -521,16 +576,19 @@ props = bpy.data.collections.new('Props')
 scene.collection.children.link(props)
 
 
+rng = random.Random(3)
+
+
 def place(me, x, y, s, rz, sink=0.3):
     ob = bpy.data.objects.new(me.name + '.inst', me)
     ob.location = (x, y, height(x, y) - sink * s)
-    ob.rotation_euler = (0, 0, rz)
+    lean = S.get('tilt', 0.0) * 0.6
+    ob.rotation_euler = (rng.uniform(-lean, lean), rng.uniform(-lean, lean), rz)
     ob.scale = (s, s, s)
     props.objects.link(ob)
     return ob
 
 
-rng = random.Random(3)
 trees = 0
 for _ in range(2600):
     x = rng.uniform(-W / 2 + 2, W / 2 - 2)
@@ -621,17 +679,28 @@ rig = bpy.data.objects.new('Skier', None)
 # the rig's forward is +y: turn to face downhill with a little carve, roll into the turn, sit on the slope
 R = (Matrix.Rotation(math.atan(SLOPE), 4, 'X') @ Matrix.Rotation(math.radians(192), 4, 'Z')
      @ Matrix.Rotation(math.radians(-14), 4, 'Y'))
-SK_SCALE = 1.0 if SHOT == 'ride' else 1.5   # a touch heroic in the wide shot so he reads
+SK_SCALE = (1.0 if SHOT == 'ride' else 1.5) * (1.12 if S.get('cartoon') else 1.0)   # a touch heroic in the wide shot so he reads
 rig.matrix_world = Matrix.Translation((sx, sy, height(sx, sy))) @ R @ Matrix.Scale(SK_SCALE, 4)
 scene.collection.objects.link(rig)
 bev = 0.04 if S['smooth'] else 0.0
 for side in (-1, 1):
     box('ski', (0.12, 1.9, 0.04), (side * 0.16, 0.05, 0.03), M_FLAG if STYLE != 'poster' else M_JACKET, parent=rig, bevel=0.015 if bev else 0)
     box('leg', (0.16, 0.2, 0.62), (side * 0.15, -0.05, 0.4), M_PANTS, rot=(math.radians(-25), 0, 0), parent=rig, bevel=bev)
-box('torso', (0.42, 0.3, 0.6), (0, 0.12, 0.98), M_JACKET, rot=(math.radians(-28), 0, 0), parent=rig, bevel=bev * 2)
-ball('head', 0.15, (0, 0.28, 1.42), M_PANTS, rig)
-for side in (-1, 1):
-    box('arm', (0.1, 0.48, 0.1), (side * 0.3, 0.3, 0.95), M_JACKET, rot=(math.radians(-20), 0, side * 0.3), parent=rig, bevel=bev)
+if S.get('cartoon'):
+    box('torso', (0.56, 0.42, 0.62), (0, 0.12, 0.98), M_JACKET, rot=(math.radians(-24), 0, 0), parent=rig, bevel=0.14)
+    ball('head', 0.3, (0, 0.34, 1.62), M_SNOW, rig)
+    hat = ball('hat', 0.31, (0, 0.32, 1.7), M_HAT, rig)
+    hat.scale = (1, 1, 0.78)
+    ball('pompom', 0.12, (0, 0.28, 2.0), M_SNOW, rig)
+    box('goggles', (0.5, 0.12, 0.16), (0, 0.6, 1.6), M_INK, parent=rig, bevel=0.05)
+    for side in (-1, 1):
+        box('arm', (0.16, 0.5, 0.16), (side * 0.38, 0.32, 0.98), M_JACKET, rot=(math.radians(-20), 0, side * 0.35), parent=rig, bevel=0.07)
+        ball('mitt', 0.12, (side * 0.48, 0.58, 0.9), M_HAT, rig)
+else:
+    box('torso', (0.42, 0.3, 0.6), (0, 0.12, 0.98), M_JACKET, rot=(math.radians(-28), 0, 0), parent=rig, bevel=bev * 2)
+    ball('head', 0.15, (0, 0.28, 1.42), M_PANTS, rig)
+    for side in (-1, 1):
+        box('arm', (0.1, 0.48, 0.1), (side * 0.3, 0.3, 0.95), M_JACKET, rot=(math.radians(-20), 0, side * 0.3), parent=rig, bevel=bev)
 
 # ---------------------------------------------------------------- light, sky, camera
 sun_d = bpy.data.lights.new('Sun', 'SUN')
@@ -727,8 +796,10 @@ if S['outline']:
     ls.select_silhouette = True
     ls.select_border = True
     ls.select_crease = S.get('crease', False)
+    ls.select_material_boundary = False
     ls.linestyle.color = S.get('ink', (0.05, 0.06, 0.16))
-    scene.render.line_thickness = 1.4 * RES[0] / 1280 if S.get('crease') else scene.render.line_thickness
+    # far away the props are small, so the ink gets thinner in the wide shot
+    scene.render.line_thickness = S.get('line', 1.4) * RES[0] / 1280 * (0.6 if SHOT == 'wide' and S.get('cartoon') else 1.0)
 vs = scene.view_settings
 try:
     if S['look'] == 'None':

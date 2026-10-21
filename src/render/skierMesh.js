@@ -1,4 +1,6 @@
 import * as THREE from 'three';
+import { THEME } from './theme.js';
+import { toonRamp, outlineMaterial } from './toon.js';
 
 // A chunky, readable little skier (drawn ~2.2x life size so it reads from orbit distance),
 // plus a ground shadow disc and a fading speed trail.
@@ -21,11 +23,11 @@ export class SkierMesh {
     const mat = (color) =>
       ghost
         ? new THREE.MeshLambertMaterial({ color: '#9cc6f2', transparent: true, opacity: 0.38, depthWrite: false })
-        : new THREE.MeshLambertMaterial({ color });
-    const jacket = mat('#ff5a1f');
-    const pants = mat('#1d2733');
-    const skin = mat('#f1c9a5');
-    const ski = mat('#2f6fd6');
+        : new THREE.MeshToonMaterial({ color, gradientMap: toonRamp() });
+    const jacket = mat(THEME.jacket);
+    const pants = mat(THEME.pants);
+    const skin = mat('#f6cfae');
+    const ski = mat(THEME.hat);
 
     const legs = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.7, 0.32), pants);
     legs.position.y = 0.45;
@@ -43,12 +45,22 @@ export class SkierMesh {
     skiR.position.x = 0.13;
     this.body.add(legs, torso, head, hat, skiL, skiR);
     this.person = [legs, torso, head, hat];
+    if (!ghost) {
+      // cartoon ink outline around every part, and the rider casts a sun shadow
+      const ink = outlineMaterial({ width: 2.2, fade: 3000 });
+      this.ink = ink;
+      for (const m of [legs, torso, head, hat, skiL, skiR]) {
+        m.castShadow = true;
+        const o = new THREE.Mesh(m.geometry, ink);
+        m.add(o);
+      }
+    }
     this.body.scale.setScalar(SCALE);
     if (ghost) this.group.traverse((o) => (o.renderOrder = 5));
 
     this.shadow = new THREE.Mesh(
       new THREE.CircleGeometry(1.4, 24),
-      new THREE.MeshBasicMaterial({ color: '#0e1620', transparent: true, opacity: 0.28, depthWrite: false })
+      new THREE.MeshBasicMaterial({ color: THEME.ink, transparent: true, opacity: 0.22, depthWrite: false })
     );
     this.shadow.rotation.x = -Math.PI / 2;
     this.shadow.renderOrder = 2;
@@ -118,10 +130,11 @@ export class SkierMesh {
 
     const gy = hf.heightAt(x, z);
     this.shadow.position.set(x, gy + 0.15, z);
+    // the sun casts the real shadow; this disc right under him only helps judge landings
     const air = Math.max(0, y - gy);
     const s = 1 + air * 0.04;
     this.shadow.scale.setScalar(s);
-    this.shadow.material.opacity = 0.28 / (1 + air * 0.08);
+    this.shadow.material.opacity = (0.26 * Math.min(1, Math.max(0, air - 0.8) / 2)) / (1 + air * 0.08);
   }
 
   // Ghost replay: position and facing from a recorded path

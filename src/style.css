@@ -48,7 +48,7 @@ body {
   font-family: var(--body);
   font-size: 14px;
   color: var(--paper);
-  background: linear-gradient(180deg, var(--sky-top) 0%, var(--sky-low) 62%, #f2f5f7 100%);
+  background: linear-gradient(180deg, var(--sky-top) 0%, var(--sky-low) 70%, var(--sky-low) 100%);
   -webkit-font-smoothing: antialiased;
   user-select: none;
   -webkit-user-select: none;

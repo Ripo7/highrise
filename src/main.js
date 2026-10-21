@@ -17,6 +17,7 @@ import { GhostRider, packPath } from './render/ghost.js';
 import { Sound } from './audio.js';
 import { RideControls } from './rideControls.js';
 import { createUI } from './ui.js';
+import { THEME, SUN_DIR } from './render/theme.js';
 import { ProfileEditor } from './profileEditor.js';
 
 // ---------- state ----------
@@ -94,10 +95,53 @@ function computeHome() {
 computeHome();
 camera.position.copy(HOME_CAM);
 
-scene.add(new THREE.HemisphereLight('#cfe0ef', '#e7d8c6', 1.6));
-const sun = new THREE.DirectionalLight('#fff6ea', 2.2);
-sun.position.set(-0.7, 0.5, 0.3).multiplyScalar(200);
-scene.add(sun);
+// the sky behind the canvas comes from the theme
+document.documentElement.style.setProperty('--sky-top', THEME.sky.top);
+document.documentElement.style.setProperty('--sky-low', THEME.sky.horizon);
+scene.add(new THREE.HemisphereLight(THEME.sky.top, THEME.sky.horizon, 1.4));
+const sun = new THREE.DirectionalLight(THEME.sun.color, 2.4);
+sun.position.set(...SUN_DIR).multiplyScalar(200);
+scene.add(sun, sun.target);
+// Long sun shadows are half the look. One shadow map follows what you're looking at
+// (the rider, or the orbit target) and covers more ground the further back the camera is.
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFShadowMap;
+sun.castShadow = true;
+sun.shadow.mapSize.setScalar(COARSE ? 1024 : 2048);
+sun.shadow.bias = -0.0004;
+sun.shadow.normalBias = 0.6;
+const SUN_V = new THREE.Vector3(...SUN_DIR).normalize();
+const sunRot = new THREE.Matrix4().lookAt(SUN_V, new THREE.Vector3(), new THREE.Vector3(0, 1, 0));
+const sunRotInv = sunRot.clone().invert();
+const _sunC = new THREE.Vector3();
+function updateSun() {
+  const riding_ = riding && skier;
+  if (riding_) _sunC.set(skier.pos[0], skier.pos[1], skier.pos[2]);
+  else _sunC.copy(controls.target);
+  const dist = camera.position.distanceTo(_sunC);
+  const half = riding_ ? 120 : THREE.MathUtils.clamp(dist * 0.7, 60, 1400);
+  // snap to whole shadow-map texels in the light's frame so shadows don't shimmer as we move
+  const texel = (2 * half) / sun.shadow.mapSize.x;
+  _sunC.applyMatrix4(sunRotInv);
+  _sunC.x = Math.round(_sunC.x / texel) * texel;
+  _sunC.y = Math.round(_sunC.y / texel) * texel;
+  _sunC.applyMatrix4(sunRot);
+  const cam = sun.shadow.camera;
+  if (cam.right !== half) {
+    cam.left = -half;
+    cam.right = half;
+    cam.top = half;
+    cam.bottom = -half;
+    cam.near = 1;
+    cam.far = 6000;
+    cam.updateProjectionMatrix();
+  }
+  sun.target.position.copy(_sunC);
+  sun.position.copy(_sunC).addScaledVector(SUN_V, 3000);
+}
+
+const propMeshes = new PropMeshes(props);
+scene.add(propMeshes.group);
 
 let terrain = null;
 function rebuildTerrain() {
@@ -107,15 +151,16 @@ function rebuildTerrain() {
   }
   terrain = new TerrainMesh(hf, { finishZ: hf.finishZ, start: state.start });
   terrain.setRelief(state.relief);
+  // the terrain shading its own hollows is costly on phones: there only props and the rider cast
+  terrain.top.castShadow = !COARSE;
   terrain.uniforms.uContours.value = state.contours ? 1 : 0;
   scene.add(terrain.group);
   // trees, rocks and the skier fade into the same haze as the snow
-  scene.fog = new THREE.Fog('#dfe8ee', terrain.uniforms.uFogNear.value, terrain.uniforms.uFogFar.value);
+  scene.fog = new THREE.Fog(THEME.haze, terrain.uniforms.uFogNear.value, terrain.uniforms.uFogFar.value);
+  propMeshes.setFog(terrain.uniforms.uFogNear.value, terrain.uniforms.uFogFar.value);
 }
 rebuildTerrain();
 
-const propMeshes = new PropMeshes(props);
-scene.add(propMeshes.group);
 propMeshes.rebuild();
 
 const skierMesh = new SkierMesh();
@@ -1020,6 +1065,7 @@ function frame() {
       if (camera.position.y < g + 6) camera.position.y = g + 6;
     }
   }
+  updateSun();
   renderer.render(scene, camera);
   requestAnimationFrame(frame);
 }

@@ -186,4 +186,6 @@ const WIPEOUT_HINT = {
   sideways: 'Skis sideways: straighten before landing',
   flip: 'Not upright: finish the flip or let go sooner',
   edge: 'Off the side of the piste',
+  tree: 'Straight into a tree: steer around them',
+  rock: 'Hit a rock: jump it or go around',
 };

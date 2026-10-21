@@ -7,7 +7,9 @@ import { History } from './core/history.js';
 import { Skier } from './core/skier.js';
 import { ScoreKeeper, SPEED_BONUS_KMH, speedRate } from './core/score.js';
 import { STAMPS, applyStamp, restoreRect } from './core/stamps.js';
-import { buildFromProfile, addDelta, defaultProfile, profileStats } from './core/profile.js';
+import { buildFromProfile, addDelta, defaultProfile, profileStats, profileLength } from './core/profile.js';
+import { PropSet, PROP_TOOLS, TREE, ROCK, scatterProps, packProps, unpackProps, rng } from './core/props.js';
+import { PropMeshes } from './render/propMeshes.js';
 import { TerrainMesh } from './render/terrainMesh.js';
 import { SkierMesh, Trail } from './render/skierMesh.js';
 import { Spray } from './render/spray.js';
@@ -25,7 +27,11 @@ const SAVE_KEY = 'highrise.ski.v3'; // v3: drawn run profile + sculpting stored 
 const INTRO_KEY = 'highrise.intro.v3';
 
 const hf = new Heightfield();
+const props = new PropSet(hf); // trees and rocks
 const history = new History(25);
+const BUILD_KINDS = { ...STAMPS, ...PROP_TOOLS };
+const isPropTool = (k) => k in PROP_TOOLS;
+const random = rng(Date.now() % 100000);
 const state = {
   tool: 'raise',
   buildKind: 'kicker',
@@ -47,6 +53,7 @@ if (!hadSave) {
   state.profile = defaultProfile();
   state.start = buildFromProfile(hf, state.profile);
   baseH = hf.copy();
+  props.set(scatterProps(hf, 0, profileLength(state.profile), 1));
 }
 
 // ---------- renderer / scene ----------
@@ -102,8 +109,14 @@ function rebuildTerrain() {
   terrain.setRelief(state.relief);
   terrain.uniforms.uContours.value = state.contours ? 1 : 0;
   scene.add(terrain.group);
+  // trees, rocks and the skier fade into the same haze as the snow
+  scene.fog = new THREE.Fog('#dfe8ee', terrain.uniforms.uFogNear.value, terrain.uniforms.uFogFar.value);
 }
 rebuildTerrain();
+
+const propMeshes = new PropMeshes(props);
+scene.add(propMeshes.group);
+propMeshes.rebuild();
 
 const skierMesh = new SkierMesh();
 skierMesh.addTo(scene);
@@ -138,7 +151,7 @@ controls.update();
 // ---------- UI ----------
 const ui = createUI({
   tools: TOOLS,
-  stamps: STAMPS,
+  stamps: BUILD_KINDS,
   speedBonusKmh: SPEED_BONUS_KMH,
   speedRate,
   initial: state,
@@ -147,7 +160,7 @@ const ui = createUI({
     state.buildKind = k;
     ui.setKind(k);
     if (state.tool !== 'build') setTool('build');
-    ui.toast(STAMPS[k].hint);
+    ui.toast(BUILD_KINDS[k].hint);
   },
   onRadius: (v) => (state.radius = v),
   onStrength: (v) => (state.strength = v),
@@ -203,11 +216,22 @@ refreshHistoryButtons();
 
 const rideControls = new RideControls({ onPress: () => sound.unlock() });
 
+// undo snapshots hold the terrain and the trees/rocks together
+const snapshot = (h = hf.copy()) => ({ h, p: props.clone() });
+function restore(snap) {
+  hf.set(snap.h);
+  props.set(snap.p);
+  terrain.updateAll();
+  propMeshes.rebuild();
+  placeGate();
+}
+
 // ---------- sculpting input ----------
 const pointers = new Map();
 const hover = { valid: false, x: 0, y: 0, z: 0 };
 let stroke = null; // brush stroke in progress
 let build = null; // Build drag in progress: { pointerId, ax, az, base, rect }
+let propStroke = null; // planting / clearing trees and rocks
 const baseField = new Heightfield(); // shares nothing: its .h points at the build snapshot
 let saveTimer = 0;
 
@@ -227,6 +251,7 @@ canvas.addEventListener('pointerdown', (e) => {
   if (pointers.size > 1) {
     if (stroke) cancelStroke();
     if (build) cancelBuild();
+    if (propStroke) cancelPropStroke();
     return;
   }
   if (e.button !== 0 || altHeld || e.altKey) return;
@@ -244,9 +269,18 @@ canvas.addEventListener('pointerdown', (e) => {
     return;
   }
 
+  if (state.tool === 'build' && hover.valid && isPropTool(state.buildKind)) {
+    history.push(snapshot());
+    propStroke = { pointerId: e.pointerId, lastX: Infinity, lastZ: Infinity, changed: false };
+    applyPropStroke();
+    canvas.setPointerCapture(e.pointerId);
+    refreshHistoryButtons();
+    return;
+  }
+
   if (state.tool === 'build' && hover.valid) {
     const base = hf.copy();
-    history.push(base);
+    history.push(snapshot(base));
     baseField.h = base;
     build = { pointerId: e.pointerId, ax: hover.x, az: hover.z, bx: hover.x, bz: hover.z, base, rect: null, moved: false };
     applyBuild();
@@ -256,7 +290,7 @@ canvas.addEventListener('pointerdown', (e) => {
   }
 
   if (isBrush(state.tool) && hover.valid) {
-    history.push(hf.copy());
+    history.push(snapshot());
     stroke = { pointerId: e.pointerId, targetHeight: hover.y, last: null, carry: 0 };
     canvas.setPointerCapture(e.pointerId);
     refreshHistoryButtons();
@@ -268,6 +302,7 @@ canvas.addEventListener('pointermove', (e) => {
   if (e.pointerType === 'mouse' || pointers.size === 1) {
     // while building, aim at the ground as it was, not at the feature being drawn
     updateHover(e, build ? baseField : hf);
+    if (propStroke && hover.valid) applyPropStroke();
     if (build && hover.valid) {
       build.bx = hover.x;
       build.bz = hover.z;
@@ -283,6 +318,13 @@ const endPointer = (e) => {
     stroke = null;
     scheduleSave();
   }
+  if (propStroke && propStroke.pointerId === e.pointerId) {
+    // nothing changed (e.g. clearing empty snow): drop the undo step
+    if (!propStroke.changed) history.discardLast();
+    propStroke = null;
+    refreshHistoryButtons();
+    scheduleSave();
+  }
   if (build && build.pointerId === e.pointerId) {
     if (build.dirty) applyBuild();
     build = null;
@@ -294,7 +336,10 @@ const endPointer = (e) => {
 canvas.addEventListener('pointerup', endPointer);
 canvas.addEventListener('pointercancel', endPointer);
 canvas.addEventListener('lostpointercapture', (e) => {
-  const mine = (stroke && stroke.pointerId === e.pointerId) || (build && build.pointerId === e.pointerId);
+  const mine =
+    (stroke && stroke.pointerId === e.pointerId) ||
+    (build && build.pointerId === e.pointerId) ||
+    (propStroke && propStroke.pointerId === e.pointerId);
   if (mine && !pointers.has(e.pointerId)) endPointer(e);
 });
 canvas.addEventListener('pointerleave', (e) => {
@@ -303,17 +348,64 @@ canvas.addEventListener('pointerleave', (e) => {
 
 function cancelStroke() {
   const snap = history.discardLast();
-  if (snap) {
-    hf.set(snap);
-    terrain.updateAll();
-  }
+  if (snap) restore(snap);
   stroke = null;
   refreshHistoryButtons();
+}
+
+function cancelPropStroke() {
+  const snap = history.discardLast();
+  if (snap) restore(snap);
+  propStroke = null;
+  refreshHistoryButtons();
+}
+
+// Plant or clear trees and rocks under the pointer
+function applyPropStroke() {
+  const ps = propStroke;
+  const kind = state.buildKind;
+  const x = hover.x;
+  const z = hover.z;
+  const u = z - hf.startZ;
+  const moved = Math.hypot(x - ps.lastX, z - ps.lastZ);
+  if (kind === 'tree' || kind === 'rock') {
+    // one per tap; dragging plants a row, spaced out
+    const gap = kind === 'tree' ? 7 : 6;
+    if (moved < gap) return;
+    if (props.near(x, z, kind === 'tree' ? 2.5 : 2).length) return;
+    const s = kind === 'tree' ? 0.8 + random() * 0.5 : 0.6 + state.strength * 2.6;
+    props.add({ k: kind === 'tree' ? TREE : ROCK, u, x, s, r: random() * 6.283 });
+  } else if (kind === 'forest') {
+    const R = Math.max(4, state.radius);
+    if (moved < R * 0.4) return;
+    const tries = Math.ceil((Math.PI * R * R) / 90);
+    for (let i = 0; i < tries; i++) {
+      const a = random() * 6.283;
+      const d = R * Math.sqrt(random());
+      const tx = x + Math.cos(a) * d;
+      const tz = z + Math.sin(a) * d;
+      if (!hf.inside(tx, tz) || Math.abs(tx) > hf.halfX - 5) continue;
+      if (props.near(tx, tz, 5).length) continue;
+      props.add({ k: TREE, u: tz - hf.startZ, x: tx, s: 0.7 + random() * 0.7, r: random() * 6.283 });
+    }
+  } else if (kind === 'clear') {
+    if (moved < 2) return;
+    if (!props.removeWithin(x, z, Math.max(3, state.radius))) {
+      ps.lastX = x;
+      ps.lastZ = z;
+      return;
+    }
+  }
+  ps.lastX = x;
+  ps.lastZ = z;
+  ps.changed = true;
+  propMeshes.rebuild();
 }
 
 function cancelBuild() {
   restoreRect(hf, build.base, build.rect);
   terrain.update(build.rect);
+  propMeshes.refreshRect(build.rect);
   history.discardLast();
   build = null;
   refreshHistoryButtons();
@@ -327,7 +419,10 @@ function applyBuild() {
   b.rect = applyStamp(hf, b.base, state.buildKind, b.ax, b.az, b.bx, b.bz, state.radius, state.strength);
   b.dirty = false;
   const r = old && b.rect ? unionRect(old, b.rect) : b.rect || old;
-  if (r) terrain.update(r);
+  if (r) {
+    terrain.update(r);
+    propMeshes.refreshRect(r);
+  }
   placeGate();
 }
 
@@ -375,23 +470,19 @@ function updateHover(e, field = hf) {
 
 // ---------- history / save ----------
 function undo() {
-  if (stroke || build) return;
-  const prev = history.undo(hf.copy());
+  if (stroke || build || propStroke) return;
+  const prev = history.undo(snapshot());
   if (!prev) return;
-  hf.set(prev);
-  terrain.updateAll();
-  placeGate();
+  restore(prev);
   refreshHistoryButtons();
   scheduleSave();
 }
 
 function redo() {
-  if (stroke || build) return;
-  const next = history.redo(hf.copy());
+  if (stroke || build || propStroke) return;
+  const next = history.redo(snapshot());
   if (!next) return;
-  hf.set(next);
-  terrain.updateAll();
-  placeGate();
+  restore(next);
   refreshHistoryButtons();
   scheduleSave();
 }
@@ -400,7 +491,7 @@ function redo() {
 let designerMode = null;
 function openDesigner(mode) {
   if (riding) exitRide(true);
-  if (stroke || build) return;
+  if (stroke || build || propStroke) return;
   designerMode = mode;
   hover.valid = false;
   editor.open(mode === 'edit' ? state.profile : null, { canCancel: mode !== 'first' });
@@ -417,16 +508,27 @@ function applyProfile(e, keepSculpt) {
   // keep a moved start gate at the same distance down the run
   const startU = state.start ? state.start.z - hf.startZ : 0;
   const startX = state.start ? state.start.x : 0;
+  const oldLength = state.profile ? profileLength(state.profile) : 0;
   state.profile = e;
   buildFromProfile(hf, e);
   baseH = hf.copy();
   if (delta) addDelta(hf, delta, oldDims);
   const st = profileStats(e);
+  // trees and rocks: keep yours (they live in run coordinates) and grow new forest on any
+  // added length; a brand new run gets a fresh scatter
+  if (keepSculpt) {
+    props.trim(st.length);
+    const extra = st.length > oldLength + 20 ? scatterProps(hf, oldLength, st.length, Math.round(st.length)) : [];
+    props.set(props.list.concat(extra));
+  } else {
+    props.set(scatterProps(hf, 0, st.length, Math.round(st.length) + 1));
+  }
   state.start = keepSculpt && startU < st.length - 60 ? { x: startX, z: hf.startZ + startU } : { x: 0, z: hf.startZ };
   state.best = null;
   state.bestPath = null;
   history.clear();
   rebuildTerrain();
+  propMeshes.rebuild();
   placeGate();
   skier = null;
   skierMesh.visible = false;
@@ -469,6 +571,7 @@ function scheduleSave() {
         JSON.stringify({
           profile: state.profile.map((v) => Math.round(v * 10) / 10),
           sculpt: encodeHeights(hf.h.map((v, i) => v - baseH[i])),
+          props: packProps(props.list),
           start: state.start,
           best: state.best,
           bestPath: state.bestPath,
@@ -497,9 +600,11 @@ function loadSave() {
     for (let i = 0; i < delta.length; i++) hf.h[i] += delta[i];
     state.profile = data.profile;
     state.start = data.start;
+    // older saves have no trees or rocks yet: grow some
+    props.set(Array.isArray(data.props) ? unpackProps(data.props) : scatterProps(hf, 0, profileLength(data.profile), 1));
     state.relief = !!data.relief;
     state.muted = !!data.muted;
-    if (data.buildKind in STAMPS) state.buildKind = data.buildKind;
+    if (data.buildKind in STAMPS || data.buildKind in PROP_TOOLS) state.buildKind = data.buildKind;
     // best runs are scored on style now (older saves stored a time)
     if (data.best && typeof data.best.score === 'number') {
       state.best = data.best;
@@ -560,7 +665,13 @@ function sendSkier() {
     build = null;
     scheduleSave();
   }
+  if (propStroke) {
+    if (!propStroke.changed) history.discardLast();
+    propStroke = null;
+    scheduleSave();
+  }
   skier = new Skier(hf, state.start);
+  skier.props = props;
   score = new ScoreKeeper();
   lastEventCount = 0;
   lastFeedCount = 0;
@@ -729,6 +840,11 @@ function onSkierEvent(ev) {
       spray.burst(skier, 0.4 + k);
       rig.shake = Math.max(rig.shake, 0.15 + 0.7 * k * k);
     }
+  } else if (ev.type === 'bump') {
+    // brushed a tree or rock, or the edge of the piste
+    sound.land(Math.min(16, 6 + (ev.value || 3)), 'sketchy');
+    spray.burst(skier, 0.5);
+    rig.shake = Math.max(rig.shake, 0.35);
   } else if (ev.type === 'wipeout') {
     sound.wipeout();
     spray.burst(skier, 2);
@@ -822,6 +938,7 @@ function frame() {
     });
     if (rect) {
       terrain.update(rect);
+      propMeshes.refreshRect(rect);
       hover.y = hf.heightAt(hover.x, hover.z);
       if (Math.hypot(hover.x - state.start.x, hover.z - state.start.z) < state.radius + 4) placeGate();
     }
@@ -830,7 +947,15 @@ function frame() {
 
   terrain.refreshLocalMean();
   const showRing = !riding && hover.valid && (isBrush(state.tool) || (state.tool === 'build' && !build));
-  const ringR = state.tool === 'build' ? Math.max(3, Math.min(state.radius, 90) / 2) : state.radius;
+  const kind = state.buildKind;
+  const ringR =
+    state.tool !== 'build'
+      ? state.radius
+      : kind === 'forest' || kind === 'clear'
+        ? Math.max(4, state.radius)
+        : kind === 'tree' || kind === 'rock'
+          ? 3
+          : Math.max(3, Math.min(state.radius, 90) / 2);
   terrain.setBrush(showRing, hover.x, hover.y, hover.z, ringR);
 
   if (skier) {
@@ -892,7 +1017,7 @@ window.addEventListener('blur', () => {
   rideControls.reset();
 });
 
-const KIND_ORDER = Object.keys(STAMPS);
+const KIND_ORDER = Object.keys(BUILD_KINDS);
 
 window.addEventListener('keydown', (e) => {
   sound.unlock();
@@ -949,7 +1074,7 @@ window.addEventListener('keydown', (e) => {
       const next = KIND_ORDER[(KIND_ORDER.indexOf(state.buildKind) + 1) % KIND_ORDER.length];
       state.buildKind = next;
       ui.setKind(next);
-      ui.toast(`Build: ${STAMPS[next].label}`);
+      ui.toast(`Build: ${BUILD_KINDS[next].label}`);
     } else setTool('build');
   } else if (e.key === '5' || key === 'g') setTool('start');
   else if (key === 'v') setTool('view');
@@ -1007,4 +1132,5 @@ window.__highrise = {
   },
   camera,
   hf,
+  props,
 };

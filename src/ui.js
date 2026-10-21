@@ -16,6 +16,10 @@ const KIND_ICONS = {
   table: '<path d="M2 18h20"/><path d="M3 18 8 11h7l6 7"/>',
   berm: '<path d="M2 18h20"/><path d="M5 18c2-9 12-9 14 0"/>',
   rollers: '<path d="M2 18h20"/><path d="M2 18c2-5 4-5 6 0s4-5 6 0 4-5 6 0"/>',
+  tree: '<path d="M12 3 6 12h3l-4 6h14l-4-6h3z"/><path d="M12 18v3"/>',
+  rock: '<path d="M2 20h20"/><path d="M5 20l.5-5L9 10l5-1 4 3 1.5 8"/><path d="m9 10 2 4 3-5M11 14l-5.5 1"/>',
+  forest: '<path d="M7 4 3 11h2.5L2 16h10L8.5 11H11z"/><path d="M16 7l-3.5 6h2L11 18h10l-3.5-5h2z"/><path d="M7 16v3M16 18v3"/>',
+  clear: '<path d="M4 20 20 4"/><path d="M8 4 4 11h2.5L3 16h6"/><path d="M15 20h6"/>',
 };
 
 const STATUS_LABEL = {

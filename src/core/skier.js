@@ -1,3 +1,5 @@
+import { propRadius, propHeight, TREE } from './props.js';
+
 // Point-mass skier sliding on the heightfield.
 // Grounded: gravity + snow friction + air drag, velocity kept along the surface.
 // Airborne: ballistic flight + drag. The skier leaves the ground on its own when the
@@ -54,6 +56,7 @@ export const PHYS = {
   assistYaw: 1.0,
   assistPitch: 1.5,
   wipeoutTime: 1.6,
+  hitWipeout: 11, // m/s straight into a tree or rock that knocks you down; less is a glancing bump
 };
 
 export class Skier {
@@ -95,6 +98,7 @@ export class Skier {
     this.pitch = 0; // body pitch (rad, + = backflip direction)
     this.pitchVel = 0;
     this.flipTotal = 0; // accumulated pitch this jump (signed)
+    this.props = null; // PropSet of trees and rocks to collide with
     this.events = []; // { type: 'pop' | 'land' | 'wipeout' | 'recover', t, ... }
     this.path = [[...this.pos]];
     this._pathTimer = 0;
@@ -210,6 +214,8 @@ export class Skier {
       if (gap <= 0) this.land(ground, n);
     }
 
+    if (this.props && this.wipeout <= 0) this.collide();
+
     // tumbling: count down, then get back up facing down the hill
     if (this.wipeout > 0) {
       this.wipeout -= dt;
@@ -255,6 +261,53 @@ export class Skier {
       this.slowTime = 0;
     }
     if (this.status !== 'running') this.path.push([pos[0], pos[1], pos[2]]);
+  }
+
+  // Trees and rocks: slide around them on a glancing hit, wipe out on a direct one.
+  // You can fly over rocks (and the tops of small trees).
+  collide() {
+    const { pos, vel, hf, P } = this;
+    const near = this.props.near(pos[0], pos[2], 6);
+    if (!near.length) return;
+    const above = pos[1] - hf.heightAt(pos[0], pos[2]);
+    for (const p of near) {
+      if (above > propHeight(p)) continue;
+      const px = p.x;
+      const pz = this.props.worldZ(p);
+      const r = propRadius(p) + 0.45;
+      let dx = pos[0] - px;
+      let dz = pos[2] - pz;
+      let d = Math.hypot(dx, dz);
+      if (d >= r) continue;
+      if (d < 1e-4) {
+        dx = -vel[0];
+        dz = -vel[2];
+        d = Math.hypot(dx, dz) || 1;
+      }
+      const nx = dx / d;
+      const nz = dz / d;
+      pos[0] = px + nx * r;
+      pos[2] = pz + nz * r;
+      const g = hf.heightAt(pos[0], pos[2]);
+      if (this.grounded || pos[1] < g) pos[1] = g;
+      const approach = -(vel[0] * nx + vel[2] * nz);
+      if (approach <= 0) continue;
+      vel[0] += approach * nx;
+      vel[2] += approach * nz;
+      const what = p.k === TREE ? 'tree' : 'rock';
+      if (approach > P.hitWipeout) {
+        vel[0] *= 0.3;
+        vel[1] *= 0.3;
+        vel[2] *= 0.3;
+        this.startWipeout(what, approach);
+        return;
+      }
+      const k = 1 - Math.min(0.35, approach * 0.03);
+      vel[0] *= k;
+      vel[1] *= k;
+      vel[2] *= k;
+      if (approach > 2) this.events.push({ type: 'bump', t: this.time, value: approach, what });
+    }
   }
 
   pop(charge) {

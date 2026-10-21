@@ -353,3 +353,76 @@ test('running into the edge of the piste bumps you back without a fall', () => {
   assert.ok(s.events.some((e) => e.type === 'bump'), 'reached the edge');
   assert.equal(s.wipeouts, 0);
 });
+
+import { PropSet, scatterProps, packProps, unpackProps, TREE, ROCK } from '../src/core/props.js';
+
+function straightRun(deg = 20, length = 800) {
+  const e = Array.from({ length: length / PROFILE_STEP + 1 }, (_, i) => -Math.tan((deg * Math.PI) / 180) * i * PROFILE_STEP);
+  const hf = new Heightfield();
+  const start = buildFromProfile(hf, e);
+  return { hf, start };
+}
+
+test('skiing straight into a tree is a wipeout', () => {
+  const { hf, start } = straightRun();
+  const props = new PropSet(hf);
+  props.add({ k: TREE, u: 200, x: 0, s: 1, r: 0 });
+  const s = new Skier(hf, start);
+  s.props = props;
+  s.simulate();
+  const w = s.events.find((e) => e.type === 'wipeout');
+  assert.ok(w && w.reason === 'tree', 'hit the tree');
+});
+
+test('clipping the side of a tree is a bump, not a fall', () => {
+  const { hf, start } = straightRun();
+  const props = new PropSet(hf);
+  props.add({ k: TREE, u: 200, x: 1.2, s: 1, r: 0 }); // the skier passes 1.2 m from its centre
+  const s = new Skier(hf, start);
+  s.props = props;
+  s.simulate();
+  assert.ok(s.events.some((e) => e.type === 'bump' && e.what === 'tree'), 'touched it');
+  assert.equal(s.wipeouts, 0);
+  assert.equal(s.status, 'finished');
+});
+
+test('flying over a rock clears it', () => {
+  const { hf, start } = straightRun();
+  const props = new PropSet(hf);
+  props.add({ k: ROCK, u: 200, x: 0, s: 1, r: 0 });
+  const s = new Skier(hf, start);
+  s.props = props;
+  // load a full jump and pop ~15 m before the rock
+  while (s.pos[2] - hf.startZ < 172) s.step(1 / 240);
+  s.input.crouch = true;
+  for (let k = 0; k < 110; k++) s.step(1 / 240);
+  s.input.crouch = false;
+  s.simulate();
+  assert.equal(s.wipeouts, 0);
+  assert.ok(!s.events.some((e) => e.type === 'bump'));
+});
+
+test('auto-scattered forest keeps the middle open and a hands-off run clean', () => {
+  const { hf, start } = straightRun(22, 1600);
+  const list = scatterProps(hf, 0, 1600, 3);
+  assert.ok(list.length > 400 && list.length < 4000, `${list.length} props`);
+  assert.ok(list.every((p) => Math.abs(p.x) >= 46));
+  assert.ok(list.some((p) => p.k === ROCK) && list.some((p) => p.k === TREE));
+  const props = new PropSet(hf);
+  props.set(list);
+  const s = new Skier(hf, start);
+  s.props = props;
+  s.simulate();
+  assert.equal(s.status, 'finished');
+  assert.equal(s.wipeouts, 0);
+  // save round trip
+  const back = unpackProps(packProps(list));
+  assert.equal(back.length, list.length);
+  assert.ok(Math.abs(back[10].u - list[10].u) < 0.06);
+});
+
+test('4 km of scatter stays light enough for phones', () => {
+  const { hf } = straightRun(25, 4000);
+  const list = scatterProps(hf, 0, 4000, 9);
+  assert.ok(list.length < 9000, `${list.length} props`);
+});

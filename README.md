@@ -15,7 +15,8 @@ This is **Phase 0**: a grey-box prototype to prove the core loop is fun before a
 | Action | Mouse / keyboard | Touch |
 | --- | --- | --- |
 | Raise / lower / smooth / flatten | `1`–`4`, left-drag (hold to keep building) | Tool bar, one finger |
-| Build a feature | `B` (press again to cycle Kicker → Table → Berm → Rollers), drag along the run | Build, then pick a feature and drag |
+| Build a feature | `B` (press again to cycle Kicker → Table → Berm → Rollers → Tree → Rock → Forest → Clear), drag along the run | Build, then pick a feature and drag |
+| Trees and rocks | Build → Tree / Rock: tap (drag for a row) · Forest: drag to paint · Clear: drag to erase | Same |
 | Feature width / height | Size and Strength sliders (they read Width / Height in Build) | Same |
 | Move the start gate | `5` then click | Start |
 | Orbit | Right-drag or Alt-drag | Orbit tool, one finger |
@@ -49,6 +50,10 @@ There are no ready-made mountains: **you draw the descent**. The run designer is
 Open the designer again any time with **Profile** (`P`): your kickers and sculpting stay at the same distance down the run when you rebuild. **New run** (••• menu) starts from a blank page.
 
 Profiles live in `src/core/profile.js` (resampling, smoothing, slope limits, the 3D build and carrying sculpting across); the designer is `src/profileEditor.js`. Long runs use slightly coarser terrain cells so the mesh stays under ~420k vertices for phones.
+
+## Trees and rocks
+
+Every new run grows forest along both sides, clumps of trees and boulders further in, and rocks on the steep bits, with a clear lane down the middle (`src/core/props.js`). They're obstacles: brushing one is a bump that costs a little speed, hitting one head-on (over ~40 km/h straight into it) is a wipeout. Rocks can be jumped. Add or remove them with the Build tool; they're part of undo, saved with the run, and stay at the same distance down the run when you redraw the profile (a longer run grows new forest on the extra part). They're drawn as two instanced meshes, so thousands cost two draw calls.
 
 ## What's in the prototype
 

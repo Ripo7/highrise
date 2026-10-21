@@ -1500,12 +1500,19 @@ body.riding .build-kinds {
     justify-content: space-between;
     padding: 4px;
   }
+  .build-kinds {
+    flex-wrap: wrap;
+  }
   .kind {
-    flex: 1;
+    flex: 1 0 23%;
     flex-direction: column;
     gap: 3px;
-    padding: 6px 2px;
+    padding: 5px 2px;
     font-size: 11px;
+  }
+  .kind svg {
+    width: 22px;
+    height: 22px;
   }
 }
 @media (max-height: 560px) and (min-width: 721px) {

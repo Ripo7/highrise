@@ -41,24 +41,19 @@ The **predicted line** reruns a hands-off skier every time you change the terrai
 
 Hold to load a jump (the ring fills) and release at a kicker's lip to fly higher. Land with the skis straight and upright: clean landings score full points, sketchy ones half and cost speed, and a bad one is a wipeout (you lose the combo, tumble, get up and carry on). Tricks landed within 2.6 s of each other chain into a combo (×1.5, ×2, … up to ×5). A see-through ghost replays your best run.
 
-Your mountain, start gate, best score and ghost autosave in the browser. **New mountain** opens the picker.
+Your run profile, sculpting, start gate, best score and ghost autosave in the browser.
 
-## Mountains
+## Your run
 
-Every run is 1.2 km long and 480 m wide. Start from:
+There are no ready-made mountains: **you draw the descent**. The run designer is a side view of the slope with a start flag. Drag from the flag down and to the right; the line follows your finger, and its angle is the real slope angle (1:1), coloured like piste markers (green < 12°, blue 12–22°, red 22–32°, black 32°+). Hold near the right edge and the view zooms out so the run keeps growing, up to 4 km. Press on the line to redraw from that point, move back to erase, undo a stroke. **Build this run** turns it into a 480 m wide 3D piste.
 
-| Mountain | Level | Hands-off run |
-| --- | --- | --- |
-| Blank slope | Build it yourself | An even 18° face, ~39 s, 133 km/h |
-| Meander Valley | Easy | Wide banked bends down a rolling valley, ~52 s, 131 km/h |
-| Kicker Line | Jumps | Five kickers with long landing hills (1.4–2.3 s of air) plus a roller lane, ~39 s, 147 km/h |
-| Couloir | Expert | Wide steep bowl, narrow couloir, mogul field, fast finish, ~41 s, 150 km/h |
+Open the designer again any time with **Profile** (`P`): your kickers and sculpting stay at the same distance down the run when you rebuild. **New run** (••• menu) starts from a blank page.
 
-Templates live in `src/core/templates.js`: each is a slope profile along the run plus a cross-section function, so new ones are quick to add. The tests check that every template is skiable hands-off without crashing, takes over 30 s and tops 110 km/h.
+Profiles live in `src/core/profile.js` (resampling, smoothing, slope limits, the 3D build and carrying sculpting across); the designer is `src/profileEditor.js`. Long runs use slightly coarser terrain cells so the mesh stays under ~420k vertices for phones.
 
 ## What's in the prototype
 
-- **Heightfield terrain** (321 × 801 samples, 1.5 m apart: a 480 m × 1200 m piste) with raise, lower, smooth and flatten brushes, soft cosine falloff and a live cursor ring.
+- **Heightfield terrain**: 480 m wide, as long as the drawn run (1.5 m cells, up to 2.15 m on a 4 km run) with raise, lower, smooth and flatten brushes, soft cosine falloff and a live cursor ring.
 - **Skier physics**: a point mass with gravity, snow friction and air drag. It leaves the ground on its own when the slope falls away faster than gravity can follow, so kickers and crests create real jumps. Landings are judged by impact speed into the slope: soft, rough (speed loss) or crash.
 - **Tricks and style**: crouch-and-pop jumps with a short grace window after the lip, spins and front/back flips in the air, landings judged on impact, ski angle and balance, named tricks ("Switch Double Backflip 540"), combos, a results card and a ghost of your best run (`src/core/score.js`, tested).
 - **Ride mode**: sending the skier drops the camera low behind him (chase cam or helmet cam) and you can steer, tuck and brake. Speed shows: the lens widens, the camera rumbles, snow sprays off the skis (rooster tails when carving, bursts on landing) and the screen edges streak. The skis have a heading and edge grip carves the velocity towards it; hands off, the skier simply follows the terrain. Land with the skis sideways and you crash.

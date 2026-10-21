@@ -32,6 +32,10 @@
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 19h20"/><path d="m3 19 5-8 4 5 3-4 6 7"/><path d="M8 11V5M12 16v-4M15 12V8"/></svg>
         <span>Relief</span><kbd>T</kbd>
       </button>
+      <button id="edit-run" class="view-toggle run-toggle" type="button" title="Redraw the run profile (P)">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 5c4 0 5 2 7 6s4 7 13 8"/><path d="M2 21h20" opacity=".5"/><circle cx="2.5" cy="5" r="1.5"/></svg>
+        <span>Profile</span><kbd>P</kbd>
+      </button>
       <button id="line" class="view-toggle line-toggle" type="button" aria-pressed="true" title="Predicted line (L)">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4c3 3 1 6 5 8s6 1 7 4 1 4 4 4" stroke-dasharray="3 2.5"/><circle cx="20" cy="20" r="1.6"/></svg>
         <span>Line</span><kbd>L</kbd>
@@ -80,7 +84,7 @@
           <label class="check"><input id="contours" type="checkbox" /> Contours <kbd>C</kbd></label>
           <button id="mute" class="btn btn-quiet" type="button" aria-pressed="false" title="Sound (M)">Sound on</button>
           <button id="reset-view" class="btn btn-quiet" type="button" title="Reset view (R)">Reset view</button>
-          <button id="reset" class="btn btn-quiet" type="button">New mountain</button>
+          <button id="reset" class="btn btn-quiet" type="button">New run</button>
         </div>
       </div>
 
@@ -154,26 +158,50 @@
 
     <div id="toast" class="toast" role="status" hidden></div>
 
-    <div id="picker" class="intro" hidden>
-      <div class="intro-card panel picker-card" role="dialog" aria-modal="true" aria-labelledby="picker-title">
-        <div class="picker-head">
-          <p class="intro-eyebrow">New mountain</p>
-          <button id="picker-close" class="icon-btn" type="button" aria-label="Close">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>
-          </button>
+    <!-- run designer: draw the descent seen from the side -->
+    <div id="profile" class="profile" hidden>
+      <canvas id="profile-canvas" aria-label="Draw the run seen from the side"></canvas>
+      <header class="profile-head">
+        <div class="profile-title">
+          <p class="intro-eyebrow">Your run</p>
+          <h1>Draw the descent</h1>
+          <p id="profile-hint" class="profile-hint"></p>
         </div>
-        <h1 id="picker-title">Pick a starting slope</h1>
-        <p class="intro-lede">Every run is 1.2 km from gate to finish. Start from a blank face or a ready-made line, then sculpt it your way.</p>
-        <div id="picker-list" class="picker-list"></div>
-      </div>
+        <dl class="profile-read">
+          <div><dt>Length</dt><dd id="pr-len">0 m</dd></div>
+          <div><dt>Drop</dt><dd id="pr-drop">0 m</dd></div>
+          <div><dt>Average</dt><dd id="pr-avg">0°</dd></div>
+          <div><dt>Steepest</dt><dd id="pr-max">0°</dd></div>
+        </dl>
+      </header>
+      <footer class="profile-foot">
+        <ul class="profile-legend" aria-label="Slope colours">
+          <li><i class="diff" data-d="green"></i>&lt; 12°</li>
+          <li><i class="diff" data-d="blue"></i>12–22°</li>
+          <li><i class="diff" data-d="red"></i>22–32°</li>
+          <li><i class="diff" data-d="black"></i>32°+</li>
+        </ul>
+        <div class="profile-actions">
+          <button id="pr-undo" class="icon-btn" type="button" aria-label="Undo stroke" title="Undo stroke (Ctrl+Z)">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 14 4 9l5-5"/><path d="M4 9h10a6 6 0 0 1 0 12h-3"/></svg>
+          </button>
+          <button id="pr-clear" class="btn btn-quiet" type="button">Clear</button>
+          <button id="pr-cancel" class="btn" type="button">Cancel</button>
+          <button id="pr-build" class="send pr-build" type="button">Build this run</button>
+        </div>
+      </footer>
     </div>
 
     <div id="intro" class="intro" hidden>
       <div class="intro-card panel" role="dialog" aria-modal="true" aria-labelledby="intro-title">
         <p class="intro-eyebrow">How to play</p>
-        <h1 id="intro-title">Build it. Ride it. Style it.</h1>
-        <p class="intro-lede">Shape the mountain into a playground, then ride it: pop off kickers, spin and flip, land clean and chain tricks into combos.</p>
+        <h1 id="intro-title">Draw it. Build it. Ride it.</h1>
+        <p class="intro-lede">Draw your own descent, shape it into a playground, then ride it: pop off kickers, spin and flip, land clean and chain tricks into combos.</p>
         <ol class="intro-steps">
+          <li>
+            <b>Draw</b>
+            <span>Trace the run seen from the side, as long and as steep as you like (up to 4 km). Redraw it any time with Profile: your sculpting moves with it.</span>
+          </li>
           <li>
             <b>Build</b>
             <span class="desktop-only">Drag on the snow to raise or dig. Use Build (B) to drag out kickers, tables, berms and rollers. The dashed line shows where a hands-off skier would go, with landings marked green, amber or red.</span>
@@ -190,7 +218,7 @@
             <span class="touch-only">Left thumb: slide to steer, drag down to brake. Right thumb: hold Jump to crouch, release to pop at a kicker's lip. In the air, slide to spin and drag up or down to flip. Hold Jump again to soak up big landings.</span>
           </li>
         </ol>
-        <button id="intro-go" class="send intro-go" type="button">Start building</button>
+        <button id="intro-go" class="send intro-go" type="button">Got it</button>
       </div>
     </div>
 

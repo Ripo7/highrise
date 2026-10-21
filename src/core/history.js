@@ -31,6 +31,11 @@ export class History {
     return next;
   }
 
+  clear() {
+    this.undoStack.length = 0;
+    this.redoStack.length = 0;
+  }
+
   get canUndo() {
     return this.undoStack.length > 0;
   }

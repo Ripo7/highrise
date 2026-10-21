@@ -168,7 +168,9 @@ const frag = /* glsl */ `
     // speed readable when the camera skims the surface
     float near = (1.0 - smoothstep(25.0, 140.0, dist)) * (1.0 - uRelief);
     if (near > 0.0) {
-      float grain = vnoise(vWorld.xz * 1.7) * 0.6 + vnoise(vWorld.xz * 5.3) * 0.4;
+      // fine grain fades out before it gets small enough on screen to shimmer
+      float fine = 1.0 - smoothstep(0.15, 0.5, length(fwidth(vWorld.xz * 5.3)));
+      float grain = vnoise(vWorld.xz * 1.7) * 0.6 + (vnoise(vWorld.xz * 5.3) - 0.5) * 0.4 * fine + 0.2;
       float ripple = vnoise(vec2(vWorld.x * 0.35 + vWorld.z * 0.12, vWorld.z * 2.2));
       col *= 1.0 + near * ((grain - 0.5) * 0.09 + (ripple - 0.5) * 0.05);
       // tiny sparkles, only right by the camera (larger ones read as road markings)
@@ -263,8 +265,9 @@ export class TerrainMesh {
       uSky: { value: new THREE.Color('#bcd2e6') },
       uBounce: { value: new THREE.Color('#e9dccd') },
       uFog: { value: fog },
-      uFogNear: { value: 1400 },
-      uFogFar: { value: 4200 },
+      // fog scales with the run so long runs fade into the distance, not into a wall
+      uFogNear: { value: Math.max(1400, hf.sizeZ * 1.2) },
+      uFogFar: { value: Math.max(4200, hf.sizeZ * 3.5) },
       uBrushPos: { value: new THREE.Vector3() },
       uBrushRadius: { value: 12 },
       uBrushOn: { value: 0 },
@@ -379,6 +382,15 @@ export class TerrainMesh {
     pass(localMean, lowTmp, true);
     pass(lowTmp, localMean, false);
     this.localTex.needsUpdate = true;
+  }
+
+  dispose() {
+    this.group.traverse((o) => {
+      if (o.geometry) o.geometry.dispose();
+    });
+    this.material.dispose();
+    this.sides[0]?.material.dispose();
+    this.localTex.dispose();
   }
 
   setStart(x, z) {

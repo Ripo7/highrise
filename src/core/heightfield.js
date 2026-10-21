@@ -2,18 +2,24 @@
 // Pure JS (no Three.js) so the physics and brushes can be tested in Node.
 //
 // World axes: x = across the slope, z = down the slope (start at -z, finish at +z), y = up.
-// The piste is a long strip: 480 m wide, 1200 m from top to bottom.
+// The piste is a long strip, 480 m wide. Its length comes from the run the player draws
+// (see profile.js); these defaults are used by tests and before a run exists.
 
 export const SIZE_X = 480; // metres across
 export const SIZE_Z = 1200; // metres from top to bottom
 export const CELL = 1.5; // metres between height samples
-export const MIN_H = -30;
-export const MAX_H = 620;
+export const MIN_H = -400;
+export const MAX_H = 6000;
 export const START_MARGIN = 20; // start line this far below the top edge
 export const FINISH_MARGIN = 18; // finish line this far above the bottom edge
 
 export class Heightfield {
   constructor(sizeX = SIZE_X, sizeZ = SIZE_Z, cell = CELL) {
+    this.resize(sizeX, sizeZ, cell);
+  }
+
+  // Change the grid size (contents are reset when the sample count changes)
+  resize(sizeX, sizeZ, cell = this.cell) {
     this.cell = cell;
     this.nx = Math.round(sizeX / cell) + 1;
     this.nz = Math.round(sizeZ / cell) + 1;
@@ -21,7 +27,12 @@ export class Heightfield {
     this.sizeZ = (this.nz - 1) * cell;
     this.halfX = this.sizeX / 2;
     this.halfZ = this.sizeZ / 2;
-    this.h = new Float32Array(this.nx * this.nz);
+    if (!this.h || this.h.length !== this.nx * this.nz) this.h = new Float32Array(this.nx * this.nz);
+    return this;
+  }
+
+  sameShape(o) {
+    return o.nx === this.nx && o.nz === this.nz && o.cell === this.cell;
   }
 
   get startZ() {
@@ -167,11 +178,12 @@ export function makeValueNoise(seed = 1) {
   };
 }
 
-// Autosave encoding: heights quantised to 1 cm in 16 bits, then base64 (~0.5 MB)
+// Autosave encoding for the player's sculpting (heights minus the generated piste):
+// 1 cm steps in 16 bits (±327 m), then base64.
 export function encodeHeights(arr) {
   const q = new Uint16Array(arr.length);
   for (let i = 0; i < arr.length; i++) {
-    q[i] = Math.max(0, Math.min(65535, Math.round((arr[i] - MIN_H) * 100)));
+    q[i] = Math.max(0, Math.min(65535, Math.round(arr[i] * 100) + 32768));
   }
   const bytes = new Uint8Array(q.buffer);
   let bin = '';
@@ -189,6 +201,6 @@ export function decodeHeights(str, expectedLength) {
   for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
   const q = new Uint16Array(bytes.buffer);
   const out = new Float32Array(expectedLength);
-  for (let i = 0; i < expectedLength; i++) out[i] = q[i] / 100 + MIN_H;
+  for (let i = 0; i < expectedLength; i++) out[i] = (q[i] - 32768) / 100;
   return out;
 }

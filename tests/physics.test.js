@@ -4,7 +4,7 @@ import { Heightfield, encodeHeights, decodeHeights } from '../src/core/heightfie
 import { Skier } from '../src/core/skier.js';
 import { applyBrush, strokeTo } from '../src/core/brushes.js';
 import { History } from '../src/core/history.js';
-import { TEMPLATES, buildTemplate } from '../src/core/templates.js';
+import { TEMPLATES, buildTemplate } from './fixtures/templates.js';
 import { ScoreKeeper, judgeLanding } from '../src/core/score.js';
 
 function mountain(id = 'blank') {
@@ -161,11 +161,15 @@ test('undo and redo restore snapshots', () => {
   assert.deepEqual(hf.h, edited);
 });
 
-test('autosave round-trips heights to the centimetre', () => {
+test('autosave round-trips sculpting to the centimetre', () => {
   const { hf } = mountain('couloir');
-  const back = decodeHeights(encodeHeights(hf.h), hf.h.length);
+  const base = hf.copy();
+  for (let k = 0; k < 60; k++) applyBrush(hf, { tool: 'raise', x: 20, z: -100, radius: 30, strength: 1, dt: 1 / 30 });
+  for (let k = 0; k < 60; k++) applyBrush(hf, { tool: 'lower', x: -40, z: 200, radius: 30, strength: 1, dt: 1 / 30 });
+  const delta = hf.h.map((v, i) => v - base[i]);
+  const back = decodeHeights(encodeHeights(delta), delta.length);
   let worst = 0;
-  for (let i = 0; i < hf.h.length; i++) worst = Math.max(worst, Math.abs(back[i] - hf.h[i]));
+  for (let i = 0; i < delta.length; i++) worst = Math.max(worst, Math.abs(back[i] - delta[i]));
   assert.ok(worst <= 0.006, `worst error ${worst}`);
 });
 
@@ -232,5 +236,71 @@ test('stamps are undone exactly by restoring their rect', () => {
     assert.ok(r, kind);
     restoreRect(hf, base, r);
     assert.deepEqual(hf.h, base, kind);
+  }
+});
+
+import { resample, smooth, clampSlopes, profileStats, buildFromProfile, addDelta, pisteDims, PROFILE_STEP } from '../src/core/profile.js';
+
+// a drawn run: 25° start, a flat shelf, a 35° wall, then easing out (points every ~3 m)
+function drawnRun() {
+  const pts = [[0, 0]];
+  let e = 0;
+  for (let u = 3; u <= 1600; u += 3) {
+    const deg = u < 400 ? 25 : u < 520 ? 4 : u < 760 ? 35 : u < 1200 ? 18 : 10;
+    e -= Math.tan((deg * Math.PI) / 180) * 3;
+    pts.push([u, e]);
+  }
+  return smooth(clampSlopes(resample(pts)), 2);
+}
+
+test('a drawn profile becomes a skiable piste of the right length', () => {
+  const e = drawnRun();
+  const st = profileStats(e);
+  assert.ok(Math.abs(st.length - 1600) < PROFILE_STEP + 1, `length ${st.length}`);
+  assert.ok(st.maxDeg > 30 && st.maxDeg < 37, `max ${st.maxDeg.toFixed(1)}°`);
+  assert.ok(st.ok);
+  const hf = new Heightfield();
+  const start = buildFromProfile(hf, e);
+  assert.ok(Math.abs(hf.finishZ - hf.startZ - st.length) < hf.cell + 0.5, 'finish line at the end of the drawing');
+  assert.ok(hf.nx * hf.nz <= 450000, `mesh ${hf.nx * hf.nz} vertices`);
+  const s = new Skier(hf, start).simulate();
+  assert.equal(s.status, 'finished');
+  assert.ok(s.time > 30, `run ${s.time.toFixed(1)} s`);
+});
+
+test('long runs stay within the vertex budget', () => {
+  const d = pisteDims(4000);
+  const hf = new Heightfield(d.sizeX, d.sizeZ, d.cell);
+  assert.ok(hf.nx * hf.nz <= 450000, `${hf.nx * hf.nz} vertices at ${d.cell} m`);
+});
+
+test('editing the profile keeps the sculpting in place along the run', () => {
+  const e = drawnRun();
+  const hf = new Heightfield();
+  buildFromProfile(hf, e);
+  const base = hf.copy();
+  // a kicker 300 m down the run, 40 m right of centre
+  const z = hf.startZ + 300;
+  applyStamp(hf, base, 'kicker', 40, z - 22, 40, z, 22, 0.6);
+  const delta = hf.h.map((v, i) => v - base[i]);
+  const oldDims = { sizeX: hf.sizeX, sizeZ: hf.sizeZ, cell: hf.cell };
+  // make the run 400 m longer and steeper at the end, then carry the sculpting over
+  const e2 = e.concat(Array.from({ length: 100 }, (_, i) => e[e.length - 1] - (i + 1) * PROFILE_STEP * 0.5));
+  buildFromProfile(hf, e2);
+  const fresh = hf.copy();
+  addDelta(hf, delta, oldDims);
+  const z2 = hf.startZ + 300;
+  const [gx, gz] = hf.toGrid(40, z2 - 1);
+  const k = Math.round(gz) * hf.nx + Math.round(gx);
+  assert.ok(hf.h[k] - fresh[k] > 1, `kicker carried over (${(hf.h[k] - fresh[k]).toFixed(2)} m)`);
+});
+
+test('a straight drawn run never launches the skier out of the gate', () => {
+  for (const deg of [12, 20, 30, 45]) {
+    const e = Array.from({ length: 120 }, (_, i) => -Math.tan((deg * Math.PI) / 180) * i * PROFILE_STEP);
+    const hf = new Heightfield();
+    const s = new Skier(hf, buildFromProfile(hf, e)).simulate();
+    assert.equal(s.status, 'finished', `${deg}°`);
+    assert.equal(s.jumps, 0, `${deg}° run jumped`);
   }
 });

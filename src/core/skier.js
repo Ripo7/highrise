@@ -24,7 +24,7 @@ export const PHYS = {
   minJumpAir: 0.25, // seconds of air to count as a jump
   stuckSpeed: 0.6,
   stuckTime: 2.5,
-  maxTime: 300,
+  maxTime: 420, // runs can be up to 4 km long
   edgeMargin: 3,
   turnRate: 3.0, // rad/s at low speed, eases off as speed rises
   followRate: 2.0, // rad/s the heading drifts back to the direction of travel (no input)

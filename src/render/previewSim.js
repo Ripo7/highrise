@@ -9,7 +9,7 @@ export function simulateLine(hf, start) {
   let lastX = Infinity;
   let lastZ = Infinity;
   let seen = 0;
-  while (s.status === 'running' && s.time < 150) {
+  while (s.status === 'running' && s.time < 420) {
     s.step(s.P.dt);
     const [x, y, z] = s.pos;
     if (Math.hypot(x - lastX, z - lastZ) >= 1.6) {

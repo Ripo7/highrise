@@ -86,15 +86,29 @@ export class LinePreview {
     this.lastJob = job;
     if (this.worker) {
       const h = new Float32Array(this.hf.h); // copy, then hand the copy over
-      this.worker.postMessage({ id: ++this.seq, h, start: job.start }, [h.buffer]);
+      const dims = { sizeX: this.hf.sizeX, sizeZ: this.hf.sizeZ, cell: this.hf.cell };
+      this.worker.postMessage({ id: ++this.seq, h, dims, start: job.start }, [h.buffer]);
     } else {
       // no worker: compute here on the next frame
       setTimeout(() => this.receive(simulateLine(this.hf, job.start)), 0);
     }
   }
 
+  // the terrain was replaced: results still in flight belong to the old one
+  invalidate() {
+    this.minId = this.seq + 1;
+  }
+
   receive(result) {
     this.busy = false;
+    if (result.id !== undefined && result.id < (this.minId || 0)) {
+      if (this.pending) this.dispatch();
+      else if (this.lastJob) {
+        this.pending = this.lastJob;
+        this.dispatch();
+      }
+      return;
+    }
     this.buildRibbon(result.pts);
     this.buildMarkers(result.marks);
     this.stats = result.stats;

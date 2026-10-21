@@ -7,7 +7,7 @@ import { History } from './core/history.js';
 import { Skier } from './core/skier.js';
 import { ScoreKeeper } from './core/score.js';
 import { STAMPS, applyStamp, restoreRect } from './core/stamps.js';
-import { TEMPLATES, buildTemplate, getTemplate } from './core/templates.js';
+import { buildFromProfile, addDelta, defaultProfile, profileStats } from './core/profile.js';
 import { TerrainMesh } from './render/terrainMesh.js';
 import { SkierMesh, Trail } from './render/skierMesh.js';
 import { Spray } from './render/spray.js';
@@ -16,14 +16,14 @@ import { GhostRider, packPath } from './render/ghost.js';
 import { Sound } from './audio.js';
 import { RideControls } from './rideControls.js';
 import { createUI } from './ui.js';
+import { ProfileEditor } from './profileEditor.js';
 
 // ---------- state ----------
 const isBrush = (t) => t in TOOLS;
 const COARSE = window.matchMedia('(pointer: coarse)').matches;
 let altHeld = false; // Alt/Option held: left button orbits
-const SAVE_KEY = 'highrise.ski.v2'; // v2: 1.2 km piste (v1 saves were 240 m square)
-const INTRO_KEY = 'highrise.intro.v2';
-const DEFAULT_TEMPLATE = 'kickers';
+const SAVE_KEY = 'highrise.ski.v3'; // v3: drawn run profile + sculpting stored as a delta
+const INTRO_KEY = 'highrise.intro.v3';
 
 const hf = new Heightfield();
 const history = new History(25);
@@ -33,7 +33,7 @@ const state = {
   radius: COARSE ? 28 : 22, // a 480 m wide mountain; fingers are less precise on phones
   strength: 0.5,
   start: null,
-  templateId: DEFAULT_TEMPLATE,
+  profile: null, // the drawn run: elevations every 4 m
   rideCam: 'chase', // chase | helmet
   contours: true,
   relief: false,
@@ -42,8 +42,14 @@ const state = {
   best: null, // { score, time }
   bestPath: null, // packed path of the best run, for the ghost
 };
+let baseH = null; // the generated piste before any sculpting
 const hadSave = loadSave();
-if (!hadSave) state.start = buildTemplate(hf, DEFAULT_TEMPLATE);
+if (!hadSave) {
+  // nothing drawn yet: a plain slope sits behind the run designer
+  state.profile = defaultProfile();
+  state.start = buildFromProfile(hf, state.profile);
+  baseH = hf.copy();
+}
 
 // ---------- renderer / scene ----------
 const canvas = document.getElementById('scene');
@@ -53,7 +59,7 @@ renderer.setPixelRatio(Math.min(window.devicePixelRatio, COARSE ? 1.75 : 2));
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 
 const scene = new THREE.Scene();
-const camera = new THREE.PerspectiveCamera(42, 1, 1, 9000);
+const camera = new THREE.PerspectiveCamera(42, 1, 1, 40000);
 const HOME_CAM = new THREE.Vector3();
 const HOME_TARGET = new THREE.Vector3();
 // Frame the whole run (3/4 side-on on wide screens, straight up the fall line on phones)
@@ -63,13 +69,20 @@ function computeHome() {
   camera.fov = portrait ? 58 : 40;
   camera.aspect = aspect;
   camera.updateProjectionMatrix();
+  // frame the run from gate to finish, drop included, so steep runs fit too
+  const zs = hf.startZ;
+  const zf = hf.finishZ;
+  const ys = hf.heightAt(0, zs);
+  const yf = hf.heightAt(0, zf);
+  const span = Math.hypot(zf - zs, ys - yf);
+  HOME_TARGET.set(0, (ys + yf) / 2, (zs + zf) / 2);
   if (portrait) {
-    HOME_TARGET.set(0, hf.heightAt(0, -hf.halfZ * 0.15), -hf.halfZ * 0.15);
-    HOME_CAM.copy(HOME_TARGET).addScaledVector(new THREE.Vector3(0.08, 0.62, 0.78).normalize(), 1150);
+    // phones: looking up the fall line, the run stretches away up the screen
+    HOME_CAM.copy(HOME_TARGET).addScaledVector(new THREE.Vector3(0.08, 0.62, 0.78).normalize(), Math.max(650, span * 1.05));
   } else {
-    HOME_TARGET.set(0, hf.heightAt(0, 0), 0);
+    // wide screens: side-on 3/4 view, start on the left and finish on the right
     const hTan = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) * aspect;
-    const d = THREE.MathUtils.clamp((hf.halfZ * 1.12) / hTan, 800, 2800);
+    const d = THREE.MathUtils.clamp((span * 0.58) / hTan, 600, 12000);
     HOME_CAM.copy(HOME_TARGET).addScaledVector(new THREE.Vector3(-0.72, 0.64, 0.26).normalize(), d);
   }
 }
@@ -81,10 +94,18 @@ const sun = new THREE.DirectionalLight('#fff6ea', 2.2);
 sun.position.set(-0.55, 0.75, 0.35).multiplyScalar(200);
 scene.add(sun);
 
-const terrain = new TerrainMesh(hf, { finishZ: hf.finishZ, start: state.start });
-terrain.setRelief(state.relief);
-terrain.uniforms.uContours.value = state.contours ? 1 : 0;
-scene.add(terrain.group);
+let terrain = null;
+function rebuildTerrain() {
+  if (terrain) {
+    scene.remove(terrain.group);
+    terrain.dispose();
+  }
+  terrain = new TerrainMesh(hf, { finishZ: hf.finishZ, start: state.start });
+  terrain.setRelief(state.relief);
+  terrain.uniforms.uContours.value = state.contours ? 1 : 0;
+  scene.add(terrain.group);
+}
+rebuildTerrain();
 
 const skierMesh = new SkierMesh();
 skierMesh.addTo(scene);
@@ -113,7 +134,7 @@ controls.enableDamping = true;
 controls.dampingFactor = 0.08;
 controls.maxPolarAngle = Math.PI * 0.47;
 controls.minDistance = 20;
-controls.maxDistance = 3000;
+controls.maxDistance = 14000;
 controls.zoomToCursor = true; // scroll / pinch zooms towards what you point at
 controls.screenSpacePanning = false; // panning slides along the ground, up and down the piste
 controls.update();
@@ -122,7 +143,6 @@ controls.update();
 const ui = createUI({
   tools: TOOLS,
   stamps: STAMPS,
-  templates: TEMPLATES,
   initial: state,
   onTool: setTool,
   onKind: (k) => {
@@ -139,7 +159,8 @@ const ui = createUI({
   onResetView: resetView,
   onRideExit: () => exitRide(true),
   onRideCam: () => toggleRideCam(),
-  onPickTemplate: (id) => chooseTemplate(id),
+  onEditRun: () => openDesigner('edit'),
+  onNewRun: () => openDesigner('new'),
   onRelief: (on) => {
     state.relief = on;
     terrain.setRelief(on);
@@ -166,10 +187,10 @@ const ui = createUI({
     } catch {
       /* ignore */
     }
-    // first visit: go straight on to choosing a mountain
+    // first visit: go straight on to drawing a run
     if (!hadSave && !pickedOnce) {
       pickedOnce = true;
-      ui.openPicker();
+      openDesigner('first');
     }
   },
 });
@@ -180,9 +201,9 @@ try {
 } catch {
   /* ignore */
 }
-if (!hadSave) document.getElementById('intro-go').textContent = 'Choose a mountain';
+if (!hadSave) document.getElementById('intro-go').textContent = 'Draw my run';
 if (!seenIntro) ui.openIntro();
-else if (!hadSave) ui.openPicker();
+else if (!hadSave) setTimeout(() => openDesigner('first'), 0);
 ui.setBest(state.best);
 ui.setKind(state.buildKind);
 setTool(state.tool);
@@ -338,7 +359,7 @@ function updateHover(e, field = hf) {
   let prevT = 0;
   hover.valid = false;
   // step grows with distance: fine near the camera, quick across the far piste
-  for (let t = 0, step = 0.75; t < 6000; t += step, step = Math.max(0.75, t * 0.003)) {
+  for (let t = 0, step = 0.75; t < 30000; t += step, step = Math.max(0.75, t * 0.003)) {
     const x = o.x + d.x * t;
     const y = o.y + d.y * t;
     const z = o.z + d.z * t;
@@ -397,15 +418,38 @@ function redo() {
   schedulePreview(0);
 }
 
-function chooseTemplate(id) {
+// ---------- run designer ----------
+let designerMode = null;
+function openDesigner(mode) {
   if (riding) exitRide(true);
-  history.push(hf.copy());
-  state.start = buildTemplate(hf, id);
-  state.templateId = id;
+  if (stroke || build) return;
+  designerMode = mode;
+  hover.valid = false;
+  editor.open(mode === 'edit' ? state.profile : null, { canCancel: mode !== 'first' });
+}
+
+/**
+ * Generate the piste for a drawn profile. keepSculpt carries the player's sculpting over
+ * (it moves with the run: same distance from the start, same offset across).
+ */
+function applyProfile(e, keepSculpt) {
+  if (riding) exitRide(true);
+  const delta = keepSculpt && baseH ? hf.h.map((v, i) => v - baseH[i]) : null;
+  const oldDims = { sizeX: hf.sizeX, sizeZ: hf.sizeZ, cell: hf.cell };
+  // keep a moved start gate at the same distance down the run
+  const startU = state.start ? state.start.z - hf.startZ : 0;
+  const startX = state.start ? state.start.x : 0;
+  state.profile = e;
+  buildFromProfile(hf, e);
+  baseH = hf.copy();
+  if (delta) addDelta(hf, delta, oldDims);
+  const st = profileStats(e);
+  state.start = keepSculpt && startU < st.length - 60 ? { x: startX, z: hf.startZ + startU } : { x: 0, z: hf.startZ };
   state.best = null;
   state.bestPath = null;
-  terrain.setStart(state.start.x, state.start.z);
-  terrain.updateAll();
+  history.clear();
+  rebuildTerrain();
+  linePreview.invalidate();
   placeGate();
   skier = null;
   skierMesh.visible = false;
@@ -413,12 +457,29 @@ function chooseTemplate(id) {
   ui.setBest(null);
   ui.setStatus('idle');
   ui.clearStats();
+  ui.setPreview(null);
   refreshHistoryButtons();
   scheduleSave();
   schedulePreview(0);
-  resetView();
-  ui.toast(`${getTemplate(id).name} loaded. Undo brings your old mountain back.`);
+  computeHome();
+  camera.position.copy(HOME_CAM);
+  controls.target.copy(HOME_TARGET);
+  viewAnim = null;
+  const km = st.length >= 1000 ? `${(st.length / 1000).toFixed(2)} km` : `${Math.round(st.length)} m`;
+  ui.toast(`${km} run built, ${Math.round(st.drop)} m of drop.${delta ? ' Your sculpting moved with it.' : ''}`);
 }
+
+const editor = new ProfileEditor({
+  onBuild: (e) => {
+    editor.close();
+    applyProfile(e, designerMode === 'edit');
+    designerMode = null;
+  },
+  onCancel: () => {
+    editor.close();
+    designerMode = null;
+  },
+});
 
 function refreshHistoryButtons() {
   ui.setHistory(history.canUndo, history.canRedo);
@@ -431,12 +492,12 @@ function scheduleSave() {
       localStorage.setItem(
         SAVE_KEY,
         JSON.stringify({
-          h: encodeHeights(hf.h),
+          profile: state.profile.map((v) => Math.round(v * 10) / 10),
+          sculpt: encodeHeights(hf.h.map((v, i) => v - baseH[i])),
           start: state.start,
           best: state.best,
           bestPath: state.bestPath,
           rideCam: state.rideCam,
-          templateId: state.templateId,
           relief: state.relief,
           line: state.line,
           muted: state.muted,
@@ -454,11 +515,14 @@ function loadSave() {
     const raw = localStorage.getItem(SAVE_KEY);
     if (!raw) return false;
     const data = JSON.parse(raw);
-    const h = data.h && decodeHeights(data.h, hf.nx * hf.nz);
-    if (!h || !data.start) return false;
-    hf.set(h);
+    if (!Array.isArray(data.profile) || data.profile.length < 2 || !data.start) return false;
+    buildFromProfile(hf, data.profile);
+    const delta = data.sculpt && decodeHeights(data.sculpt, hf.nx * hf.nz);
+    if (!delta) return false;
+    baseH = hf.copy();
+    for (let i = 0; i < delta.length; i++) hf.h[i] += delta[i];
+    state.profile = data.profile;
     state.start = data.start;
-    if (data.templateId) state.templateId = data.templateId;
     state.relief = !!data.relief;
     state.line = data.line !== false;
     state.muted = !!data.muted;
@@ -513,7 +577,7 @@ const editView = { pos: new THREE.Vector3(), target: new THREE.Vector3() };
 const rig = { pos: new THREE.Vector3(), look: new THREE.Vector3(), snap: true, shake: 0, air: 0 };
 
 function sendSkier() {
-  if (ui.blocking) return;
+  if (ui.blocking || editor.isOpen) return;
   sound.unlock();
   if (stroke) {
     stroke = null;
@@ -770,6 +834,11 @@ function resize() {
 
 function frame() {
   const dt = Math.min(clock.getDelta(), 0.05);
+  // the run designer covers the screen: don't spend the GPU on the hidden 3D scene
+  if (editor.isOpen) {
+    requestAnimationFrame(frame);
+    return;
+  }
   resize();
 
   // sculpt continuously while held, so holding still keeps building
@@ -876,7 +945,7 @@ window.addEventListener('keydown', (e) => {
     setAlt(true);
     return;
   }
-  if (ui.blocking) return;
+  if (ui.blocking || editor.isOpen) return;
   const key = e.key.toLowerCase();
   const mod = e.ctrlKey || e.metaKey;
   if (riding && !mod) {
@@ -933,6 +1002,7 @@ window.addEventListener('keydown', (e) => {
   else if (key === 'c') ui.toggleContours();
   else if (key === 't') ui.toggleRelief();
   else if (key === 'l') ui.toggleLine();
+  else if (key === 'p') openDesigner('edit');
   else if (key === 'm') ui.toggleMute();
   else if (key === 'r') resetView();
 });

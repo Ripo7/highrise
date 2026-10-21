@@ -5,7 +5,8 @@ import { simulateLine } from './previewSim.js';
 const hf = new Heightfield();
 
 self.onmessage = (e) => {
-  const { id, h, start } = e.data;
+  const { id, h, dims, start } = e.data;
+  hf.resize(dims.sizeX, dims.sizeZ, dims.cell);
   hf.h = h;
   const result = simulateLine(hf, start);
   self.postMessage({ id, ...result }, [result.pts.buffer]);

@@ -1,4 +1,4 @@
-import { smoothstep, makeValueNoise } from './heightfield.js';
+import { smoothstep, makeValueNoise } from '../../src/core/heightfield.js';
 
 // Starting mountains. Each one is described by:
 //  - slope(u): steepness (rise/run) at u metres below the top edge, integrated into a

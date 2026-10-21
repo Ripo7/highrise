@@ -211,11 +211,6 @@ kbd {
   color: #14202b;
   border-color: rgba(20, 32, 43, 0.35);
 }
-/* the line toggle lights up white-on-ink like the dashed line it controls */
-.line-toggle[aria-pressed='true'] {
-  background: #f6f8fa;
-  color: #14202b;
-}
 body.riding .view-row {
   display: none;
 }
@@ -991,8 +986,7 @@ body.riding .view-row {
 body.riding .dock,
 body.riding .hint,
 body.riding .brand,
-body.riding .build-kinds,
-body.riding .preview-info {
+body.riding .build-kinds {
   display: none !important;
 }
 .ride-top {
@@ -1260,25 +1254,45 @@ body.riding .preview-info {
   background: var(--signal);
   transform-origin: left;
 }
-.preview-info {
-  margin: 8px 0 0;
-  font-size: 13px;
-  color: #c9d5de;
-  line-height: 1.35;
-}
-.preview-info span {
-  font: 700 11px/1 var(--display);
-  letter-spacing: 0.14em;
+
+/* speed streak: electric blue, like the wind */
+.streak {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-top: 6px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: rgba(64, 196, 255, 0.16);
+  font: 600 12px/1 var(--display);
+  letter-spacing: 0.12em;
   text-transform: uppercase;
-  padding: 2px 5px;
-  margin-right: 4px;
-  border-radius: 3px;
-  background: #f6f8fa;
-  color: #14202b;
+  color: #8fdcff;
+  transition: opacity 0.2s ease;
 }
-.preview-info .ok { color: var(--good); }
-.preview-info .warn { color: #f2b233; }
-.preview-info .bad { color: var(--bad); }
+.streak b {
+  font: 700 20px/1 var(--display);
+  letter-spacing: 0.02em;
+  color: #fff;
+  font-variant-numeric: tabular-nums;
+}
+.streak .streak-rate {
+  margin-left: auto;
+  font-size: 15px;
+  color: #40c4ff;
+}
+.streak.fading {
+  opacity: 0.55;
+}
+.stats dd span.fast {
+  color: #40c4ff;
+}
+.trick-speed b {
+  color: #8fdcff;
+}
+.trick-speed small {
+  color: #8fdcff;
+}
 
 /* ---------- build: what to build ---------- */
 .build-kinds {

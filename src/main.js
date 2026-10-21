@@ -5,13 +5,12 @@ import { Heightfield, encodeHeights, decodeHeights } from './core/heightfield.js
 import { strokeTo, TOOLS } from './core/brushes.js';
 import { History } from './core/history.js';
 import { Skier } from './core/skier.js';
-import { ScoreKeeper } from './core/score.js';
+import { ScoreKeeper, SPEED_BONUS_KMH, speedRate } from './core/score.js';
 import { STAMPS, applyStamp, restoreRect } from './core/stamps.js';
 import { buildFromProfile, addDelta, defaultProfile, profileStats } from './core/profile.js';
 import { TerrainMesh } from './render/terrainMesh.js';
 import { SkierMesh, Trail } from './render/skierMesh.js';
 import { Spray } from './render/spray.js';
-import { LinePreview } from './render/preview.js';
 import { GhostRider, packPath } from './render/ghost.js';
 import { Sound } from './audio.js';
 import { RideControls } from './rideControls.js';
@@ -37,7 +36,6 @@ const state = {
   rideCam: 'chase', // chase | helmet
   contours: true,
   relief: false,
-  line: true,
   muted: false,
   best: null, // { score, time }
   bestPath: null, // packed path of the best run, for the ghost
@@ -117,8 +115,6 @@ const trail = new Trail({ color: '#ff5a1f' });
 scene.add(trail.line);
 const spray = new Spray();
 scene.add(spray.points);
-const linePreview = new LinePreview(hf);
-scene.add(linePreview.group);
 
 const sound = new Sound();
 sound.muted = state.muted;
@@ -143,6 +139,8 @@ controls.update();
 const ui = createUI({
   tools: TOOLS,
   stamps: STAMPS,
+  speedBonusKmh: SPEED_BONUS_KMH,
+  speedRate,
   initial: state,
   onTool: setTool,
   onKind: (k) => {
@@ -164,12 +162,6 @@ const ui = createUI({
   onRelief: (on) => {
     state.relief = on;
     terrain.setRelief(on);
-    scheduleSave();
-  },
-  onLine: (on) => {
-    state.line = on;
-    if (on) schedulePreview(0);
-    else ui.setPreview(null);
     scheduleSave();
   },
   onMute: (m) => {
@@ -245,7 +237,6 @@ canvas.addEventListener('pointerdown', (e) => {
       terrain.setStart(hover.x, hover.z);
       placeGate();
       scheduleSave();
-      schedulePreview(0);
       ui.toast('Start gate moved');
     } else {
       ui.toast('Put the start higher up the slope');
@@ -291,14 +282,12 @@ const endPointer = (e) => {
   if (stroke && stroke.pointerId === e.pointerId) {
     stroke = null;
     scheduleSave();
-    schedulePreview(0);
   }
   if (build && build.pointerId === e.pointerId) {
     if (build.dirty) applyBuild();
     build = null;
     sound.stamp();
     scheduleSave();
-    schedulePreview(0);
   }
   if (e.pointerType !== 'mouse') hover.valid = false;
 };
@@ -340,7 +329,6 @@ function applyBuild() {
   const r = old && b.rect ? unionRect(old, b.rect) : b.rect || old;
   if (r) terrain.update(r);
   placeGate();
-  schedulePreview(300);
 }
 
 function unionRect(a, b) {
@@ -385,14 +373,6 @@ function updateHover(e, field = hf) {
   }
 }
 
-// ---------- line preview ----------
-let previewDue = 0; // timestamp when the next preview should run (0 = none pending)
-function schedulePreview(delay = 120) {
-  if (!state.line) return;
-  const due = performance.now() + delay;
-  previewDue = previewDue ? Math.min(previewDue, due) : due;
-}
-
 // ---------- history / save ----------
 function undo() {
   if (stroke || build) return;
@@ -403,7 +383,6 @@ function undo() {
   placeGate();
   refreshHistoryButtons();
   scheduleSave();
-  schedulePreview(0);
 }
 
 function redo() {
@@ -415,7 +394,6 @@ function redo() {
   placeGate();
   refreshHistoryButtons();
   scheduleSave();
-  schedulePreview(0);
 }
 
 // ---------- run designer ----------
@@ -449,7 +427,6 @@ function applyProfile(e, keepSculpt) {
   state.bestPath = null;
   history.clear();
   rebuildTerrain();
-  linePreview.invalidate();
   placeGate();
   skier = null;
   skierMesh.visible = false;
@@ -457,10 +434,8 @@ function applyProfile(e, keepSculpt) {
   ui.setBest(null);
   ui.setStatus('idle');
   ui.clearStats();
-  ui.setPreview(null);
   refreshHistoryButtons();
   scheduleSave();
-  schedulePreview(0);
   computeHome();
   camera.position.copy(HOME_CAM);
   controls.target.copy(HOME_TARGET);
@@ -499,7 +474,6 @@ function scheduleSave() {
           bestPath: state.bestPath,
           rideCam: state.rideCam,
           relief: state.relief,
-          line: state.line,
           muted: state.muted,
           buildKind: state.buildKind,
         })
@@ -524,7 +498,6 @@ function loadSave() {
     state.profile = data.profile;
     state.start = data.start;
     state.relief = !!data.relief;
-    state.line = data.line !== false;
     state.muted = !!data.muted;
     if (data.buildKind in STAMPS) state.buildKind = data.buildKind;
     // best runs are scored on style now (older saves stored a time)
@@ -615,8 +588,6 @@ function enterRide() {
   controls.enabled = false;
   camera.near = 0.2;
   hover.valid = false;
-  linePreview.visible = false;
-  ui.setPreview(null);
   rideControls.reset();
   ui.setRiding(true);
   ui.setRideCam(state.rideCam);
@@ -642,10 +613,6 @@ function exitRide(abort) {
   camera.updateProjectionMatrix();
   controls.enabled = true;
   trail.line.visible = true;
-  if (state.line) {
-    linePreview.visible = true;
-    if (linePreview.stats) ui.setPreview(linePreview.stats);
-  }
   viewAnim = {
     t: 0,
     fromPos: camera.position.clone(),
@@ -791,6 +758,7 @@ function onRunEnd(s) {
     wipeouts: s.wipeouts,
     bestTrick: score.bestTrick,
     bestCombo: score.bestCombo,
+    speedPoints: score.speedPoints,
   });
 }
 
@@ -856,20 +824,9 @@ function frame() {
       terrain.update(rect);
       hover.y = hf.heightAt(hover.x, hover.z);
       if (Math.hypot(hover.x - state.start.x, hover.z - state.start.z) < state.radius + 4) placeGate();
-      schedulePreview(300);
     }
   }
   if (!riding && build && build.dirty) applyBuild();
-
-  // live line preview
-  if (!riding && state.line && previewDue && performance.now() >= previewDue) {
-    previewDue = 0;
-    linePreview.visible = true;
-    linePreview.request(state.start, (stats) => {
-      if (!riding && state.line) ui.setPreview(stats);
-    });
-  }
-  if (!state.line) linePreview.visible = false;
 
   terrain.refreshLocalMean();
   const showRing = !riding && hover.valid && (isBrush(state.tool) || (state.tool === 'build' && !build));
@@ -919,7 +876,6 @@ function frame() {
   requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);
-schedulePreview(400);
 
 // ---------- keyboard ----------
 const setAlt = (v) => {
@@ -1001,7 +957,6 @@ window.addEventListener('keydown', (e) => {
   else if (e.key === ']') ui.nudgeRadius(2);
   else if (key === 'c') ui.toggleContours();
   else if (key === 't') ui.toggleRelief();
-  else if (key === 'l') ui.toggleLine();
   else if (key === 'p') openDesigner('edit');
   else if (key === 'm') ui.toggleMute();
   else if (key === 'r') resetView();

@@ -18,8 +18,8 @@ export const PHYS = {
   drag: 0.002, // 0.5·ρ·CdA / m  (1/m)
   dt: 1 / 240,
   liftoffGap: 0.004, // metres above the surface before we count as airborne
-  sketchyImpact: 12.5, // m/s into the slope: sketchy landing
-  crashImpact: 17.5, // m/s into the slope: wipeout
+  sketchyImpact: 15, // m/s into the slope: sketchy landing
+  crashImpact: 23, // m/s into the slope: wipeout
   absorb: 3, // extra m/s of tolerance when crouching into the landing
   minJumpAir: 0.25, // seconds of air to count as a jump
   stuckSpeed: 0.6,
@@ -44,10 +44,15 @@ export const PHYS = {
   flipRate: 6.2, // rad/s pitch while flipping
   spinResponse: 14, // how quickly rotation speed follows the input
   // landing tolerances (radians)
-  cleanYaw: 0.42,
-  cleanPitch: 0.42,
-  crashYaw: 1.15,
-  crashPitch: 1.0,
+  cleanYaw: 0.55,
+  cleanPitch: 0.6,
+  crashYaw: 1.4,
+  crashPitch: 1.35,
+  // landing assist: hands off the controls in the air and a nearly-straight, nearly-
+  // upright skier eases himself back (rad/s, within these angles)
+  assistRate: 3.2,
+  assistYaw: 1.0,
+  assistPitch: 1.5,
   wipeoutTime: 1.6,
 };
 
@@ -223,14 +228,17 @@ export class Skier {
     }
 
     if (this.status !== 'running') return;
-    // edges: a stray skier wipes out and is set back on the piste
+    // edges: bump a stray skier back onto the piste (no fall), losing some speed
     const lim = hf.halfX - P.edgeMargin;
     if (Math.abs(pos[0]) > lim) {
-      pos[0] = Math.sign(pos[0]) * (lim - 8);
-      pos[1] = hf.heightAt(pos[0], pos[2]);
-      vel[0] = -Math.sign(pos[0]) * 2;
-      this.grounded = true;
-      this.startWipeout('edge', 0);
+      const side = Math.sign(pos[0]);
+      pos[0] = side * (lim - 1);
+      if (pos[1] < hf.heightAt(pos[0], pos[2])) pos[1] = hf.heightAt(pos[0], pos[2]);
+      vel[0] = -side * Math.max(2, Math.abs(vel[0]) * 0.4);
+      vel[1] *= 0.7;
+      vel[2] *= 0.7;
+      if (this.heading[0] * side > 0) this.heading[0] = -this.heading[0];
+      this.events.push({ type: 'bump', t: this.time });
     }
     if (pos[2] < -hf.halfZ + 0.5) {
       pos[2] = -hf.halfZ + 2;
@@ -290,6 +298,35 @@ export class Skier {
     this.pitchVel += (-inp.pitch * P.flipRate - this.pitchVel) * k;
     this.pitch += this.pitchVel * dt;
     this.flipTotal += this.pitchVel * dt;
+
+    // landing assist
+    const step = P.assistRate * dt;
+    if (Math.abs(inp.pitch) < 0.1 && Math.abs(this.pitchVel) < 1) {
+      const target = Math.round(this.pitch / (2 * Math.PI)) * 2 * Math.PI;
+      const err = target - this.pitch;
+      if (Math.abs(err) < P.assistPitch) {
+        const d = Math.sign(err) * Math.min(Math.abs(err), step);
+        this.pitch += d;
+        this.flipTotal += d;
+      }
+    }
+    if (Math.abs(inp.steer) < 0.1 && Math.abs(this.spinVel) < 1) {
+      const v = this.vel;
+      const h = this.heading;
+      const vl = Math.hypot(v[0], v[2]);
+      const hl = Math.hypot(h[0], h[2]);
+      if (vl > 2 && hl > 0.2) {
+        // signed angle from the skis to the direction of travel; forwards or switch
+        let a = Math.atan2(h[0] * v[2] - h[2] * v[0], h[0] * v[0] + h[2] * v[2]);
+        if (a > Math.PI / 2) a -= Math.PI;
+        else if (a < -Math.PI / 2) a += Math.PI;
+        if (Math.abs(a) < P.assistYaw) {
+          const d = -Math.sign(a) * Math.min(Math.abs(a), step);
+          rotateAround(h, UP, d);
+          this.spin += d;
+        }
+      }
+    }
   }
 
   land(ground, n) {
@@ -324,8 +361,9 @@ export class Skier {
     else if (pitchErr > P.cleanPitch) cause = 'balance';
     if (cause && !reason) quality = 'sketchy';
 
-    const spinHalves = Math.round(Math.abs(this.spin) / Math.PI);
-    const flips = Math.round(Math.abs(this.flipTotal) / (2 * Math.PI));
+    // a 180 needs ~150° of rotation, a 360 ~330°; a flip needs ~300°
+    const spinHalves = Math.floor((Math.abs(this.spin) + 0.55) / Math.PI);
+    const flips = Math.floor((Math.abs(this.flipTotal) + 1.05) / (2 * Math.PI));
     if (isJump || spinHalves || flips) {
       this.events.push({
         type: 'land',

@@ -20,12 +20,9 @@ This is **Phase 0**: a grey-box prototype to prove the core loop is fun before a
 | Move the start gate | `5` then click | Start |
 | Orbit | Right-drag or Alt-drag | Orbit tool, one finger |
 | Pan / zoom | Middle-drag / scroll | Two fingers / pinch |
-| Predicted line | `L` | Line button |
 | Relief view | `T` | Relief button |
 | Undo / redo | `Ctrl+Z` / `Ctrl+Shift+Z` | Buttons |
 | Brush size | `[` `]` | Slider |
-
-The **predicted line** reruns a hands-off skier every time you change the terrain (in a background thread) and draws where he'd go: blue dashes on the snow, orange arcs through the air, and a ring at each landing (green clean, amber sketchy, red wipeout).
 
 ### Riding
 
@@ -39,7 +36,9 @@ The **predicted line** reruns a hands-off skier every time you change the terrai
 | Restart / camera / back to building | `R` / `C` / `Esc` | Buttons top left |
 | Sound | `M` | ••• menu |
 
-Hold to load a jump (the ring fills) and release at a kicker's lip to fly higher. Land with the skis straight and upright: clean landings score full points, sketchy ones half and cost speed, and a bad one is a wipeout (you lose the combo, tumble, get up and carry on). Tricks landed within 2.6 s of each other chain into a combo (×1.5, ×2, … up to ×5). A see-through ghost replays your best run.
+Hold to load a jump (the ring fills) and release at a kicker's lip to fly higher. Land with the skis straight and upright: clean landings score full points, sketchy ones half and cost speed, and only a really bad one is a wipeout (you lose the combo, tumble, get up and carry on). Let go of the stick in the air and the skier straightens up and finishes a nearly-complete flip by himself. Hitting the edge of the piste just bumps you back.
+
+**Speed bonus:** above 100 km/h a speed streak builds (40 points a second at 100 km/h, +3 per extra km/h: about 170/s at 145 km/h). It's banked once you've been back under 100 for 0.8 s, or at the finish, and lost on a wipeout. Tricks landed within 2.6 s of each other chain into a combo (×1.5, ×2, … up to ×5). A see-through ghost replays your best run.
 
 Your run profile, sculpting, start gate, best score and ghost autosave in the browser.
 

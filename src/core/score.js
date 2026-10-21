@@ -11,6 +11,14 @@ const SPIN_POINTS = { 180: 250, 360: 600, 540: 1000, 720: 1500, 900: 2100, 1080:
 const FLIP_POINTS = { back: 1200, front: 1400 };
 const FLIP_WORD = ['', '', 'Double ', 'Triple ', 'Quad '];
 export const FINISH_BONUS = 1000;
+// Speed streak: above SPEED_BONUS_KMH the streak earns points every second, more the
+// faster you go; it's banked when you drop back below for SPEED_GRACE seconds (or at the
+// finish) and lost on a wipeout.
+export const SPEED_BONUS_KMH = 100;
+const SPEED_GRACE = 0.8;
+export function speedRate(kmh) {
+  return kmh < SPEED_BONUS_KMH ? 0 : 40 + (kmh - SPEED_BONUS_KMH) * 3; // points per second
+}
 
 export function spinPoints(deg) {
   if (!deg) return 0;
@@ -63,6 +71,8 @@ export class ScoreKeeper {
     this.bestCombo = 0;
     this.feed = []; // messages for the HUD: { kind, text, sub, points }
     this._seen = 0;
+    this.streak = null; // { points, time, top, below }
+    this.speedPoints = 0; // banked from speed streaks this run
   }
 
   get window() {
@@ -78,13 +88,42 @@ export class ScoreKeeper {
     return this.combo ? Math.round(this.combo.points * this.multiplier) : 0;
   }
 
-  // Read new events from the skier and run the combo timer
+  // Read new events from the skier, run the combo timer and the speed streak
   update(skier, dt) {
     for (; this._seen < skier.events.length; this._seen++) this.onEvent(skier.events[this._seen]);
     if (this.combo && skier.grounded && skier.wipeout <= 0) {
       this.combo.timer -= dt;
       if (this.combo.timer <= 0) this.bank();
     }
+    if (!dt || skier.wipeout > 0) return;
+    const kmh = skier.speed * 3.6;
+    const rate = speedRate(kmh);
+    if (rate > 0) {
+      if (!this.streak) this.streak = { points: 0, time: 0, top: 0, below: 0 };
+      this.streak.points += rate * dt;
+      this.streak.time += dt;
+      this.streak.top = Math.max(this.streak.top, kmh);
+      this.streak.below = 0;
+    } else if (this.streak) {
+      this.streak.below += dt;
+      if (this.streak.below > SPEED_GRACE) this.bankStreak();
+    }
+  }
+
+  bankStreak() {
+    const st = this.streak;
+    this.streak = null;
+    if (!st) return;
+    const pts = Math.round(st.points / 10) * 10;
+    if (pts <= 0) return;
+    this.total += pts;
+    this.speedPoints += pts;
+    this.feed.push({
+      kind: 'speed',
+      text: 'Speed run',
+      sub: `${st.time.toFixed(1)} s over ${SPEED_BONUS_KMH} km/h · top ${Math.round(st.top)} km/h`,
+      points: pts,
+    });
   }
 
   onEvent(ev) {
@@ -105,8 +144,9 @@ export class ScoreKeeper {
         points: trick.points,
       });
     } else if (ev.type === 'wipeout') {
-      const lost = this.pending;
+      const lost = this.pending + (this.streak ? Math.round(this.streak.points / 10) * 10 : 0);
       this.combo = null;
+      this.streak = null;
       this.feed.push({
         kind: 'wipeout',
         text: 'Wipeout',
@@ -130,6 +170,7 @@ export class ScoreKeeper {
   finish(skier) {
     this.update(skier, 0);
     this.bank();
+    this.bankStreak();
     if (skier.status === 'finished') this.total += FINISH_BONUS;
   }
 }

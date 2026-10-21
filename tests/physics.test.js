@@ -81,14 +81,15 @@ test('a backflip off a kicker lands clean and scores', () => {
   assert.ok(score.total > 3000, `score ${score.total}`);
 });
 
-test('landing sideways wipes out, then the skier gets up and finishes', () => {
+test('landing upside down wipes out, then the skier gets up and finishes', () => {
   const kick = 260;
   const { s, score } = ride('kickers', (s, hf) => {
     const u = s.pos[2] + hf.halfZ;
-    // quarter turn in the air: skis across the slope on touchdown
-    s.input.steer = !s.grounded && u > kick && u < kick + 200 && Math.abs(s.spin) < Math.PI / 2 ? 1 : 0;
+    s.input.crouch = u > kick - 12 && u < kick - 0.5;
+    // half a backflip, then let go: too far from upright for the landing assist
+    s.input.pitch = !s.grounded && u > kick && u < kick + 200 && s.flipTotal < Math.PI ? -1 : 0;
   });
-  assert.ok(s.events.some((e) => e.type === 'wipeout' && e.reason === 'sideways'));
+  assert.ok(s.events.some((e) => e.type === 'wipeout' && e.reason === 'flip'));
   assert.ok(s.events.some((e) => e.type === 'recover'));
   assert.equal(s.status, 'finished');
   assert.ok(score.feed.some((f) => f.kind === 'wipeout'));
@@ -303,4 +304,52 @@ test('a straight drawn run never launches the skier out of the gate', () => {
     assert.equal(s.status, 'finished', `${deg}°`);
     assert.equal(s.jumps, 0, `${deg}° run jumped`);
   }
+});
+
+test('a speed streak above 100 km/h earns points, banks when you slow down, and a wipeout loses it', () => {
+  const sk = new ScoreKeeper();
+  const fake = { events: [], grounded: true, wipeout: 0, speed: 35, status: 'running' }; // 126 km/h
+  for (let i = 0; i < 300; i++) sk.update(fake, 1 / 60); // 5 s
+  assert.ok(sk.streak && sk.streak.points > 500, `streak ${sk.streak?.points}`);
+  assert.equal(sk.total, 0, 'not banked yet');
+  fake.speed = 20; // 72 km/h
+  for (let i = 0; i < 60; i++) sk.update(fake, 1 / 60);
+  assert.ok(sk.total > 500 && sk.speedPoints === sk.total, `banked ${sk.total}`);
+  assert.ok(sk.feed.some((f) => f.kind === 'speed'));
+  // a new streak, then a wipeout
+  fake.speed = 40;
+  for (let i = 0; i < 120; i++) sk.update(fake, 1 / 60);
+  const before = sk.total;
+  fake.events.push({ type: 'wipeout', reason: 'impact' });
+  fake.wipeout = 1.6; // tumbling
+  sk.update(fake, 1 / 60);
+  assert.equal(sk.streak, null);
+  assert.equal(sk.total, before, 'streak lost, nothing banked');
+});
+
+test('letting go mid-flip lets the skier right himself instead of falling', () => {
+  const kick = 260;
+  const { s } = ride('kickers', (s, hf) => {
+    const u = s.pos[2] + hf.halfZ;
+    s.input.crouch = u > kick - 12 && u < kick - 0.5;
+    // stop pulling 70° short of a full backflip
+    s.input.pitch = !s.grounded && u > kick && u < kick + 200 && s.flipTotal < 2 * Math.PI - 1.2 ? -1 : 0;
+  });
+  const flip = s.events.find((e) => e.type === 'land' && e.flips === 1);
+  assert.ok(flip, 'the assist finished the flip');
+  assert.notEqual(flip.quality, 'wipeout');
+  assert.equal(s.wipeouts, 0);
+});
+
+test('running into the edge of the piste bumps you back without a fall', () => {
+  const { hf, start } = mountain('blank');
+  const s = new Skier(hf, start);
+  // heading for the left edge at speed
+  s.pos[0] = hf.halfX - 30;
+  s.pos[1] = hf.heightAt(s.pos[0], s.pos[2]);
+  s.vel = [18, 0, 8];
+  s.heading = [0.9, 0, 0.44];
+  for (let k = 0; k < 240 * 5 && s.status === 'running'; k++) s.step(1 / 240);
+  assert.ok(s.events.some((e) => e.type === 'bump'), 'reached the edge');
+  assert.equal(s.wipeouts, 0);
 });

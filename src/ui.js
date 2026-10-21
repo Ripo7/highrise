@@ -111,7 +111,6 @@ export function createUI(opts) {
     return btn;
   };
   const reliefBtn = toggle('#relief', opts.initial.relief, opts.onRelief);
-  const lineBtn = toggle('#line', opts.initial.line, opts.onLine);
   const muteBtn = $('#mute');
   const showMute = (m) => {
     muteBtn.textContent = m ? 'Sound off' : 'Sound on';
@@ -189,11 +188,13 @@ export function createUI(opts) {
   const comboPts = $('#combo-pts');
   const comboMult = $('#combo-mult');
   const comboTimer = $('#combo-timer');
+  const streakEl = $('#streak');
+  const streakPts = $('#streak-pts');
+  const streakRate = $('#streak-rate');
   const bestEl = $('#s-best');
   const rush = $('#rush');
   let lastRush = -1;
   const progressFill = $('#progress-fill');
-  const previewInfo = $('#preview-info');
   const tricksEl = $('#tricks');
   const toastEl = $('#toast');
   let toastTimer = 0;
@@ -245,6 +246,14 @@ export function createUI(opts) {
         comboMult.textContent = `×${score.multiplier}`;
         comboTimer.style.transform = `scaleX(${Math.max(0, score.combo.timer / score.window).toFixed(3)})`;
       } else comboEl.hidden = true;
+      const kmh = sk.speed * 3.6;
+      stat.speed.classList.toggle('fast', kmh >= opts.speedBonusKmh);
+      if (score.streak) {
+        streakEl.hidden = false;
+        streakPts.textContent = fmt(score.streak.points);
+        streakRate.textContent = `+${Math.round(opts.speedRate(kmh))}/s`;
+        streakEl.classList.toggle('fading', score.streak.below > 0);
+      } else streakEl.hidden = true;
     },
     clearStats() {
       lastScoreText = '';
@@ -253,26 +262,12 @@ export function createUI(opts) {
       stat.speed.textContent = '0';
       stat.air.textContent = '0.0';
       comboEl.hidden = true;
+      streakEl.hidden = true;
+      stat.speed.classList.remove('fast');
       progressFill.style.transform = 'scaleX(0)';
     },
     setBest(best) {
       bestEl.textContent = best ? fmt(best.score) : '—';
-    },
-    setPreview(stats) {
-      if (!stats) {
-        previewInfo.hidden = true;
-        return;
-      }
-      previewInfo.hidden = false;
-      const bits = [];
-      if (stats.status === 'finished') bits.push(`${stats.time.toFixed(0)} s to the finish`);
-      else if (stats.status === 'stuck') bits.push('stops before the finish');
-      else bits.push('too slow to finish');
-      bits.push(stats.jumps === 1 ? '1 jump' : `${stats.jumps} jumps`);
-      if (stats.wipeouts) bits.push(`<b class="bad">${stats.wipeouts} wipeout${stats.wipeouts > 1 ? 's' : ''}</b>`);
-      else if (stats.sketchy) bits.push(`<b class="warn">${stats.sketchy} sketchy</b>`);
-      else if (stats.jumps) bits.push('<b class="ok">all clean</b>');
-      previewInfo.innerHTML = `<span>Line</span> ${bits.join(' · ')}`;
     },
     // big trick call-outs in the middle of the screen
     trick(item) {
@@ -299,6 +294,7 @@ export function createUI(opts) {
       $('#res-wipeouts').textContent = r.wipeouts;
       $('#res-trick').textContent = r.bestTrick ? `${r.bestTrick.name} · ${fmt(r.bestTrick.points)}` : '—';
       $('#res-combo').textContent = r.bestCombo ? fmt(r.bestCombo) : '—';
+      $('#res-speed').textContent = r.speedPoints ? fmt(r.speedPoints) : '—';
       results.hidden = false;
       $('#res-retry').focus({ preventScroll: true });
     },
@@ -341,9 +337,6 @@ export function createUI(opts) {
     },
     toggleRelief() {
       reliefBtn.click();
-    },
-    toggleLine() {
-      lineBtn.click();
     },
     toggleMute() {
       muteBtn.click();

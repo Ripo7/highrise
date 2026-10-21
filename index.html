@@ -36,10 +36,6 @@
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 5c4 0 5 2 7 6s4 7 13 8"/><path d="M2 21h20" opacity=".5"/><circle cx="2.5" cy="5" r="1.5"/></svg>
         <span>Profile</span><kbd>P</kbd>
       </button>
-      <button id="line" class="view-toggle line-toggle" type="button" aria-pressed="true" title="Predicted line (L)">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4c3 3 1 6 5 8s6 1 7 4 1 4 4 4" stroke-dasharray="3 2.5"/><circle cx="20" cy="20" r="1.6"/></svg>
-        <span>Line</span><kbd>L</kbd>
-      </button>
     </div>
 
     <p class="hint">
@@ -62,8 +58,10 @@
         <span>Combo</span><b id="combo-pts">0</b><b class="combo-mult" id="combo-mult">×1</b>
         <span class="combo-timer"><i id="combo-timer"></i></span>
       </div>
+      <div id="streak" class="streak" hidden>
+        <span>Speed</span><b id="streak-pts">0</b><b class="streak-rate" id="streak-rate">+0/s</b>
+      </div>
       <div class="progress" aria-hidden="true"><span id="progress-fill"></span></div>
-      <p id="preview-info" class="preview-info" hidden></p>
     </section>
 
     <div id="build-kinds" class="build-kinds panel" role="radiogroup" aria-label="Feature to build" hidden></div>
@@ -146,6 +144,7 @@
           <div><dt>Top speed</dt><dd id="res-top">0 km/h</dd></div>
           <div><dt>Tricks</dt><dd id="res-tricks">0</dd></div>
           <div><dt>Wipeouts</dt><dd id="res-wipeouts">0</dd></div>
+          <div class="res-wide"><dt>Speed bonus (over 100 km/h)</dt><dd id="res-speed">—</dd></div>
           <div class="res-wide"><dt>Best trick</dt><dd id="res-trick">—</dd></div>
           <div class="res-wide"><dt>Best combo</dt><dd id="res-combo">—</dd></div>
         </dl>
@@ -204,8 +203,8 @@
           </li>
           <li>
             <b>Build</b>
-            <span class="desktop-only">Drag on the snow to raise or dig. Use Build (B) to drag out kickers, tables, berms and rollers. The dashed line shows where a hands-off skier would go, with landings marked green, amber or red.</span>
-            <span class="touch-only">Drag on the snow to raise or dig. Use Build to drag out kickers, tables, berms and rollers. The dashed line shows where a hands-off skier would go, with landings marked green, amber or red.</span>
+            <span class="desktop-only">Drag on the snow to raise or dig. Use Build (B) to drag out kickers, tables, berms and rollers.</span>
+            <span class="touch-only">Drag on the snow to raise or dig. Use Build to drag out kickers, tables, berms and rollers.</span>
           </li>
           <li>
             <b>Look around</b>
@@ -214,8 +213,8 @@
           </li>
           <li>
             <b>Ride</b>
-            <span class="desktop-only">← → steer, ↓ brakes. Hold Space to crouch, release to jump: time it at a kicker's lip. In the air, ← → spin and ↑ ↓ flip. Hold Space again to soak up big landings.</span>
-            <span class="touch-only">Left thumb: slide to steer, drag down to brake. Right thumb: hold Jump to crouch, release to pop at a kicker's lip. In the air, slide to spin and drag up or down to flip. Hold Jump again to soak up big landings.</span>
+            <span class="desktop-only">← → steer, ↓ brakes. Hold Space to crouch, release to jump: time it at a kicker's lip. In the air, ← → spin and ↑ ↓ flip. Hold Space again to soak up big landings. Stay above 100 km/h for a speed bonus.</span>
+            <span class="touch-only">Left thumb: slide to steer, drag down to brake. Right thumb: hold Jump to crouch, release to pop at a kicker's lip. In the air, slide to spin and drag up or down to flip. Hold Jump again to soak up big landings. Stay above 100 km/h for a speed bonus.</span>
           </li>
         </ol>
         <button id="intro-go" class="send intro-go" type="button">Got it</button>

@@ -104,11 +104,13 @@ const frag = /* glsl */ `
 
     // snow tinted cooler on steeper faces, rock showing through cliffs
     vec3 base = mix(uSnow, uSnowShade, smoothstep(0.05, 0.35, slope));
-    base = mix(base, uRock, smoothstep(0.42, 0.62, slope));
+    // only the very steepest faces show some rock, and only partly: every drawn face is
+    // skiable, so it should still read as snow
+    base = mix(base, uRock, 0.55 * smoothstep(0.5, 0.75, slope));
 
     // light: wrapped sun + sky/bounce hemisphere
     float ndl = dot(n, normalize(uSunDir));
-    float sun = clamp(ndl * 0.75 + 0.25, 0.0, 1.0);
+    float sun = clamp(ndl * 0.85 + 0.15, 0.0, 1.0);
     vec3 hemi = mix(uBounce, uSky, n.y * 0.5 + 0.5);
     vec3 col = base * (hemi * 0.55 + vec3(1.0, 0.97, 0.92) * sun * 0.75);
 
@@ -255,13 +257,13 @@ export class TerrainMesh {
     geo.boundingSphere = bound;
     this.geo = geo;
 
-    const sunDir = new THREE.Vector3(-0.55, 0.75, 0.35).normalize();
+    const sunDir = new THREE.Vector3(-0.7, 0.5, 0.3).normalize(); // low, from the side: slopes read
     const fog = new THREE.Color('#dfe8ee');
     this.uniforms = {
       uSunDir: { value: sunDir },
       uSnow: { value: new THREE.Color('#f7f9fb') },
       uSnowShade: { value: new THREE.Color('#d6e2ec') },
-      uRock: { value: new THREE.Color('#6b7480') },
+      uRock: { value: new THREE.Color('#8f9aa6') },
       uSky: { value: new THREE.Color('#bcd2e6') },
       uBounce: { value: new THREE.Color('#e9dccd') },
       uFog: { value: fog },

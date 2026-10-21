@@ -96,7 +96,7 @@ camera.position.copy(HOME_CAM);
 
 scene.add(new THREE.HemisphereLight('#cfe0ef', '#e7d8c6', 1.6));
 const sun = new THREE.DirectionalLight('#fff6ea', 2.2);
-sun.position.set(-0.55, 0.75, 0.35).multiplyScalar(200);
+sun.position.set(-0.7, 0.5, 0.3).multiplyScalar(200);
 scene.add(sun);
 
 let terrain = null;
@@ -778,11 +778,19 @@ function updateRideCamera(dt) {
   let posRate;
   let lookRate;
   const kick = Math.min(1, Math.max(0, (speed - 8) / 32));
+  // read the slope ahead: where the snow actually is 8-35 m down the line, so the camera
+  // aims at the run (not over a crest into the sky) and rises to see down steep faces
+  const groundHere = hf.heightAt(x, z);
+  const aheadAt = (d) => hf.heightAt(x + _flat.x * d, z + _flat.z * d);
+  const lookDist = 12 + Math.min(18, speed * 0.35);
+  const gLook = aheadAt(lookDist);
+  // how far the snow falls away ahead (steep faces, drops behind a crest)
+  const drop = Math.max(0, groundHere - Math.min(aheadAt(15), aheadAt(28) + 3, aheadAt(42) + 7));
   if (state.rideCam === 'helmet') {
     _want.copy(_p).addScaledVector(_flat, 0.4);
-    _want.y += 3.2;
-    _look.copy(_want).addScaledVector(_flat, 24);
-    _look.y -= 3;
+    _want.y = Math.max(y, groundHere) + 3.2;
+    _look.copy(_p).addScaledVector(_flat, lookDist + 8);
+    _look.y = Math.min(_want.y - 1.5, aheadAt(lookDist + 8) + 1.5);
     posRate = 30;
     lookRate = 12;
     camera.fov = 72 + 22 * kick;
@@ -790,11 +798,19 @@ function updateRideCamera(dt) {
     const portrait = camera.aspect < 1;
     const back = (portrait ? 10 : 7.5) + 2.5 * kick + 5 * rig.air;
     _want.copy(_p).addScaledVector(_flat, -back);
-    _want.y += (portrait ? 4.2 : 3.2) + 2.5 * rig.air;
-    _look.copy(_p).addScaledVector(_flat, 10 - 4 * rig.air);
-    _look.y += 1;
+    // higher on steep or dropping ground so you see down the slope over the skier
+    const lift = Math.min(16, drop * 0.5);
+    _want.y = y + (portrait ? 4.2 : 3.2) + lift + 2.5 * rig.air;
+    // never below the snow behind (uphill of the skier on steep runs)
+    const behind = hf.heightAt(_want.x, _want.z);
+    const clear = (portrait ? 5 : 4) + Math.min(4, Math.max(0, behind - y) * 0.25);
+    if (_want.y < behind + clear) _want.y = behind + clear;
+    // aim between the skier and the snow ahead; in the air, favour the skier
+    const toSkier = 0.45 + 0.4 * rig.air;
+    _look.copy(_p).addScaledVector(_flat, lookDist * (1 - toSkier));
+    _look.y = (y + 1.2) * toSkier + (gLook + 1) * (1 - toSkier);
     posRate = 7;
-    lookRate = 10;
+    lookRate = 9;
     camera.fov = (portrait ? 66 : 58) + 24 * kick;
   }
   // a little rumble over the snow at speed
@@ -996,7 +1012,14 @@ function frame() {
     if (viewAnim.t >= 1) viewAnim = null;
   }
 
-  if (!riding) controls.update();
+  if (!riding) {
+    controls.update();
+    // never let the orbit camera sink into a steep slope
+    if (!viewAnim) {
+      const g = hf.inside(camera.position.x, camera.position.z) ? hf.heightAt(camera.position.x, camera.position.z) : -Infinity;
+      if (camera.position.y < g + 6) camera.position.y = g + 6;
+    }
+  }
   renderer.render(scene, camera);
   requestAnimationFrame(frame);
 }
@@ -1133,4 +1156,5 @@ window.__highrise = {
   camera,
   hf,
   props,
+  snapCamera: () => (rig.snap = true),
 };

@@ -47,6 +47,27 @@ STYLES = {
         lens=70, dof=True, outline=False, look='None',
     ),
     # flat graphic colour bands, hard shadows, ink outlines
+    # A x C: faceted low poly and a low golden sun, drawn as flat colour bands with ink lines
+    'mix_warm': dict(
+        smooth=False, facets=6, cell=2.5, toon=True, bands=3, cuts=(0.3, 0.74),
+        sun_elev=14, sun_az=-62, sun_color=(1.0, 0.86, 0.68), sun_strength=5.0, sun_angle=0.3,
+        sky_top=(0.27, 0.3, 0.6), sky_horizon=(1.0, 0.66, 0.42), sky_strength=0.3, exposure=0.0, tree_snow=0.2,
+        snow=(1.0, 0.94, 0.84), shadow_snow=(0.48, 0.5, 0.8), rock=(0.42, 0.33, 0.4), needles=(0.1, 0.32, 0.3),
+        bark=(0.32, 0.16, 0.1),
+        strata=[(0.42, 0.24, 0.22), (0.72, 0.4, 0.27), (0.3, 0.18, 0.2), (0.62, 0.32, 0.24)],
+        jacket=(0.98, 0.32, 0.1), pants=(0.1, 0.12, 0.26), flag=(0.98, 0.3, 0.12),
+        lens=38, dof=False, outline=True, ink=(0.12, 0.08, 0.18), crease=True, look='None',
+    ),
+    'mix_ink': dict(
+        smooth=False, facets=6, cell=2.5, toon=True, bands=3, cuts=(0.3, 0.74),
+        sun_elev=14, sun_az=-62, sun_color=(1, 0.95, 0.88), sun_strength=5.0, sun_angle=0.3,
+        sky_top=(0.93, 0.3, 0.32), sky_horizon=(1.0, 0.72, 0.38), sky_strength=0.3, exposure=0.0, tree_snow=0.22,
+        snow=(0.99, 0.95, 0.86), shadow_snow=(0.36, 0.42, 0.78), rock=(0.22, 0.2, 0.36), needles=(0.09, 0.14, 0.3),
+        bark=(0.09, 0.14, 0.3),
+        strata=[(0.2, 0.18, 0.32), (0.93, 0.3, 0.32), (0.2, 0.18, 0.32), (0.98, 0.58, 0.3)],
+        jacket=(0.98, 0.82, 0.15), pants=(0.07, 0.12, 0.27), flag=(0.93, 0.3, 0.32),
+        lens=38, dof=False, outline=True, ink=(0.05, 0.06, 0.16), crease=True, look='None',
+    ),
     'poster': dict(
         smooth=True, facets=8, cell=2.2, toon=True,
         sun_elev=24, sun_az=-75, sun_color=(1, 1, 1), sun_strength=4.0, sun_angle=0.2, exposure=0.0, tree_snow=0.22,
@@ -78,10 +99,29 @@ def mat_principled(name, color, rough=0.8, sss=0.0):
     return m
 
 
-def mat_toon(name, lit, shadow=None):
-    """Two flat bands: lit colour, and a shadow colour where light is low."""
+def toon_bands(lit, shadow=None):
+    """Colour bands from dark to light as (position, colour)."""
     if shadow is None:
         shadow = tuple(c * 0.45 for c in lit)
+    if S.get('bands', 2) == 3:
+        mid = tuple(a * 0.5 + b * 0.5 for a, b in zip(lit, shadow))
+        mid = tuple(min(1.0, m * 1.08) for m in mid)
+        return [(0.0, shadow), (S['cuts'][0], mid), (S['cuts'][1], lit)]
+    return [(0.0, shadow), (0.5, lit)]
+
+
+def fill_ramp(ramp, bands):
+    els = ramp.color_ramp.elements
+    ramp.color_ramp.interpolation = 'CONSTANT'
+    while len(els) < len(bands):
+        els.new(0.99)
+    for e, (pos, col) in zip(els, bands):
+        e.position = pos
+        e.color = (*col, 1)
+
+
+def mat_toon(name, lit, shadow=None):
+    """Flat colour bands: the lit colour, and shadow (and mid) colours where light is low."""
     m = bpy.data.materials.new(name)
     m.use_nodes = True
     nt = m.node_tree
@@ -89,11 +129,8 @@ def mat_toon(name, lit, shadow=None):
     diff = nt.nodes.new('ShaderNodeBsdfDiffuse')
     s2r = nt.nodes.new('ShaderNodeShaderToRGB')
     ramp = nt.nodes.new('ShaderNodeValToRGB')
-    ramp.color_ramp.interpolation = 'CONSTANT'
-    ramp.color_ramp.elements[0].position = 0.0
-    ramp.color_ramp.elements[0].color = (*shadow, 1)
-    ramp.color_ramp.elements[1].position = 0.5
-    ramp.color_ramp.elements[1].color = (*lit, 1)
+    fill_ramp(ramp, toon_bands(lit, shadow))
+    m['bands'] = [list(c) for _, c in toon_bands(lit, shadow)]
     em = nt.nodes.new('ShaderNodeEmission')
     out = nt.nodes.new('ShaderNodeOutputMaterial')
     nt.links.new(diff.outputs[0], s2r.inputs[0])
@@ -139,15 +176,11 @@ def terrain_material():
     def shader_of(src):
         # rebuild the core of a material inside this tree
         if S['toon']:
-            lit = src.node_tree.nodes['Color Ramp'].color_ramp.elements[1].color[:3]
-            sh = src.node_tree.nodes['Color Ramp'].color_ramp.elements[0].color[:3]
             d = nt.nodes.new('ShaderNodeBsdfDiffuse')
             s2r = nt.nodes.new('ShaderNodeShaderToRGB')
             r = nt.nodes.new('ShaderNodeValToRGB')
-            r.color_ramp.interpolation = 'CONSTANT'
-            r.color_ramp.elements[0].color = (*sh, 1)
-            r.color_ramp.elements[1].position = 0.5
-            r.color_ramp.elements[1].color = (*lit, 1)
+            src_r = src.node_tree.nodes['Color Ramp'].color_ramp
+            fill_ramp(r, [(e.position, tuple(e.color[:3])) for e in src_r.elements])
             e = nt.nodes.new('ShaderNodeEmission')
             nt.links.new(d.outputs[0], s2r.inputs[0])
             nt.links.new(s2r.outputs['Color'], r.inputs[0])
@@ -657,7 +690,7 @@ if SHOT == 'ride':
 else:
     # three-quarter view from below and to the side, like the game's orbit camera
     target = Vector((0, 0, height(0, 0) - 10))
-    dist = {'faceted': 330, 'toy': 520, 'poster': 340}[STYLE]
+    dist = {'toy': 520}.get(STYLE, 335)
     yaw, pitch = math.radians(-40), math.radians(30)
     cam.location = target + Vector((math.sin(yaw) * -math.cos(pitch), -math.cos(yaw) * math.cos(pitch), math.sin(pitch))) * dist
 cam.rotation_euler = (target - cam.location).to_track_quat('-Z', 'Y').to_euler()
@@ -693,8 +726,9 @@ if S['outline']:
     ls.select_by_visibility = True
     ls.select_silhouette = True
     ls.select_border = True
-    ls.select_crease = STYLE != 'poster'
-    ls.linestyle.color = (0.05, 0.06, 0.16)
+    ls.select_crease = S.get('crease', False)
+    ls.linestyle.color = S.get('ink', (0.05, 0.06, 0.16))
+    scene.render.line_thickness = 1.4 * RES[0] / 1280 if S.get('crease') else scene.render.line_thickness
 vs = scene.view_settings
 try:
     if S['look'] == 'None':

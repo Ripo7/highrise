@@ -115,24 +115,37 @@ const frag = /* glsl */ `
     vec3 n = normalize(vNormal);
     float slope = 1.0 - n.y; // 0 flat .. 1 vertical
 
-    // Cartoon light: three flat bands picked by how much the face turns to the sun.
-    // Edges are anti-aliased over about a pixel so they stay crisp without stair steps.
-    float ndl = dot(n, normalize(uSunDir));
+    // Cartoon light: three flat bands (0 shadow, 1 mid, 2 lit).
+    // The broad band comes from the slope smoothed over ~40 m, so it only changes where the
+    // run really gets steeper or flatter; small natural bumps can't flip it into blotches.
+    // Features that stand out from that (a kicker, a berm, a roller) then step one band up
+    // on their sunny side and one down on the other.
+    vec3 L = normalize(uSunDir);
+    vec2 uvc = clamp((vWorld.xz + uHalf) / (2.0 * uHalf), 0.0, 1.0);
+    vec2 du = vec2(8.0 / (2.0 * uHalf.x), 0.0);
+    vec2 dv = vec2(0.0, 8.0 / (2.0 * uHalf.y));
+    float gx = (localMeanAt(uvc + du) - localMeanAt(uvc - du)) / 16.0;
+    float gz = (localMeanAt(uvc + dv) - localMeanAt(uvc - dv)) / 16.0;
+    vec3 ns = normalize(vec3(-gx, 1.0, -gz));
+    float ndlS = dot(ns, L);
+    float ndl = dot(n, L);
+    float aaS = fwidth(ndlS) + 0.002;
     float aa = fwidth(ndl) + 0.003;
-    float toMid = smoothstep(uCutShadow - aa, uCutShadow + aa, ndl);
-    float toLit = smoothstep(uCutLit - aa, uCutLit + aa, ndl);
+    float level = smoothstep(uCutShadow - aaS, uCutShadow + aaS, ndlS) + smoothstep(uCutLit - aaS, uCutLit + aaS, ndlS);
+    float rel = ndl - ndlS;
+    level += smoothstep(0.17 - aa, 0.17 + aa, rel) - smoothstep(0.17 - aa, 0.17 + aa, -rel);
+    // faces turned right away from the sun are always in shadow
+    level = min(level, 2.0 * smoothstep(0.02 - aa, 0.02 + aa, ndl));
     // shadows cast by trees, the rider and the terrain drop into the shadow band
-    float lit = smoothstep(0.35, 0.65, sunShadow());
-    toMid *= lit;
-    toLit *= lit;
-    vec3 snow = mix(uSnowShadow, mix(uSnowMid, uSnowLit, toLit), toMid);
-    vec3 rock = mix(uRockShadow, mix(uRockMid, uRockLit, toLit), toMid);
-    // rock only on near-vertical faces (over about 66 degrees, mostly sculpted walls): every
+    level = clamp(level, 0.0, 2.0) * smoothstep(0.35, 0.65, sunShadow());
+    vec3 snow = level < 1.0 ? mix(uSnowShadow, uSnowMid, level) : mix(uSnowMid, uSnowLit, level - 1.0);
+    vec3 rock = level < 1.0 ? mix(uRockShadow, uRockMid, level) : mix(uRockMid, uRockLit, level - 1.0);
+    // rock only on faces steeper than any drawn run (over about 71 degrees: sculpted walls): every
     // drawn face is skiable, so it reads as snow; the edge is a clean cut with a thin ink line
     float aas = fwidth(slope) + 0.002;
-    float rockAmt = smoothstep(0.6 - aas, 0.6 + aas, slope);
+    float rockAmt = smoothstep(0.68 - aas, 0.68 + aas, slope);
     vec3 col = mix(snow, rock, rockAmt);
-    col = mix(col, uInk, (1.0 - smoothstep(0.0, aas * 1.6, abs(slope - 0.6))) * 0.55);
+    col = mix(col, uInk, (1.0 - smoothstep(0.0, aas * 1.6, abs(slope - 0.68))) * 0.55);
 
     // ink along crests and lips seen edge-on: where the surface turns away from the camera
     // fast (a kicker lip, the top of a roller), not on broad slopes merely seen at an angle
@@ -403,16 +416,19 @@ export class TerrainMesh {
     }
 
     this.updateAll();
+    this.refreshLocalMean();
   }
 
   setRelief(on) {
     this.uniforms.uRelief.value = on ? 1 : 0;
-    if (on) this.refreshLocalMean();
   }
 
   // Recompute the blurred surroundings (cheap: ~7k cells), at most once per frame
   refreshLocalMean() {
-    if (!this.localDirty || this.uniforms.uRelief.value < 0.5) return;
+    if (!this.localDirty) return;
+    const now = performance.now();
+    if (this.lastLocal && now - this.lastLocal < 120) return;
+    this.lastLocal = now;
     this.localDirty = false;
     const { hf, ds, lx, lz, low, lowTmp, localMean } = this;
     for (let j = 0; j < lz; j++) {

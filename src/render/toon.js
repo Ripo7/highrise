@@ -40,13 +40,18 @@ export const shadowFragPars = /* glsl */ `
 // --- ink outlines: the mesh again, back faces only, pushed out along the normals ---
 // Width is in pixels-ish: the push grows with distance so the line stays about as thick.
 
-const outlineVert = (instanced) => /* glsl */ `
+const outlineVert = (instanced, skinned) => /* glsl */ `
+  #include <common>
+  ${skinned ? '#include <skinning_pars_vertex>' : ''}
   uniform float uWidth;
   varying float vDist;
   void main() {
     ${instanced ? 'mat4 m = modelMatrix * instanceMatrix;' : 'mat4 m = modelMatrix;'}
-    vec4 w = m * vec4(position, 1.0);
-    vec3 nw = normalize(mat3(m) * normal);
+    #include <beginnormal_vertex>
+    #include <begin_vertex>
+    ${skinned ? '#include <skinbase_vertex>\n#include <skinnormal_vertex>\n#include <skinning_vertex>' : ''}
+    vec4 w = m * vec4(transformed, 1.0);
+    vec3 nw = normalize(mat3(m) * objectNormal);
     vec4 mv = viewMatrix * w;
     float d = -mv.z;
     vDist = length(w.xyz - cameraPosition);
@@ -73,9 +78,9 @@ const outlineFrag = /* glsl */ `
   }
 `;
 
-export function outlineMaterial({ instanced = false, width = 1.6, fade = 1600 } = {}) {
+export function outlineMaterial({ instanced = false, skinned = false, width = 1.6, fade = 1600 } = {}) {
   return new THREE.ShaderMaterial({
-    vertexShader: outlineVert(instanced),
+    vertexShader: outlineVert(instanced, skinned),
     fragmentShader: outlineFrag,
     side: THREE.BackSide,
     uniforms: {

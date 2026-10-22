@@ -1,5 +1,12 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+// rounded cartoon fonts, bundled (no third-party request; latin subset only)
+import '@fontsource/fredoka/latin-500.css';
+import '@fontsource/fredoka/latin-600.css';
+import '@fontsource/fredoka/latin-700.css';
+import '@fontsource/nunito/latin-600.css';
+import '@fontsource/nunito/latin-700.css';
+import '@fontsource/nunito/latin-800.css';
 import './style.css';
 import { Heightfield, encodeHeights, decodeHeights } from './core/heightfield.js';
 import { strokeTo, TOOLS } from './core/brushes.js';

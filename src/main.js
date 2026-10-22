@@ -4,7 +4,7 @@ import './style.css';
 import { Heightfield, encodeHeights, decodeHeights } from './core/heightfield.js';
 import { strokeTo, TOOLS } from './core/brushes.js';
 import { History } from './core/history.js';
-import { Skier } from './core/skier.js';
+import { Skier, PHYS } from './core/skier.js';
 import { ScoreKeeper, SPEED_BONUS_KMH, speedRate } from './core/score.js';
 import { STAMPS, applyStamp, restoreRect } from './core/stamps.js';
 import { buildFromProfile, addDelta, defaultProfile, profileStats, profileLength } from './core/profile.js';
@@ -19,6 +19,7 @@ import { RideControls } from './rideControls.js';
 import { createUI } from './ui.js';
 import { THEME, SUN_DIR } from './render/theme.js';
 import { ProfileEditor } from './profileEditor.js';
+import { createDebugOverlay } from './debugOverlay.js';
 
 // ---------- state ----------
 const isBrush = (t) => t in TOOLS;
@@ -26,6 +27,9 @@ const COARSE = window.matchMedia('(pointer: coarse)').matches;
 let altHeld = false; // Alt/Option held: left button orbits
 const SAVE_KEY = 'highrise.ski.v3'; // v3: drawn run profile + sculpting stored as a delta
 const INTRO_KEY = 'highrise.intro.v3';
+const BACKUP_KEY = 'highrise.ski.backup';
+let loadNote = null; // told to the player once the UI is up
+let saveFailed = false;
 
 const hf = new Heightfield();
 const props = new PropSet(hf); // trees and rocks
@@ -59,7 +63,26 @@ if (!hadSave) {
 
 // ---------- renderer / scene ----------
 const canvas = document.getElementById('scene');
-const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
+let renderer;
+try {
+  renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
+} catch (err) {
+  // three.js needs WebGL 2: say so instead of leaving the UI over a blank canvas
+  showFatal('Highrise needs WebGL 2, which this browser or device doesn’t provide. Try an up-to-date Chrome, Edge, Firefox or Safari, and check that hardware acceleration is on.');
+  throw err;
+}
+// the GPU can drop the context (driver reset, phone under memory pressure); three.js
+// restores it by itself, the player just needs to know why the screen flickered
+canvas.addEventListener('webglcontextlost', () => window.__highriseToast?.('Graphics were reset by the browser, restoring…', 'bad'));
+canvas.addEventListener('webglcontextrestored', () => window.__highriseToast?.('Graphics restored.'));
+
+function showFatal(msg) {
+  const el = document.createElement('div');
+  el.className = 'fatal panel';
+  el.setAttribute('role', 'alert');
+  el.textContent = msg;
+  document.body.append(el);
+}
 // phones: cap resolution a little to keep sculpting smooth
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, COARSE ? 1.75 : 2));
 renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -169,7 +192,8 @@ skierMesh.visible = false;
 const ghostRider = new GhostRider(hf);
 ghostRider.addTo(scene);
 
-const trail = new Trail({ color: '#ff5a1f' });
+// room for the longest possible run at 30 samples a second
+const trail = new Trail({ color: '#ff5a1f', max: Math.ceil(PHYS.maxTime * 30) + 16 });
 scene.add(trail.line);
 const spray = new Spray();
 scene.add(spray.points);
@@ -177,7 +201,8 @@ scene.add(spray.points);
 const sound = new Sound();
 sound.muted = state.muted;
 
-// start gate: two little poles with a banner
+// start gate: two little poles with a banner (materials kept to fade it, see setGateFade)
+const gateMats = [];
 const gate = makeGate();
 scene.add(gate);
 placeGate();
@@ -244,6 +269,7 @@ const ui = createUI({
     }
   },
 });
+window.__highriseToast = (msg, kind) => ui.toast(msg, kind);
 let pickedOnce = false;
 let seenIntro = false;
 try {
@@ -255,6 +281,7 @@ if (!hadSave) document.getElementById('intro-go').textContent = 'Draw my run';
 if (!seenIntro) ui.openIntro();
 else if (!hadSave) setTimeout(() => openDesigner('first'), 0);
 ui.setBest(state.best);
+if (loadNote) ui.toast(loadNote, 'bad');
 ui.setKind(state.buildKind);
 setTool(state.tool);
 refreshHistoryButtons();
@@ -283,6 +310,11 @@ let saveTimer = 0;
 canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 // browsers only start audio from a gesture
 document.addEventListener('pointerdown', () => sound.unlock());
+// no sound from a background tab or a locked phone
+document.addEventListener('visibilitychange', () => {
+  sound.setHidden(document.hidden);
+  if (document.hidden) rideControls.reset();
+});
 
 canvas.addEventListener('pointerdown', (e) => {
   // a fresh first finger means any touch we still track is stale (a lost pointerup
@@ -539,6 +571,8 @@ function openDesigner(mode) {
   if (stroke || build || propStroke) return;
   designerMode = mode;
   hover.valid = false;
+  // the 3D loop pauses while the designer is open: settle the sound layers first
+  sound.update({ skier: null, sculpt: 0 });
   editor.open(mode === 'edit' ? state.profile : null, { canCancel: mode !== 'first' });
 }
 
@@ -614,6 +648,8 @@ function scheduleSave() {
       localStorage.setItem(
         SAVE_KEY,
         JSON.stringify({
+          v: 4,
+          dims: { nx: hf.nx, nz: hf.nz, cell: hf.cell, sizeX: hf.sizeX, sizeZ: hf.sizeZ },
           profile: state.profile.map((v) => Math.round(v * 10) / 10),
           sculpt: encodeHeights(hf.h.map((v, i) => v - baseH[i])),
           props: packProps(props.list),
@@ -626,23 +662,41 @@ function scheduleSave() {
           buildKind: state.buildKind,
         })
       );
+      saveFailed = false;
     } catch {
-      /* storage unavailable: fine, the session still works */
+      // storage full or blocked: the session still works, but say so once
+      if (!saveFailed) ui.toast('Could not save your run: browser storage is full or blocked.', 'bad');
+      saveFailed = true;
     }
   }, 400);
 }
 
+// Saves record the grid they were made on, so a save survives any later change to the
+// grid sizing: the sculpting is resampled onto the new grid (same distance down the run,
+// same offset across). A save that still can't be read is kept under BACKUP_KEY, never
+// silently overwritten.
 function loadSave() {
+  let raw = null;
   try {
-    const raw = localStorage.getItem(SAVE_KEY);
+    raw = localStorage.getItem(SAVE_KEY);
     if (!raw) return false;
     const data = JSON.parse(raw);
-    if (!Array.isArray(data.profile) || data.profile.length < 2 || !data.start) return false;
+    if (!Array.isArray(data.profile) || data.profile.length < 2 || !data.start) throw new Error('no run in save');
     buildFromProfile(hf, data.profile);
-    const delta = data.sculpt && decodeHeights(data.sculpt, hf.nx * hf.nz);
-    if (!delta) return false;
     baseH = hf.copy();
-    for (let i = 0; i < delta.length; i++) hf.h[i] += delta[i];
+    const d = data.dims;
+    const sameGrid = !d || (d.nx === hf.nx && d.nz === hf.nz && d.cell === hf.cell);
+    const delta = data.sculpt && decodeHeights(data.sculpt, d ? d.nx * d.nz : hf.nx * hf.nz);
+    if (delta && sameGrid) {
+      for (let i = 0; i < delta.length; i++) hf.h[i] += delta[i];
+    } else if (delta) {
+      addDelta(hf, delta, d);
+      loadNote = 'Your run was moved onto the new terrain grid.';
+    } else {
+      // sculpting from a grid we can't place any more: keep the run, back up the old save
+      backupSave(raw);
+      loadNote = 'Your sculpting could not be restored (a copy of the old save was kept).';
+    }
     state.profile = data.profile;
     state.start = data.start;
     // older saves have no trees or rocks yet: grow some
@@ -658,7 +712,19 @@ function loadSave() {
     if (data.rideCam === 'helmet' || data.rideCam === 'chase') state.rideCam = data.rideCam;
     return true;
   } catch {
+    if (raw) {
+      backupSave(raw);
+      loadNote = 'Your saved run could not be read (a copy was kept).';
+    }
     return false;
+  }
+}
+
+function backupSave(raw) {
+  try {
+    if (!localStorage.getItem(BACKUP_KEY)) localStorage.setItem(BACKUP_KEY, raw);
+  } catch {
+    /* no room for a backup: nothing more we can do */
   }
 }
 
@@ -745,6 +811,8 @@ function enterRide() {
   camera.near = 0.2;
   hover.valid = false;
   rideControls.reset();
+  // contour lines are a building aid; on the ride they read as seams in the snow
+  terrain.uniforms.uContours.value = 0;
   ui.setRiding(true);
   ui.setRideCam(state.rideCam);
   skierMesh.setFirstPerson(state.rideCam === 'helmet');
@@ -759,6 +827,8 @@ function exitRide(abort) {
   }
   riding = false;
   rideControls.reset();
+  terrain.uniforms.uContours.value = state.contours ? 1 : 0;
+  setGateFade(1);
   ui.setRiding(false);
   ui.clearTricks();
   ui.setRush(0);
@@ -804,8 +874,10 @@ const _p = new THREE.Vector3();
 const _want = new THREE.Vector3();
 const _look = new THREE.Vector3();
 const _vel = new THREE.Vector3();
+const _dp = [0, 0, 0];
+const _gateC = new THREE.Vector3();
 function updateRideCamera(dt) {
-  const [x, y, z] = skier.pos;
+  const [x, y, z] = skier.drawPos(_dp);
   _p.set(x, y, z);
   // follow the direction of travel (not the skis), so spins don't whip the camera around
   _vel.set(skier.vel[0], 0, skier.vel[2]);
@@ -832,10 +904,12 @@ function updateRideCamera(dt) {
   // how far the snow falls away ahead (steep faces, drops behind a crest)
   const drop = Math.max(0, groundHere - Math.min(aheadAt(15), aheadAt(28) + 3, aheadAt(42) + 7));
   if (state.rideCam === 'helmet') {
-    _want.copy(_p).addScaledVector(_flat, 0.4);
-    _want.y = Math.max(y, groundHere) + 3.2;
+    // just behind the (hidden) head and tipped down a little, so the ski tips and pole
+    // baskets sit at the bottom of the frame: they show speed, lean and where you point
+    _want.copy(_p).addScaledVector(_flat, -0.9);
+    _want.y = Math.max(y, groundHere) + 2.7;
     _look.copy(_p).addScaledVector(_flat, lookDist + 8);
-    _look.y = Math.min(_want.y - 1.5, aheadAt(lookDist + 8) + 1.5);
+    _look.y = Math.min(_want.y - 3.2, aheadAt(lookDist + 8) + 0.6);
     posRate = 30;
     lookRate = 12;
     camera.fov = 72 + 22 * kick;
@@ -963,6 +1037,7 @@ let viewAnim = null;
 
 // ---------- loop ----------
 const clock = new THREE.Clock();
+const debug = createDebugOverlay(renderer);
 
 function resize() {
   const w = canvas.clientWidth;
@@ -985,6 +1060,7 @@ function frame() {
     return;
   }
   resize();
+  spray.setScale(renderer.domElement.height / 3);
 
   // sculpt continuously while held, so holding still keeps building
   if (!riding && stroke && hover.valid && isBrush(state.tool)) {
@@ -1042,7 +1118,11 @@ function frame() {
     spray.fromSkier(skier, dt);
     ui.setRush(riding && skier.status === 'running' ? (skier.speed - 16) / 22 : 0);
     ghostRider.update(skier.time, dt, riding && skier.status === 'running');
-    if (riding) updateRideCamera(dt);
+    if (riding) {
+      updateRideCamera(dt);
+      const d = camera.position.distanceTo(_gateC.copy(gate.position).setY(gate.position.y + 3));
+      setGateFade(Math.round(THREE.MathUtils.smoothstep(d, 9, 20) * 50) / 50);
+    }
   }
 
   spray.update(dt);
@@ -1067,6 +1147,7 @@ function frame() {
   }
   updateSun();
   renderer.render(scene, camera);
+  debug?.tick();
   requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);
@@ -1112,8 +1193,9 @@ window.addEventListener('keydown', (e) => {
       e.preventDefault();
       return;
     }
-    if (key === 'r') sendSkier();
-    else if (e.key === 'Escape') exitRide(true);
+    if (key === 'r') {
+      if (!e.repeat) sendSkier(); // holding R must not restart over and over
+    } else if (e.key === 'Escape') exitRide(true);
     else if (key === 'c') toggleRideCam();
     else if (key === 'm') ui.toggleMute();
     return;
@@ -1159,8 +1241,9 @@ window.addEventListener('keydown', (e) => {
 // ---------- helpers ----------
 function makeGate() {
   const g = new THREE.Group();
-  const poleMat = new THREE.MeshLambertMaterial({ color: '#1d2733' });
-  const bannerMat = new THREE.MeshLambertMaterial({ color: '#2f6fd6', side: THREE.DoubleSide });
+  const poleMat = new THREE.MeshLambertMaterial({ color: '#1d2733', transparent: true });
+  const bannerMat = new THREE.MeshLambertMaterial({ color: '#2f6fd6', side: THREE.DoubleSide, transparent: true });
+  gateMats.push(poleMat, bannerMat);
   for (const sx of [-4, 4]) {
     const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.15, 6, 8), poleMat);
     pole.position.set(sx, 3, 0);
@@ -1170,6 +1253,19 @@ function makeGate() {
   banner.position.set(0, 5.3, 0);
   g.add(banner);
   return g;
+}
+
+// The chase cam starts right behind the gate: fade it out when the camera is close so
+// the banner doesn't cover the screen at the start of every run.
+let gateFade = 1;
+function setGateFade(a) {
+  if (a === gateFade) return;
+  gateFade = a;
+  gate.visible = a > 0.02;
+  for (const m of gateMats) {
+    m.opacity = a;
+    m.depthWrite = a > 0.98;
+  }
 }
 
 function placeGate() {
@@ -1193,6 +1289,7 @@ document.addEventListener(
 
 // read-only handle for debugging in the browser console
 window.__highrise = {
+  renderer,
   get skier() {
     return skier;
   },

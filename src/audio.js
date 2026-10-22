@@ -13,7 +13,8 @@ export class Sound {
 
   unlock() {
     if (this.ctx) {
-      if (this.ctx.state === 'suspended') this.ctx.resume();
+      // 'interrupted' is iOS after a call or switching apps
+      if (!this.hidden && (this.ctx.state === 'suspended' || this.ctx.state === 'interrupted')) this.ctx.resume();
       return;
     }
     const AC = window.AudioContext || window.webkitAudioContext;
@@ -56,6 +57,15 @@ export class Sound {
       carve: layer('bandpass', 2200, 1.4),
       rumble: layer('lowpass', 160, 1.0),
     };
+  }
+
+  // Page hidden (other tab, phone locked): the frame loop stops, so the continuous layers
+  // would hold their last volume forever. Stop the whole audio graph instead.
+  setHidden(hidden) {
+    this.hidden = hidden;
+    if (!this.ctx) return;
+    if (hidden) this.ctx.suspend();
+    else if (this.ctx.state !== 'running') this.ctx.resume();
   }
 
   setMuted(m) {

@@ -201,7 +201,8 @@ export class SkierMesh {
 
   // Place + pose from simulation state
   sync(skier, hf, dt) {
-    const [x, y, z] = skier.pos;
+    // between the last two physics steps, so motion is smooth at any refresh rate
+    const [x, y, z] = skier.drawPos ? skier.drawPos(this._dp || (this._dp = [0, 0, 0])) : skier.pos;
     this.group.position.set(x, y, z);
     const n = skier.n;
     const up = this._up;

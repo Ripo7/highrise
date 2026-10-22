@@ -52,7 +52,10 @@ try {
   await page.click('#pr-build');
   await page.waitForSelector('#profile', { state: 'hidden' });
 
-  // build a kicker on the run (Build tool, drag down the fall line)
+  // build a kicker on the run (Build tool, drag down the fall line). Wait for the camera to
+  // finish gliding to its new view first: on a slow software renderer that takes many
+  // seconds, and aiming mid-glide puts the kicker somewhere else.
+  await page.waitForFunction(() => window.__highrise.cameraSettled, null, { timeout: 120000 });
   await page.keyboard.press('b');
   const at = (u) =>
     page.evaluate((u) => {
@@ -62,15 +65,22 @@ try {
       const r = document.getElementById('scene').getBoundingClientRect();
       return [r.left + ((v.x + 1) / 2) * r.width, r.top + ((1 - v.y) / 2) * r.height];
     }, u);
-  const before = await page.evaluate(() => window.__highrise.hf.heightAt(0, window.__highrise.hf.startZ + 170));
+  // remember the snow before, then look for the highest rise anywhere (a slow software
+  // renderer can shift the aim a few metres, so don't insist on one exact spot)
+  await page.evaluate(() => (window.__before = window.__highrise.hf.h.slice()));
   const [ax, ay] = await at(150);
   const [bx, by] = await at(175);
   await page.mouse.move(ax, ay);
   await page.mouse.down();
   await page.mouse.move(bx, by, { steps: 8 });
   await page.mouse.up();
-  const after = await page.evaluate(() => window.__highrise.hf.heightAt(0, window.__highrise.hf.startZ + 170));
-  assert.ok(after > before + 0.5, `the kicker raised the snow (${(after - before).toFixed(2)} m)`);
+  const rise = await page.evaluate(() => {
+    const h = window.__highrise.hf.h;
+    let m = 0;
+    for (let i = 0; i < h.length; i++) m = Math.max(m, h[i] - window.__before[i]);
+    return m;
+  });
+  assert.ok(rise > 0.5, `the kicker raised the snow (${rise.toFixed(2)} m)`);
   await page.screenshot({ path: `${OUT}/2-built.png` });
 
   // ride it

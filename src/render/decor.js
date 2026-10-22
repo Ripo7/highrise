@@ -89,7 +89,9 @@ export class Decor {
       const mat = new THREE.MeshToonMaterial({ color: colors[name] || '#ffffff', gradientMap: toonRamp() });
       const im = new THREE.InstancedMesh(o.geometry, mat, max);
       im.count = 0;
-      im.castShadow = true;
+      // no shadows from the thin poles: they're barely visible and casting them from
+      // instanced meshes halved the frame rate in testing
+      im.castShadow = false;
       im.frustumCulled = false;
       const line = new THREE.InstancedMesh(o.geometry, this.inkMarkers, max);
       line.instanceMatrix = im.instanceMatrix;

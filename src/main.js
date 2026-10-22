@@ -1276,6 +1276,12 @@ document.addEventListener(
 // read-only handle for debugging in the browser console
 window.__highrise = {
   renderer,
+  // false while the camera is still gliding to a new view (tests wait for it before aiming)
+  get cameraSettled() {
+    return !viewAnim;
+  },
+  decor,
+  scene,
   get skier() {
     return skier;
   },

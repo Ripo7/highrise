@@ -173,7 +173,7 @@ function updateSun() {
 
 const propMeshes = new PropMeshes(props);
 scene.add(propMeshes.group);
-// start gate, finish arch and piste markers
+// start gate and finish arch
 const decor = new Decor(hf, props);
 scene.add(decor.group);
 let decorSeen = -1;

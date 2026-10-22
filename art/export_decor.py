@@ -1,15 +1,13 @@
-"""Run decor for the game: start gate, finish arch and piste marker, in the cartoon style.
+"""Run decor for the game: start gate and finish arch, in the cartoon style.
 
     python3 art/export_decor.py [--blend decor.blend] [--preview out.png]
 
-Writes public/models/decor.glb with three objects:
+Writes public/models/decor.glb with two objects:
   gate    wooden start gate with a banner and a snow load on the beam (about 10 m wide)
   arch    inflatable striped finish arch with a chequered banner (about 26 m wide)
-  marker  a piste marker pole; its top band is recoloured per pole by the game
-          (green / blue / red / black for how steep the run is there)
 
 Built facing -Y, standing on the origin, in metres. Parts are tagged by material name
-(wood, banner, stripe, snow, ink, cream, pole, band) and painted with theme colours in game.
+(wood, banner, stripe, snow, ink, cream) and painted with theme colours in game.
 """
 import math
 import os
@@ -31,7 +29,6 @@ scene = bpy.context.scene
 PALETTE = {  # Blender preview colours only; the game paints by name from theme.js
     'wood': (0.62, 0.3, 0.14), 'banner': (1.0, 0.22, 0.22), 'stripe': (0.15, 0.75, 0.85),
     'snow': (1, 0.97, 0.92), 'ink': (0.08, 0.06, 0.16), 'cream': (1, 0.9, 0.7),
-    'pole': (0.92, 0.92, 0.95), 'band': (0.95, 0.3, 0.2),
 }
 MATS = {}
 for name, col in PALETTE.items():
@@ -148,14 +145,6 @@ for sx in (-1, 1):
     a.cyl((sx * W / 2, 0, R - 2.6), (sx * W / 2.3, 0, R - 0.9), 0.05, 'ink', segs=5)
 a.finish((0, 0, 0))
 
-# ------------------------------------------------------------------ piste marker
-m = Part('marker')
-m.cyl((0, 0, -0.3), (0, 0, 2.6), 0.09, 'pole', segs=8)
-m.cyl((0, 0, 2.0), (0, 0, 2.6), 0.13, 'band', segs=8)
-m.blob((0, 0, 2.66), (0.13, 0.13, 0.08), 'snow', segs=8, rings=4)
-m.blob((0, 0, 0.0), (0.45, 0.4, 0.18), 'snow', segs=8, rings=4)
-m.finish((0, 0, 0))
-
 os.makedirs(os.path.dirname(OUT), exist_ok=True)
 bpy.ops.export_scene.gltf(filepath=os.path.abspath(OUT), export_format='GLB', export_materials='EXPORT',
                           export_normals=True, export_texcoords=False)
@@ -166,10 +155,6 @@ if BLEND:
 if PREVIEW:
     bpy.data.objects['gate'].location = (-12, 6, 0)
     bpy.data.objects['arch'].location = (8, 14, 0)
-    for k in range(4):
-        ob = bpy.data.objects.new(f'marker{k}', bpy.data.objects['marker'].data)
-        ob.location = (-20 + k * 2.2, -2, 0)
-        scene.collection.objects.link(ob)
     cam = bpy.data.objects.new('Cam', bpy.data.cameras.new('Cam'))
     scene.collection.objects.link(cam)
     scene.camera = cam

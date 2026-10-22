@@ -402,19 +402,22 @@ test('flying over a rock clears it', () => {
   assert.ok(!s.events.some((e) => e.type === 'bump'));
 });
 
-test('auto-scattered forest keeps the middle open and a hands-off run clean', () => {
-  const { hf, start } = straightRun(22, 1600);
+test('auto-scattered forest covers the whole mountain in patches, start and finish clear', () => {
+  const { hf } = straightRun(22, 1600);
   const list = scatterProps(hf, 0, 1600, 3);
   assert.ok(list.length > 400 && list.length < 4000, `${list.length} props`);
-  assert.ok(list.every((p) => Math.abs(p.x) >= 46));
   assert.ok(list.some((p) => p.k === ROCK) && list.some((p) => p.k === TREE));
-  const props = new PropSet(hf);
-  props.set(list);
-  const s = new Skier(hf, start);
-  s.props = props;
-  s.simulate();
-  assert.equal(s.status, 'finished');
-  assert.equal(s.wipeouts, 0);
+  // free mountain: trees in the middle too, not just a forest along the sides
+  const middle = list.filter((p) => p.k === TREE && Math.abs(p.x) < 46).length;
+  assert.ok(middle > 20, `${middle} trees in the middle`);
+  // but in patches: plenty of the mountain stays open snow (glades)
+  const cells = new Set(list.map((p) => `${Math.floor(p.x / 40)},${Math.floor(p.u / 40)}`));
+  const total = Math.ceil(480 / 40) * Math.ceil(1600 / 40);
+  assert.ok(cells.size < total * 0.85, `${cells.size} of ${total} 40 m squares have props`);
+  // nothing right at the start gate or under the finish arch
+  const finishU = hf.finishZ - hf.startZ;
+  assert.ok(list.every((p) => !(p.u < 60 && Math.abs(p.x) < 70)));
+  assert.ok(list.every((p) => !(p.u > finishU - 50 && Math.abs(p.x) < 40)));
   // save round trip
   const back = unpackProps(packProps(list));
   assert.equal(back.length, list.length);

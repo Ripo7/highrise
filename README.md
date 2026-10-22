@@ -53,7 +53,7 @@ Profiles live in `src/core/profile.js` (resampling, smoothing, slope limits, the
 
 ## Trees and rocks
 
-Every new run grows forest along both sides, clumps of trees and boulders further in, and rocks on the steep bits, with a clear lane down the middle (`src/core/props.js`). They're obstacles: brushing one is a bump that costs a little speed, hitting one head-on (over ~40 km/h straight into it) is a wipeout. Rocks can be jumped. Add or remove them with the Build tool; they're part of undo, saved with the run, and stay at the same distance down the run when you redraw the profile (a longer run grows new forest on the extra part). They're drawn as two instanced meshes, so thousands cost two draw calls.
+Every new run grows trees across the whole mountain: no marked piste and no clear lane, but patches of forest with open glades between them, thicker woods towards the far edges, lone trees on the open snow and rocks on the steep bits (`src/core/props.js`). You pick your own line; only the start gate and the finish arch are kept clear. They're obstacles: brushing one is a bump that costs a little speed, hitting one head-on (over ~40 km/h straight into it) is a wipeout. Rocks can be jumped. Add or remove them with the Build tool; they're part of undo, saved with the run, and stay at the same distance down the run when you redraw the profile (a longer run grows new forest on the extra part). They're drawn as two instanced meshes, so thousands cost two draw calls.
 
 ## What's in the prototype
 

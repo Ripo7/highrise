@@ -114,15 +114,18 @@ export function rng(seed) {
 }
 
 /**
- * Natural scatter between u0 and u1 metres down the run: forest along both sides,
- * clumps of trees and rocks further in, rocks on the steep bits, and a clear lane
- * down the middle so a hands-off run is never blocked.
+ * Natural scatter between u0 and u1 metres down the run, across the whole mountain: no
+ * marked piste, no clear lane. Forest grows in patches with open glades between them
+ * (large-scale noise), thickens towards the far edges, lone trees dot the open snow and
+ * rocks sit on the steep bits. You pick your own line. The start and the finish arch are
+ * kept clear so a run never begins or ends in a tree.
  */
 export function scatterProps(hf, u0, u1, seed = 1) {
   const out = [];
   const rand = rng(seed * 7919 + Math.round(u0));
   const n1 = makeValueNoise(seed + 11);
   const n2 = makeValueNoise(seed + 23);
+  const n3 = makeValueNoise(seed + 37);
   const step = 10;
   const half = hf.halfX - 6;
   const finishU = hf.finishZ - hf.startZ;
@@ -132,15 +135,17 @@ export function scatterProps(hf, u0, u1, seed = 1) {
       const pu = u + rand() * step;
       if (pu > finishU - 10) continue;
       const ax = Math.abs(px);
-      if (ax < 46) continue; // the centre lane stays open
-      if (pu < 50 && ax < 90) continue; // room around the start gate
+      if (pu < 60 && ax < 70) continue; // room around the start gate
+      if (pu > finishU - 50 && ax < 40) continue; // and under the finish arch
       const z = hf.startZ + pu;
-      const forest = smoothstep(115, 175, ax) * (0.55 + 0.45 * n1(px * 0.012, pu * 0.012));
-      const clumps = smoothstep(46, 80, ax) * (1 - smoothstep(130, 175, ax)) * Math.max(0, n1(px * 0.02 + 40, pu * 0.02) - 0.25) * 1.1;
-      const pTree = Math.min(0.82, forest * 0.8 + clumps);
+      // forest patches and glades: two octaves so the edges of the woods are ragged
+      const patch = 0.7 * n1(px * 0.007, pu * 0.007) + 0.3 * n3(px * 0.03 + 9, pu * 0.03);
+      const woods = smoothstep(0.5, 0.68, patch) * 0.78;
+      const edge = smoothstep(170, 232, ax) * 0.45;
+      const pTree = Math.min(0.85, woods + edge + 0.025);
       const nrm = hf.normalAt(px, z);
       const steep = smoothstep(0.3, 0.55, 1 - nrm[1]);
-      const pRock = 0.035 + 0.25 * steep + 0.08 * Math.max(0, n2(px * 0.03, pu * 0.03) - 0.4);
+      const pRock = 0.025 + 0.22 * steep + 0.07 * Math.max(0, n2(px * 0.03, pu * 0.03) - 0.4);
       const roll = rand();
       if (roll < pTree) out.push({ k: TREE, u: pu, x: px, s: 0.75 + rand() * 0.7, r: rand() * 6.283 });
       else if (roll < pTree + pRock) out.push({ k: ROCK, u: pu, x: px, s: 0.7 + rand() * rand() * 2.2, r: rand() * 6.283 });

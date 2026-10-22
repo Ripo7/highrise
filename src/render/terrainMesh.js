@@ -508,6 +508,7 @@ export class TerrainMesh {
       }
     }
     this.localDirty = true;
+    this.version = (this.version || 0) + 1;
     // upload only the touched rows: a full-mesh upload every frame stutters on phones
     const start = j0 * res * 3;
     const count = (j1 - j0 + 1) * res * 3;

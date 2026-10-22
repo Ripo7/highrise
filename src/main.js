@@ -10,6 +10,7 @@ import { STAMPS, applyStamp, restoreRect } from './core/stamps.js';
 import { buildFromProfile, addDelta, defaultProfile, profileStats, profileLength } from './core/profile.js';
 import { PropSet, PROP_TOOLS, TREE, ROCK, scatterProps, packProps, unpackProps, rng } from './core/props.js';
 import { PropMeshes } from './render/propMeshes.js';
+import { Decor } from './render/decor.js';
 import { TerrainMesh } from './render/terrainMesh.js';
 import { SkierMesh, Trail } from './render/skierMesh.js';
 import { Spray } from './render/spray.js';
@@ -165,6 +166,11 @@ function updateSun() {
 
 const propMeshes = new PropMeshes(props);
 scene.add(propMeshes.group);
+// start gate, finish arch and piste markers
+const decor = new Decor(hf, props);
+scene.add(decor.group);
+let decorSeen = -1;
+let decorAt = 0;
 
 let terrain = null;
 function rebuildTerrain() {
@@ -181,6 +187,8 @@ function rebuildTerrain() {
   // trees, rocks and the skier fade into the same haze as the snow
   scene.fog = new THREE.Fog(THEME.haze, terrain.uniforms.uFogNear.value, terrain.uniforms.uFogFar.value);
   propMeshes.setFog(terrain.uniforms.uFogNear.value, terrain.uniforms.uFogFar.value);
+  decor.setFog(terrain.uniforms.uFogNear.value, terrain.uniforms.uFogFar.value);
+  decorSeen = -1;
 }
 rebuildTerrain();
 
@@ -201,10 +209,6 @@ scene.add(spray.points);
 const sound = new Sound();
 sound.muted = state.muted;
 
-// start gate: two little poles with a banner (materials kept to fade it, see setGateFade)
-const gateMats = [];
-const gate = makeGate();
-scene.add(gate);
 placeGate();
 
 const controls = new OrbitControls(camera, canvas);
@@ -1145,6 +1149,12 @@ function frame() {
       if (camera.position.y < g + 6) camera.position.y = g + 6;
     }
   }
+  // the decor follows the snow: re-seat it a couple of times a second while the terrain changes
+  if (terrain.version !== decorSeen && performance.now() - decorAt > 400) {
+    decorSeen = terrain.version;
+    decorAt = performance.now();
+    decor.refresh();
+  }
   updateSun();
   renderer.render(scene, camera);
   debug?.tick();
@@ -1239,38 +1249,14 @@ window.addEventListener('keydown', (e) => {
 });
 
 // ---------- helpers ----------
-function makeGate() {
-  const g = new THREE.Group();
-  const poleMat = new THREE.MeshLambertMaterial({ color: '#1d2733', transparent: true });
-  const bannerMat = new THREE.MeshLambertMaterial({ color: '#2f6fd6', side: THREE.DoubleSide, transparent: true });
-  gateMats.push(poleMat, bannerMat);
-  for (const sx of [-4, 4]) {
-    const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.15, 6, 8), poleMat);
-    pole.position.set(sx, 3, 0);
-    g.add(pole);
-  }
-  const banner = new THREE.Mesh(new THREE.PlaneGeometry(8, 1.4), bannerMat);
-  banner.position.set(0, 5.3, 0);
-  g.add(banner);
-  return g;
-}
-
 // The chase cam starts right behind the gate: fade it out when the camera is close so
 // the banner doesn't cover the screen at the start of every run.
-let gateFade = 1;
 function setGateFade(a) {
-  if (a === gateFade) return;
-  gateFade = a;
-  gate.visible = a > 0.02;
-  for (const m of gateMats) {
-    m.opacity = a;
-    m.depthWrite = a > 0.98;
-  }
+  decor.setGateFade(a);
 }
 
 function placeGate() {
-  const { x, z } = state.start;
-  gate.position.set(x, hf.heightAt(x, z), z);
+  decor.setStart(state.start.x, state.start.z);
 }
 
 // Nothing on this page scrolls. iOS Safari still rubber-bands the page and ignores

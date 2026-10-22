@@ -1124,7 +1124,7 @@ function frame() {
     ghostRider.update(skier.time, dt, riding && skier.status === 'running');
     if (riding) {
       updateRideCamera(dt);
-      const d = camera.position.distanceTo(_gateC.copy(gate.position).setY(gate.position.y + 3));
+      const d = camera.position.distanceTo(_gateC.copy(decor.gate.position).setY(decor.gate.position.y + 3));
       setGateFade(Math.round(THREE.MathUtils.smoothstep(d, 9, 20) * 50) / 50);
     }
   }

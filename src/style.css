@@ -602,6 +602,20 @@ body.riding .view-row {
   border-left-color: var(--bad);
 }
 
+/* WebGL 2 missing: a plain message instead of a blank canvas */
+.fatal {
+  position: fixed;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: min(440px, calc(100vw - 32px));
+  padding: 20px 22px;
+  color: #eef3f6;
+  font-size: 15px;
+  line-height: 1.45;
+  z-index: 50;
+}
+
 /* ---------- intro ---------- */
 .intro {
   position: fixed;
@@ -1743,4 +1757,21 @@ body.designing .toast {
   .toast {
     transition: none;
   }
+}
+
+/* ?debug frame-cost readout */
+.debug-overlay {
+  position: fixed;
+  left: 50%;
+  top: calc(72px + var(--safe-t));
+  transform: translateX(-50%);
+  margin: 0;
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: rgba(20, 32, 43, 0.82);
+  color: #d8f3e4;
+  font: 11px/1.35 ui-monospace, SFMono-Regular, Menlo, monospace;
+  pointer-events: none;
+  z-index: 40;
+  white-space: pre;
 }

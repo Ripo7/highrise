@@ -77,7 +77,12 @@ npm install
 npm run dev      # local dev server
 npm test         # physics + brush tests (Node, no browser needed)
 npm run build    # production build into dist/
+npm run smoke    # browser smoke test on the build: draw a run, build a kicker, ride (needs Chromium: npx playwright install chromium)
 ```
+
+Add `?debug` to the URL for a frame-cost readout (fps, worst frame, draw calls, triangles). CI (`.github/workflows/ci.yml`) runs the tests, the build and the smoke test on every pull request.
+
+The physics runs in fixed 1/240 s steps whatever the screen's refresh rate, so a run (and the ghost of your best one) plays out identically at 60 Hz and 165 Hz.
 
 Stack: [Vite](https://vite.dev) + [Three.js](https://threejs.org). The simulation core in `src/core/` has no Three.js dependency, so it runs in tests and can later move to a worker.
 

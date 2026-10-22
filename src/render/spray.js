@@ -6,25 +6,33 @@ import * as THREE from 'three';
 
 const MAX = 900;
 
+// Point size is in device pixels: scale it with the drawing-buffer height (a third of it,
+// which keeps the look tuned on a 900 px screen) so spray looks the same at any resolution, cap it so a flake right
+// by the lens can't fill the screen, and fade flakes that are about to hit the camera.
 const vert = /* glsl */ `
   attribute float aLife;
   attribute float aSize;
+  uniform float uScale;
   varying float vLife;
+  varying float vNear;
   void main() {
     vLife = aLife;
     vec4 mv = modelViewMatrix * vec4(position, 1.0);
     gl_Position = projectionMatrix * mv;
-    gl_PointSize = aSize * (300.0 / -mv.z) * (0.6 + 0.4 * aLife);
+    float px = aSize * (uScale / -mv.z) * (0.6 + 0.4 * aLife);
+    gl_PointSize = min(px, uScale * 0.12);
+    vNear = smoothstep(0.8, 3.0, -mv.z);
   }
 `;
 
 const frag = /* glsl */ `
   varying float vLife;
+  varying float vNear;
   void main() {
     vec2 c = gl_PointCoord - 0.5;
     float d = length(c);
     if (d > 0.5) discard;
-    float a = smoothstep(0.5, 0.1, d) * vLife * 0.85;
+    float a = smoothstep(0.5, 0.1, d) * vLife * 0.85 * vNear;
     gl_FragColor = vec4(vec3(0.97, 0.98, 1.0), a);
   }
 `;
@@ -46,6 +54,7 @@ export class Spray {
     this.points = new THREE.Points(
       geo,
       new THREE.ShaderMaterial({
+        uniforms: { uScale: { value: 300 } },
         vertexShader: vert,
         fragmentShader: frag,
         transparent: true,
@@ -54,6 +63,11 @@ export class Spray {
     );
     this.points.frustumCulled = false;
     this.points.renderOrder = 4;
+  }
+
+  // a third of the drawing-buffer height, in device pixels
+  setScale(px) {
+    this.points.material.uniforms.uScale.value = px;
   }
 
   emitOne(p, v, size, life) {

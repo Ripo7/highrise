@@ -426,3 +426,52 @@ test('4 km of scatter stays light enough for phones', () => {
   const list = scatterProps(hf, 0, 4000, 9);
   assert.ok(list.length < 9000, `${list.length} props`);
 });
+
+test('a run plays out the same at any frame rate (fixed physics step)', () => {
+  const result = (fps) => {
+    const { hf, start } = mountain('kickers');
+    const s = new Skier(hf, start);
+    while (s.status === 'running') s.update(1 / fps);
+    return { time: s.time.toFixed(3), jumps: s.jumps, air: s.airTime.toFixed(3), x: s.pos[0].toFixed(3) };
+  };
+  const ref = result(60);
+  for (const fps of [30, 75, 120, 144, 165, 240]) assert.deepEqual(result(fps), ref, `${fps} fps`);
+});
+
+test('the recorded path keeps 30 samples a second at high refresh rates (ghost stays in time)', () => {
+  const { hf, start } = mountain('blank');
+  const s = new Skier(hf, start);
+  while (s.status === 'running' && s.time < 20) s.update(1 / 165);
+  const samples = s.path.length - 1;
+  assert.ok(Math.abs(samples / 30 - s.time) < 0.05, `${samples} samples for ${s.time.toFixed(2)} s`);
+});
+
+test('a tuck held over a kicker lip does not start a front flip', () => {
+  const { hf, start } = mountain('kickers');
+  const s = new Skier(hf, start);
+  let maxPitchEarly = 0;
+  while (s.status === 'running' && s.jumps < 1) {
+    // tuck all the way into the jump, let go 0.15 s after leaving the lip
+    s.input.pitch = s.grounded || s.sinceGround < 0.15 ? 1 : 0;
+    s.step(1 / 240);
+    if (!s.grounded && s.sinceGround < 0.15) maxPitchEarly = Math.max(maxPitchEarly, Math.abs(s.pitch));
+  }
+  assert.ok(maxPitchEarly < 0.01, `pitched ${maxPitchEarly.toFixed(2)} rad off the lip`);
+  const land = s.events.find((e) => e.type === 'land');
+  assert.equal(land.flips, 0);
+  assert.equal(land.quality, 'clean');
+});
+
+test('a deliberate pop with the stick held spins straight away', () => {
+  const { hf, start } = mountain('kickers');
+  const s = new Skier(hf, start);
+  while (s.grounded) s.step(1 / 240);
+  while (!s.grounded) s.step(1 / 240); // land the first kicker
+  s.input.crouch = true;
+  for (let k = 0; k < 120; k++) s.step(1 / 240);
+  s.input.steer = 1;
+  s.input.crouch = false;
+  s.step(1 / 240);
+  for (let k = 0; k < 24; k++) s.step(1 / 240); // 0.1 s
+  assert.ok(Math.abs(s.spin) > 0.2, `spun ${s.spin.toFixed(2)} rad in 0.1 s`);
+});

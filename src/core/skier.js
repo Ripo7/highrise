@@ -45,6 +45,7 @@ export const PHYS = {
   spinRate: 7.0, // rad/s yaw while steering in the air
   flipRate: 6.2, // rad/s pitch while flipping
   spinResponse: 14, // how quickly rotation speed follows the input
+  airGrace: 0.2, // s: input held over a lip starts rotating only after this long in the air
   // landing tolerances (radians)
   cleanYaw: 0.55,
   cleanPitch: 0.6,
@@ -102,6 +103,13 @@ export class Skier {
     this.events = []; // { type: 'pop' | 'land' | 'wipeout' | 'recover', t, ... }
     this.path = [[...this.pos]];
     this._pathTimer = 0;
+    this.prevPos = [...this.pos];
+    this.acc = 0; // unspent frame time (seconds) below one physics step
+    this.alpha = 0;
+    // air control is armed only once the stick/keys are let go after take-off (or after a
+    // short grace), so a tuck or a carve held over a lip doesn't start a flip or a spin
+    this.airSteerArmed = true;
+    this.airPitchArmed = true;
   }
 
   get speed() {
@@ -117,19 +125,37 @@ export class Skier {
     return this.input.crouch && this.wipeout <= 0;
   }
 
-  // Advance by frameDt seconds using fixed substeps.
+  // Advance by frameDt seconds in fixed steps of P.dt, whatever the frame rate, so a run
+  // plays out the same at 60 Hz and 165 Hz. Leftover time carries to the next frame;
+  // `alpha` says how far we are between the last two steps, for drawing (drawPos).
   update(frameDt) {
     if (this.status !== 'running') return;
-    let remaining = Math.min(frameDt, 0.1);
-    while (remaining > 1e-6 && this.status === 'running') {
-      const dt = Math.min(this.P.dt, remaining);
-      this.step(dt);
-      remaining -= dt;
+    this.acc += Math.min(frameDt, 0.1);
+    const h = this.P.dt;
+    while (this.acc >= h - 1e-9 && this.status === 'running') {
+      this.step(h);
+      this.acc -= h;
     }
+    if (this.status !== 'running') this.acc = 0;
+    this.alpha = Math.min(1, Math.max(0, this.acc / h));
+  }
+
+  // Position to draw this frame: between the last two physics steps
+  drawPos(out = [0, 0, 0]) {
+    const a = this.status === 'running' ? this.alpha : 1;
+    const p = this.pos;
+    const q = this.prevPos;
+    out[0] = q[0] + (p[0] - q[0]) * a;
+    out[1] = q[1] + (p[1] - q[1]) * a;
+    out[2] = q[2] + (p[2] - q[2]) * a;
+    return out;
   }
 
   step(dt) {
     const { P, hf, pos, vel } = this;
+    this.prevPos[0] = pos[0];
+    this.prevPos[1] = pos[1];
+    this.prevPos[2] = pos[2];
     const speed0 = Math.hypot(vel[0], vel[1], vel[2]);
     const out = this.wipeout > 0;
     const inp = out ? NO_INPUT : this.input;
@@ -227,9 +253,10 @@ export class Skier {
     const speed = this.speed;
     this.maxSpeed = Math.max(this.maxSpeed, speed);
 
+    // 30 samples a second, exactly: carry the overshoot so the ghost replays in time
     this._pathTimer += dt;
-    if (this._pathTimer >= 1 / 30) {
-      this._pathTimer = 0;
+    if (this._pathTimer >= 1 / 30 - 1e-9) {
+      this._pathTimer -= 1 / 30;
       this.path.push([pos[0], pos[1], pos[2]]);
     }
 
@@ -323,6 +350,8 @@ export class Skier {
       vel[2] += this.heading[2] * 3;
     }
     if (this.grounded) this.takeOff();
+    // a deliberate pop with the stick to one side means "spin": no wait for that
+    this.airSteerArmed = true;
     this.popped = true;
     this.events.push({ type: 'pop', t: this.time, value: charge });
   }
@@ -336,11 +365,20 @@ export class Skier {
     this.spinVel = 0;
     this.pitchVel = 0;
     this.flipTotal = 0;
+    // a steer or tuck/brake held through the lip must be let go before it rotates the rider
+    this.airSteerArmed = Math.abs(this.input.steer) < 0.1;
+    this.airPitchArmed = Math.abs(this.input.pitch) < 0.1;
   }
 
   rotateInAir(dt, inp) {
     const { P } = this;
     const k = Math.min(1, P.spinResponse * dt);
+    // arm air control once the input is released, or after a short grace in the air
+    if (!this.airSteerArmed && (Math.abs(inp.steer) < 0.1 || this.sinceGround > P.airGrace)) this.airSteerArmed = true;
+    if (!this.airPitchArmed && (Math.abs(inp.pitch) < 0.1 || this.sinceGround > P.airGrace)) this.airPitchArmed = true;
+    const steer = this.airSteerArmed ? inp.steer : 0;
+    const pitch = this.airPitchArmed ? inp.pitch : 0;
+    inp = { steer, pitch };
     // spin: steer right turns the skier clockwise seen from above
     this.spinVel += (-inp.steer * P.spinRate - this.spinVel) * k;
     if (this.spinVel) {

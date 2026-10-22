@@ -1,0 +1,32 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04 # Playwright 1.56 installs its browser deps on 24.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Physics, scoring and brush tests
+        run: npm test
+      - name: Production build
+        run: npm run build
+      - name: Install Chromium for the smoke test
+        run: npx playwright install --with-deps chromium
+      - name: Browser smoke test (draw a run, build a kicker, ride it)
+        run: npm run smoke
+      - name: Keep the smoke-test screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-screenshots
+          path: smoke-shots/
+          if-no-files-found: ignore

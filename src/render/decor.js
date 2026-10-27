@@ -4,11 +4,13 @@ import { THEME } from './theme.js';
 import { toonRamp, outlineMaterial } from './toon.js';
 
 // Run decor from Blender (art/export_decor.py -> public/models/decor.glb): the wooden start
-// gate at the top of the first piste and the inflatable finish arch at its end, both turned
-// to face along the piste. Nothing here collides; it's scenery that tells you where the run
-// starts and ends. Hidden until there is a piste.
+// gate wherever the run starts, facing down the fall line, and the inflatable finish arch at
+// the bottom. Nothing here collides; it's scenery that tells you where the run starts and
+// ends.
 
 const ARCH_SCALE = 1.7;
+// the start gate at the size of a real one (about 7.5 m across and 5 m up) next to the skier
+const GATE_SCALE = 0.62;
 
 const partColors = () => ({
   wood: THEME.bark[0],
@@ -57,6 +59,7 @@ export class Decor {
     const arch = byName('arch');
     if (gate) {
       gate.position.set(0, 0, 0);
+      gate.scale.multiplyScalar(GATE_SCALE);
       this.gate.add(toonize(gate, outlineMaterial({ width: 1.8, fade: 2500 })));
       this.gateFade = undefined;
       this.setGateFade(1);

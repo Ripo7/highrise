@@ -3,21 +3,24 @@ import { THEME, SUN_DIR } from './theme.js';
 
 // Ski tracks that stay in the snow, run after run, until fresh snow covers them.
 //
-// Each run leaves a polyline of points (x, distance down the run, kind). Kinds:
-//   0 carve: two thin, sharp grooves on the groomed piste
-//   1 powder: one deep trench, shaded like a furrow with a sunny rim
-//   2 skid: a wide scraped smear (braking, sliding sideways)
-// Points are kept in run coordinates so the tracks stay put when the run is rebuilt, and
-// draped on the snow as ribbons. They're saved in the browser with the run.
+// Each run leaves a polyline of points (x, distance down the mountain, kind). Kinds:
+//   0 carve: two thin, sharp grooves, one per ski
+//   1 powder: one trench, shaded like a furrow with a sunny rim
+//   2 skid: a wide scraped smear (braking, skidding a turn)
+// Points are kept every STEP metres, plus a last one that follows the skis every frame, so
+// the tracks start right at the skier. They're laid on the snow as ribbons, on the drawn
+// surface itself (the mesh's triangles, not a smoothed height), so they never dip under it.
+// Kept in mountain coordinates so they stay put when the snow is rebuilt; saved in the browser.
 
 const MAX = 40000; // points
 const STEP = 0.6; // metres between points
 // two ribbons per point: [offset from the centre, width] for each ski
 const KIND = [
-  [[-0.13, 0.09], [0.13, 0.09]], // carve: two sharp grooves
-  [[0, 1.05], [0, 0]], // powder: one trench
-  [[0, 1.3], [0, 0]], // skid: one wide smear
+  [[-0.13, 0.1], [0.13, 0.1]], // carve: two sharp grooves, under each ski
+  [[0, 0.7], [0, 0]], // powder: one trench, both skis and the boots
+  [[0, 1.1], [0, 0]], // skid: one wide smear
 ];
+const LIFT = 0.035; // metres above the drawn snow
 
 const vert = /* glsl */ `
   attribute float aSide;
@@ -56,19 +59,20 @@ const frag = /* glsl */ `
     vec3 col;
     if (vKind < 0.5) {
       // carve: a crisp groove
-      a = 0.62 * (1.0 - smoothstep(0.55, 1.0, abs(s)));
+      a = 0.55 * (1.0 - smoothstep(0.45, 1.0, abs(s)));
       col = uShadow;
     } else if (vKind < 1.5) {
       // powder trench: a shadowed floor, snow thrown up on both sides, the sunny one bright
       float floor_ = 1.0 - smoothstep(0.15, 0.62, abs(s));
       float rim = smoothstep(0.55, 0.78, abs(s)) * (1.0 - smoothstep(0.82, 1.0, abs(s)));
-      col = mix(uMid, uShadow, floor_);
+      col = mix(uMid, uShadow, floor_ * 0.8);
       col = mix(col, s > 0.0 ? uLit : uMid, rim);
-      a = 0.82 * floor_ + (s > 0.0 ? 0.7 : 0.35) * rim;
+      a = 0.6 * floor_ + (s > 0.0 ? 0.6 : 0.3) * rim;
     } else {
-      // skid: a wide, faint smear
-      a = 0.28 * (1.0 - smoothstep(0.3, 1.0, abs(s)));
-      col = uMid;
+      // skid: a wide scraped band, a touch shinier than the snow, with fine scratches
+      float scratch = 0.5 + 0.5 * sin(s * 31.0);
+      a = (0.14 + 0.08 * scratch) * (1.0 - smoothstep(0.55, 1.0, abs(s)));
+      col = mix(uMid, uLit, 0.35);
     }
     // older tracks soften a little (wind, sun)
     float age = clamp((uNow - vAge) / 40.0, 0.0, 1.0);
@@ -94,6 +98,7 @@ export class Tracks {
     this.count = 0;
     this.runIndex = 0;
     this.open = false; // a strip is in progress
+    this.tip = false; // the last point follows the skis (not yet a kept point)
     this.dirty = 0;
     this.version = 0;
 
@@ -153,25 +158,40 @@ export class Tracks {
     this.runIndex++;
     this.material.uniforms.uNow.value = this.runIndex * 10;
     this.open = false;
+    this.tip = false;
   }
 
-  // the skis left the snow (a jump, a wipeout, a rail): the next point starts a new strip
+  // the skis left the snow (a jump, a wipeout): the next point starts a new strip
   lift() {
     this.open = false;
+    this.tip = false;
   }
 
   // record the skier's position; kind: 0 carve, 1 powder, 2 skid
   add(x, z, kind) {
     const u = z - this.hf.startZ;
-    const n = this.count;
-    if (this.open && n > 0) {
+    let n = this.count;
+    if (this.open && this.tip && n > 1) {
+      // the tip follows the skis until it's a step from the last kept point, then stays
+      const dx = x - this.x[n - 2];
+      const du = u - this.u[n - 2];
+      if (dx * dx + du * du < STEP * STEP) {
+        this.x[n - 1] = x;
+        this.u[n - 1] = u;
+        this.kind[n - 1] = kind;
+        this.writePoint(n - 1);
+        this.writePoint(n - 2);
+        this.flush(n - 2);
+        return;
+      }
+    } else if (this.open && n > 0) {
       const dx = x - this.x[n - 1];
       const du = u - this.u[n - 1];
-      if (dx * dx + du * du < STEP * STEP) return;
+      if (dx * dx + du * du < 0.01) return;
     }
     if (n >= MAX) {
       this.compact();
-      return this.add(x, z, kind);
+      n = this.count;
     }
     this.x[n] = x;
     this.u[n] = u;
@@ -179,6 +199,7 @@ export class Tracks {
     this.brk[n] = this.open ? 0 : 1;
     this.age[n] = this.runIndex * 10;
     this.count++;
+    this.tip = this.open;
     this.open = true;
     this.writePoint(n);
     if (n > 0) this.writePoint(n - 1);
@@ -202,6 +223,7 @@ export class Tracks {
   clear() {
     this.count = 0;
     this.open = false;
+    this.tip = false;
     this.indexCount = 0;
     this.geo.setDrawRange(0, 0);
     this.version++;
@@ -262,7 +284,7 @@ export class Tracks {
         const px = x + sx * (c + e);
         const pz = z + sz * (c + e);
         p[o++] = px;
-        p[o++] = hf.heightAt(px, pz) + 0.03;
+        p[o++] = hf.heightAtMesh(px, pz) + LIFT;
         p[o++] = pz;
       }
     }
@@ -291,12 +313,14 @@ export class Tracks {
     }
   }
 
-  // upload what changed from point `from` to the end
+  // upload what changed from point `from` to the end. The ranges pile up until the next
+  // frame uploads them all (three.js merges them, then clears them): several points can be
+  // added between two frames, and clearing here would leave the earlier ones on the GPU as
+  // zeros (ribbons shooting off to the origin, gaps in the tracks)
   flush(from = 0) {
     const g = this.geo;
     const n = this.count;
     const upd = (attr, per) => {
-      attr.clearUpdateRanges();
       attr.addUpdateRange(from * per, (n - from) * per);
       attr.needsUpdate = true;
     };
@@ -304,7 +328,6 @@ export class Tracks {
     upd(g.attributes.aKind, 4);
     upd(g.attributes.aAge, 4);
     const ia = g.index;
-    ia.clearUpdateRanges();
     const i0 = Math.max(0, from - 1) * 12;
     ia.addUpdateRange(i0, Math.max(0, (n - 1) * 12 - i0));
     ia.needsUpdate = true;
@@ -353,6 +376,7 @@ export class Tracks {
       this.brk[0] = 1;
       this.count = n;
       this.open = false;
+      this.tip = false;
       this.material.uniforms.uNow.value = this.runIndex * 10;
       this.redrape();
       return true;

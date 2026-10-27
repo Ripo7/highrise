@@ -1,8 +1,8 @@
-// What the snow is like, everywhere on the mountain: groomed piste, deep powder, ice, or
-// bare rock. Stored per terrain cell (same grid as the heightfield), 0..255 per channel.
-// The physics reads it every step (friction, drag, grip, how deep the skis sink), the
-// renderer draws it (corduroy on the piste, soft pillows in the powder, blue ice, rock
-// faces). Rock rides like hard snow: no powder to sink into.
+// What the snow is like, everywhere on the mountain. Packed natural snow unless a channel
+// says otherwise: groomed corduroy, deep powder, ice, or bare rock. Stored per terrain cell
+// (same grid as the heightfield), 0..255 per channel. The physics reads it every step
+// (friction, drag, grip, how deep the skis sink), the renderer draws it (corduroy, soft
+// pillows in the powder, blue ice, rock faces). Rock rides like hard snow.
 
 export class SurfaceMap {
   constructor(hf) {
@@ -21,17 +21,20 @@ export class SurfaceMap {
       this.g = new Uint8Array(n);
       this.ice = new Uint8Array(n);
       this.rock = new Uint8Array(n);
+      this.pow = new Uint8Array(n);
     } else {
       this.g.fill(0);
       this.ice.fill(0);
       this.rock.fill(0);
+      this.pow.fill(0);
     }
     this.version++;
     return this;
   }
 
-  // Bilinear lookup at world (x, z). Fills out.g (groomed), out.ice and out.powder, 0..1.
-  at(x, z, out = { g: 1, ice: 0, powder: 0 }) {
+  // Bilinear lookup at world (x, z). Fills out.groomed, out.ice, out.powder, out.rock, 0..1
+  // (all 0: packed snow).
+  at(x, z, out = { groomed: 0, ice: 0, powder: 0, rock: 0 }) {
     const gx = (x + this.halfX) / this.cell;
     const gz = (z + this.halfZ) / this.cell;
     let i = Math.floor(gx);
@@ -49,9 +52,10 @@ export class SurfaceMap {
     const c = j1 * this.nx + i0;
     const d = j1 * this.nx + i1;
     const lerp2 = (arr) => ((arr[a] * (1 - fx) + arr[b] * fx) * (1 - fz) + (arr[c] * (1 - fx) + arr[d] * fx) * fz) / 255;
-    out.g = Math.min(1, lerp2(this.g) + lerp2(this.rock));
+    out.rock = lerp2(this.rock);
+    out.groomed = lerp2(this.g);
     out.ice = lerp2(this.ice);
-    out.powder = Math.max(0, 1 - out.g - out.ice);
+    out.powder = Math.min(lerp2(this.pow), Math.max(0, 1 - out.groomed - out.ice - out.rock));
     return out;
   }
 }

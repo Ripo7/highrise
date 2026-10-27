@@ -13,17 +13,32 @@ function mountain(id = 'blank') {
   return { hf, start };
 }
 
+// real skiers standing up settle around 80-110 km/h on these slopes (air drag); a tuck is
+// much faster
 for (const tpl of TEMPLATES) {
-  test(`template "${tpl.name}" is skiable hands-off, fast and long`, () => {
+  test(`template "${tpl.name}" is skiable hands-off at realistic speeds`, () => {
     const { hf, start } = mountain(tpl.id);
     const s = new Skier(hf, start).simulate();
     assert.equal(s.status, 'finished', `${tpl.id} ended ${s.status} at z=${s.pos[2].toFixed(0)}`);
     assert.ok(s.time > 30, `${tpl.id} run only ${s.time.toFixed(1)} s`);
-    assert.ok(s.maxSpeed * 3.6 > 110, `${tpl.id} too slow: ${(s.maxSpeed * 3.6).toFixed(0)} km/h`);
-    assert.ok(s.maxSpeed * 3.6 < 200, 'speeds stay plausible');
+    assert.ok(s.maxSpeed * 3.6 > 70, `${tpl.id} too slow: ${(s.maxSpeed * 3.6).toFixed(0)} km/h`);
+    assert.ok(s.maxSpeed * 3.6 < 140, `${tpl.id} too fast standing up: ${(s.maxSpeed * 3.6).toFixed(0)} km/h`);
     assert.equal(s.wipeouts, 0, 'no wipeout hands-off');
   });
 }
+
+test('a tuck is a lot faster than standing up', () => {
+  const { hf, start } = mountain('blank');
+  const up = new Skier(hf, start);
+  const tuck = new Skier(hf, start);
+  tuck.input.tuck = true;
+  for (let k = 0; k < 240 * 40; k++) {
+    up.step(1 / 240);
+    tuck.step(1 / 240);
+  }
+  assert.ok(tuck.speed > up.speed * 1.3, `tuck ${(tuck.speed * 3.6).toFixed(0)} vs ${(up.speed * 3.6).toFixed(0)} km/h`);
+  assert.ok(tuck.speed * 3.6 < 170, 'still plausible');
+});
 
 test('the kicker line produces five clean jumps', () => {
   const { hf, start } = mountain('kickers');
@@ -359,14 +374,22 @@ import { PropSet, scatterProps, packProps, unpackProps, TREE, ROCK } from '../sr
 function straightRun(deg = 20, length = 800) {
   const e = Array.from({ length: length / PROFILE_STEP + 1 }, (_, i) => -Math.tan((deg * Math.PI) / 180) * i * PROFILE_STEP);
   const hf = new Heightfield();
-  const start = buildFromProfile(hf, e);
+  // the gate faces straight down the run
+  const start = { ...buildFromProfile(hf, e), dir: [0, 1] };
   return { hf, start };
+}
+
+// where the skier's line crosses u metres down the run, with nothing in the way
+function lineAt(hf, start, u) {
+  const probe = new Skier(hf, start);
+  while (probe.status === 'running' && probe.pos[2] - hf.startZ < u) probe.step(1 / 240);
+  return probe.pos[0];
 }
 
 test('skiing straight into a tree is a wipeout', () => {
   const { hf, start } = straightRun();
   const props = new PropSet(hf);
-  props.add({ k: TREE, u: 200, x: 0, s: 1, r: 0 });
+  props.add({ k: TREE, u: 200, x: lineAt(hf, start, 200), s: 1, r: 0 });
   const s = new Skier(hf, start);
   s.props = props;
   s.simulate();
@@ -377,7 +400,7 @@ test('skiing straight into a tree is a wipeout', () => {
 test('clipping the side of a tree is a bump, not a fall', () => {
   const { hf, start } = straightRun();
   const props = new PropSet(hf);
-  props.add({ k: TREE, u: 200, x: 1.2, s: 1, r: 0 }); // the skier passes 1.2 m from its centre
+  props.add({ k: TREE, u: 200, x: lineAt(hf, start, 200) + 1.2, s: 1, r: 0 }); // the skier passes 1.2 m from its centre
   const s = new Skier(hf, start);
   s.props = props;
   s.simulate();
@@ -389,7 +412,7 @@ test('clipping the side of a tree is a bump, not a fall', () => {
 test('flying over a rock clears it', () => {
   const { hf, start } = straightRun();
   const props = new PropSet(hf);
-  props.add({ k: ROCK, u: 200, x: 0, s: 1, r: 0 });
+  props.add({ k: ROCK, u: 200, x: lineAt(hf, start, 200), s: 1, r: 0 });
   const s = new Skier(hf, start);
   s.props = props;
   // load a full jump and pop ~15 m before the rock

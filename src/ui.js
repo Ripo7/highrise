@@ -10,6 +10,7 @@ const STATUS_LABEL = {
   stuck: 'Stopped',
   timeout: 'Too slow',
   aborted: 'Ready',
+  paused: 'Paused',
 };
 
 const fmt = (n) => Math.round(n).toLocaleString('en-US');
@@ -18,6 +19,7 @@ export function createUI(opts) {
   const $ = (s) => document.querySelector(s);
 
   $('#send').addEventListener('click', opts.onSend);
+  $('#restart').addEventListener('click', opts.onRestart);
   $('#undo').addEventListener('click', opts.onUndo);
   $('#redo').addEventListener('click', opts.onRedo);
   $('#reset-view').addEventListener('click', () => opts.onResetView());
@@ -30,10 +32,6 @@ export function createUI(opts) {
   $('#fresh-snow').addEventListener('click', () => {
     setMenu(false);
     opts.onFreshSnow();
-  });
-  $('#suggest').addEventListener('click', () => {
-    setMenu(false);
-    opts.onSuggest();
   });
 
   // the new-mountain card: how steep, how big, and which one (a preview from above)
@@ -77,7 +75,7 @@ export function createUI(opts) {
   $('#mt-cancel').addEventListener('click', closeMt);
   $('#mt-go').addEventListener('click', () => {
     closeMt();
-    opts.onMountain({ ...mtPick }, $('#mt-starter').checked);
+    opts.onMountain({ ...mtPick });
   });
 
   const toggle = (sel, initial, cb) => {
@@ -143,11 +141,11 @@ export function createUI(opts) {
 
   $('#ride-exit').addEventListener('click', () => opts.onRideExit());
   $('#ride-cam').addEventListener('click', () => opts.onRideCam());
-  $('#ride-retry').addEventListener('click', () => opts.onSend());
+  $('#ride-retry').addEventListener('click', () => opts.onRestart());
 
   // results card
   const results = $('#results');
-  $('#res-retry').addEventListener('click', () => opts.onSend());
+  $('#res-retry').addEventListener('click', () => opts.onRestart());
   $('#res-sculpt').addEventListener('click', () => opts.onRideExit());
 
   window.addEventListener('keydown', (e) => {
@@ -200,6 +198,13 @@ export function createUI(opts) {
     },
     setTool(id) {
       document.body.dataset.tool = id;
+    },
+    // a run is waiting while you build: Ride picks it up, From the start goes back to the gate
+    setPaused(on) {
+      $('#send-label').textContent = on ? 'Ride on' : 'Ride';
+      $('#send').title = on ? 'Ride on from where you stopped (Space)' : 'Ride from the start gate (Space)';
+      $('#restart').hidden = !on;
+      document.body.classList.toggle('paused', on);
     },
     // the line under the title (desktop)
     setHint(text) {

@@ -1,4 +1,4 @@
-// Wild mountains, pistes traced through them, terrain pieces that merge, and riding it all.
+// Wild mountains, terrain pieces that merge, the start gate anywhere, and riding it all.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Heightfield } from '../src/core/heightfield.js';
@@ -6,9 +6,9 @@ import { SurfaceMap } from '../src/core/surface.js';
 import { PropSet, TREE } from '../src/core/props.js';
 import { Skier } from '../src/core/skier.js';
 import { newWild, buildWild, wildDims, makeWild, SIZES, STEEPNESS } from '../src/core/wild.js';
-import { sampleCurve, pisteCurves, curveAt, nearestOnCurves, insertIndex, newPiste, suggestPiste, DEFAULT_WIDTH } from '../src/core/piste.js';
-import { KINDS, placeTiles, eraseTiles, brushTiles, packTiles, unpackTiles, trimTiles, tileOf, gridCols, gridRows } from '../src/core/terrain.js';
-import { buildWorld } from '../src/core/world.js';
+import { KINDS, placeTiles, eraseTiles, brushTiles, lineTiles, packTiles, unpackTiles, trimTiles, tileOf, tileCenter, gridCols, gridRows, squaresToHexes } from '../src/core/terrain.js';
+import { HEX_R, HEX_W, HEX_H, hexCenter, hexDistance } from '../src/core/hex.js';
+import { buildWorld, fallLine, defaultStart, GATE_CLEAR } from '../src/core/world.js';
 
 const fresh = (size = 'small', steep = 'medium', seed = 7) => {
   const hf = new Heightfield();
@@ -16,7 +16,6 @@ const fresh = (size = 'small', steep = 'medium', seed = 7) => {
   const base = buildWild(hf, surf, newWild(size, steep, seed));
   return { hf, surf, base };
 };
-const P = (hf, x, u, w = DEFAULT_WIDTH) => ({ x, z: hf.startZ + u, w });
 const tileAt = (hf, x, u) => tileOf(hf, x, hf.startZ + u);
 
 // ---------- wild mountains ----------
@@ -54,113 +53,53 @@ test('the mountain grows a forest below the treeline, with clearings, and rock b
   assert.ok(base.rock.some((v) => v > 200), 'bare rock on them');
 });
 
-// ---------- pistes ----------
+// ---------- the hexagon grid ----------
 
-test('the piste curve passes through every waypoint, smoothly', () => {
-  const pts = [
-    { x: 0, z: 0, w: 36 },
-    { x: 40, z: 90, w: 36 },
-    { x: -20, z: 200, w: 24 },
-    { x: 10, z: 320, w: 52 },
-  ];
-  const c = sampleCurve(pts);
-  for (const q of pts) {
-    const d = Math.min(...c.xs.map((x, k) => Math.hypot(x - q.x, c.zs[k] - q.z)));
-    assert.ok(d < 0.01, 'through the waypoint');
+test('the grid is hexagons: every point is in the tile whose centre is nearest', () => {
+  const { hf } = fresh('small', 'medium', 2);
+  for (let n = 0; n < 4000; n++) {
+    const x = -hf.halfX + Math.random() * hf.sizeX;
+    const z = hf.startZ + Math.random() * 400;
+    const t = tileOf(hf, x, z);
+    const c = tileCenter(hf, t.i, t.j);
+    const d = Math.hypot(x - c.x, z - c.z);
+    assert.ok(d <= HEX_R + 1e-9, 'inside its hexagon');
+    for (const [i, j] of brushTiles(t.i, t.j, 2)) {
+      const o = tileCenter(hf, i, j);
+      assert.ok(d <= Math.hypot(x - o.x, z - o.z) + 1e-9, 'no neighbour is nearer');
+    }
   }
-  // no sample-to-sample jumps, no kinks sharper than the bends drawn
-  for (let k = 1; k < c.n; k++) assert.ok(Math.hypot(c.xs[k] - c.xs[k - 1], c.zs[k] - c.zs[k - 1]) < 2.6);
-  assert.equal(c.ws[0], 36);
-  assert.equal(c.ws[c.n - 1], 52);
+  // six neighbours, all one tile width away; brushes of 1, 7 and 19 tiles
+  const ring = brushTiles(10, 7, 2).filter(([i, j]) => i !== 10 || j !== 7);
+  const [cx, cu] = hexCenter(10, 7);
+  for (const [i, j] of ring) assert.ok(Math.abs(Math.hypot(hexCenter(i, j)[0] - cx, hexCenter(i, j)[1] - cu) - HEX_W) < 1e-9);
+  assert.deepEqual([1, 2, 3].map((s) => brushTiles(4, 5, s).length), [1, 7, 19]);
+  // a drag leaves no gaps: each tile on a line touches the one before
+  const line = lineTiles({ i: 2, j: 3 }, { i: 30, j: 41 });
+  for (let k = 1; k < line.length; k++) assert.equal(hexDistance({ i: line[k - 1][0], j: line[k - 1][1] }, { i: line[k][0], j: line[k][1] }), 1);
+  // the tiles fill the mountain, whole, edge to edge
+  const cols = gridCols(hf);
+  const rows = gridRows(hf);
+  assert.ok(hexCenter(cols - 1, 1)[0] + HEX_W / 2 <= hf.sizeX + 1e-9 && hexCenter(cols, 1)[0] + HEX_W / 2 > hf.sizeX - HEX_W);
+  assert.ok(hexCenter(0, rows - 1)[1] + HEX_R <= hf.finishZ - hf.startZ && hexCenter(0, rows)[1] + HEX_R > hf.finishZ - hf.startZ - HEX_H);
 });
 
-test('a piste is carved level across, groomed, and the trees on it are cleared', () => {
-  const { hf, surf, base } = fresh('small', 'medium', 5);
-  const pistes = [{ id: 1, pts: [P(hf, 0, 30), P(hf, 60, 200), P(hf, -40, 400), P(hf, 0, 600)], from: null, to: null }];
-  const w = buildWorld(hf, surf, base, { pistes });
-  const c = w.curves.get(1);
-  const props = new PropSet(hf);
-  props.set(w.props);
-  for (const f of [0.2, 0.4, 0.6, 0.8]) {
-    const a = curveAt(c, f);
-    const k = a.k;
-    const dx = c.xs[Math.min(c.n - 1, k + 2)] - c.xs[Math.max(0, k - 2)];
-    const dz = c.zs[Math.min(c.n - 1, k + 2)] - c.zs[Math.max(0, k - 2)];
-    const l = Math.hypot(dx, dz);
-    const nx = -dz / l;
-    const nz = dx / l;
-    // across the piste the snow is (nearly) level: a quarter of the natural tilt at most
-    const left = hf.heightAt(a.x + nx * 12, a.z + nz * 12);
-    const right = hf.heightAt(a.x - nx * 12, a.z - nz * 12);
-    const nat = new Heightfield(hf.sizeX, hf.sizeZ, hf.cell);
-    nat.h.set(base.h);
-    const natTilt = Math.abs(nat.heightAt(a.x + nx * 12, a.z + nz * 12) - nat.heightAt(a.x - nx * 12, a.z - nz * 12));
-    assert.ok(Math.abs(left - right) <= natTilt * 0.3 + 0.3, `level across at ${f}: ${Math.abs(left - right).toFixed(2)} vs ${natTilt.toFixed(2)} natural`);
-    assert.ok(surf.at(a.x, a.z).g > 0.95, 'groomed');
-    assert.equal(props.near(a.x, a.z, 14).length, 0, 'no trees or rocks on the piste');
+test('pieces painted on the old 10 m squares land on the hexagons in the same place', () => {
+  const { hf } = fresh('small', 'medium', 2);
+  // a 6 × 4 block of bumps and one forest square
+  const squares = [];
+  for (let i = 20; i < 26; i++) for (let j = 10; j < 14; j++) squares.push({ k: 'bump', i, j });
+  squares.push({ k: 'forest', i: 40, j: 30 });
+  const hexes = squaresToHexes(squares, gridCols(hf), gridRows(hf));
+  const bumps = hexes.filter((p) => p.k === 'bump');
+  // about the same area (a hexagon is 94 m², a square 100)
+  const area = (bumps.length * 3 * Math.sqrt(3) * HEX_R * HEX_R) / 2;
+  assert.ok(Math.abs(area - 2400) < 500, `${area.toFixed(0)} m² of bumps`);
+  for (const p of bumps) {
+    const [x, u] = hexCenter(p.i, p.j);
+    assert.ok(x >= 200 && x < 260 && u >= 100 && u < 140, 'inside the old block');
   }
-  // off the piste the snow is wild: powder
-  assert.ok(surf.at(c.xs[0] + 120, c.zs[0] + 200).powder > 0.9);
-});
-
-test('a piste is graded where the mountain is too steep to ride', () => {
-  const { hf, surf, base } = fresh('small', 'steep', 9);
-  // straight down through the steepest part of the mountain
-  const pistes = [{ id: 1, pts: [P(hf, 0, 20), P(hf, 0, 650)], from: null, to: null }];
-  const w = buildWorld(hf, surf, base, { pistes });
-  const c = w.curves.get(1);
-  let maxDeg = 0;
-  for (let k = 5; k < c.n - 5; k++) {
-    const d = hf.heightAt(c.xs[k], c.zs[k]) - hf.heightAt(c.xs[k + 1], c.zs[k + 1]);
-    maxDeg = Math.max(maxDeg, (Math.atan2(d, c.s[k + 1] - c.s[k]) * 180) / Math.PI);
-  }
-  assert.ok(maxDeg < 41, `steepest stretch ${maxDeg.toFixed(1)}°`);
-});
-
-test('a branch leaves a piste and joins it again with no step where they meet', () => {
-  const { hf, surf, base } = fresh('small', 'medium', 5);
-  const pistes = [{ id: 1, pts: [P(hf, 0, 30), P(hf, 0, 330), P(hf, 0, 630)], from: null, to: null }];
-  const b = newPiste(pistes, [P(hf, 110, 230, 24), P(hf, 120, 420, 24)], { id: 1, f: 0.2 });
-  b.to = { id: 1, f: 0.8 };
-  pistes.push(b);
-  const w = buildWorld(hf, surf, base, { pistes });
-  const cb = w.curves.get(b.id);
-  const cm = w.curves.get(1);
-  assert.ok(cb, 'the branch has a curve');
-  // it starts and ends on the main piste
-  const s0 = curveAt(cm, 0.2);
-  const s1 = curveAt(cm, 0.8);
-  assert.ok(Math.hypot(cb.xs[0] - s0.x, cb.zs[0] - s0.z) < 0.5);
-  assert.ok(Math.hypot(cb.xs[cb.n - 1] - s1.x, cb.zs[cb.n - 1] - s1.z) < 0.5);
-  // walk out of the main piste along the branch: the snow changes gently, no step
-  let worst = 0;
-  for (let k = 0; k < Math.min(cb.n - 1, 40); k++) {
-    const d = Math.abs(hf.heightAt(cb.xs[k + 1], cb.zs[k + 1]) - hf.heightAt(cb.xs[k], cb.zs[k]));
-    worst = Math.max(worst, d / Math.max(0.1, cb.s[k + 1] - cb.s[k]));
-  }
-  assert.ok(worst < 0.8, `steepest step along the junction: ${worst.toFixed(2)}`);
-  // only the main piste ends in a finish line (the branch joins it)
-  assert.equal(w.ends.finishes.length, 1);
-  assert.equal(w.ends.start.id, 1);
-});
-
-test('a new waypoint dropped on the piste goes between the two around it', () => {
-  const { hf } = fresh('small', 'gentle', 2);
-  const p = { id: 1, pts: [P(hf, 0, 30), P(hf, 0, 200), P(hf, 0, 400)], from: null, to: null };
-  const c = pisteCurves([p]).get(1);
-  const near = nearestOnCurves(new Map([[1, c]]), 3, hf.startZ + 300);
-  assert.equal(insertIndex(p, c, near.k), 2);
-  const n2 = nearestOnCurves(new Map([[1, c]]), 0, hf.startZ + 60);
-  assert.equal(insertIndex(p, c, n2.k), 1);
-});
-
-test('a suggested piste goes from the top to the bottom without crossing a cliff', () => {
-  const { hf, base } = fresh('medium', 'steep', 4);
-  const pts = suggestPiste(hf, base.rock, base.gen);
-  assert.ok(pts.length >= 6);
-  assert.ok(pts[0].z < hf.startZ + 60);
-  assert.ok(pts[pts.length - 1].z > hf.finishZ - 120);
-  for (let i = 1; i < pts.length; i++) assert.ok(pts[i].z > pts[i - 1].z, 'always going down the mountain');
+  assert.ok(hexes.some((p) => p.k === 'forest'));
 });
 
 // ---------- terrain pieces ----------
@@ -174,7 +113,7 @@ test('pieces replace what is on their layer, and erase clears every layer', () =
   assert.equal(ps.length, 3, 'off-grid pieces are dropped');
   ps = eraseTiles(ps, [[3, 4]]);
   assert.equal(ps.length, 0);
-  assert.deepEqual(brushTiles(5, 5, 3).length, 9);
+  assert.deepEqual(brushTiles(5, 5, 3).length, 19);
   const all = Object.keys(KINDS).map((k, n) => ({ k, i: n, j: n * 2 }));
   assert.deepEqual(unpackTiles(packTiles(all)), all);
   assert.equal(trimTiles([{ k: 'bump', i: 5, j: 400 }], 50, 50).length, 0);
@@ -188,8 +127,7 @@ test('bumps side by side melt into one ridge: no dip between them, no edges', ()
   buildWorld(hf, surf, base, { pieces: row });
   const nat = new Heightfield(hf.sizeX, hf.sizeZ, hf.cell);
   nat.h.set(base.h);
-  const zc = hf.startZ + (t.j + 0.5) * 10;
-  const x0 = -hf.halfX + (t.i + 0.5) * 10;
+  const { x: x0, z: zc } = tileCenter(hf, t.i, t.j);
   // along the ridge: the rise never dips between tiles
   const rise = [];
   for (let x = x0 - 25; x <= x0 + 25; x += 1.5) rise.push(hf.heightAt(x, zc) - nat.heightAt(x, zc));
@@ -218,10 +156,10 @@ test('a bump next to a hollow rolls into it', () => {
   buildWorld(hf, surf, base, { pieces: [{ k: 'bump', i: t.i, j: t.j }, { k: 'bump', i: t.i, j: t.j - 1 }, { k: 'hollow', i: t.i, j: t.j + 1 }, { k: 'hollow', i: t.i, j: t.j + 2 }] });
   const nat = new Heightfield(hf.sizeX, hf.sizeZ, hf.cell);
   nat.h.set(base.h);
-  const x0 = -hf.halfX + (t.i + 0.5) * 10;
+  const { x: x0, z: zc } = tileCenter(hf, t.i, t.j);
   let prev = null;
   let maxStep = 0;
-  for (let z = hf.startZ + t.j * 10 - 20; z < hf.startZ + t.j * 10 + 40; z += 0.5) {
+  for (let z = zc - 25; z < zc + 35; z += 0.5) {
     const v = hf.heightAt(x0, z) - nat.heightAt(x0, z);
     if (prev !== null) maxStep = Math.max(maxStep, Math.abs(v - prev) / 0.5);
     prev = v;
@@ -237,13 +175,14 @@ test('a flat eases the slope off, a wall steepens it, a rock band makes a cliff'
     for (let di = -8; di <= 8; di++) for (let dj = 0; dj < rowsDeep; dj++) out.push({ k, i: t.i + di, j: t.j + dj });
     return out;
   };
-  const z0 = hf.startZ + t.j * 10;
+  // the top of the first row, where its hexagons' sides begin
+  const z0 = tileCenter(hf, t.i, t.j).z - HEX_R / 2;
   const slopeIn = () => (hf.heightAt(0, z0 + 3) - hf.heightAt(0, z0 + 27)) / 24;
   buildWorld(hf, surf, base, {});
   const natural = slopeIn();
-  buildWorld(hf, surf, base, { pieces: across('flat', 3) });
+  buildWorld(hf, surf, base, { pieces: across('flat', 4) });
   assert.ok(slopeIn() < natural * 0.45, `flatter (${slopeIn().toFixed(2)} vs ${natural.toFixed(2)})`);
-  buildWorld(hf, surf, base, { pieces: across('wall', 3) });
+  buildWorld(hf, surf, base, { pieces: across('wall', 4) });
   assert.ok(slopeIn() > natural * 1.5, `steeper (${slopeIn().toFixed(2)} vs ${natural.toFixed(2)})`);
   buildWorld(hf, surf, base, { pieces: across('rocks', 1) });
   let face = 0;
@@ -252,68 +191,186 @@ test('a flat eases the slope off, a wall steepens it, a rock band makes a cliff'
   assert.ok(surf.rock[hf.idx(Math.round((0 + hf.halfX) / hf.cell), Math.round((z0 + 5 + hf.halfZ) / hf.cell))] > 128, 'bare rock');
 });
 
-test('forest grows trees, clearings remove them, powder un-grooms a piste', () => {
+test('forest grows trees, clearings remove them, powder makes deep snow', () => {
   const { hf, surf, base } = fresh('small', 'medium', 5);
-  const pistes = [{ id: 1, pts: [P(hf, 0, 30), P(hf, 0, 650)], from: null, to: null }];
   const t = tileAt(hf, -200, 300);
   const forest = [];
   for (let di = 0; di < 4; di++) for (let dj = 0; dj < 4; dj++) forest.push({ k: 'forest', i: t.i + di, j: t.j + dj });
-  const before = buildWorld(hf, surf, base, { pistes }).props.filter((p) => p.k === TREE).length;
-  const withForest = buildWorld(hf, surf, base, { pistes, pieces: forest }).props.filter((p) => p.k === TREE).length;
+  const before = buildWorld(hf, surf, base, {}).props.filter((p) => p.k === TREE).length;
+  const withForest = buildWorld(hf, surf, base, { pieces: forest }).props.filter((p) => p.k === TREE).length;
   assert.ok(withForest > before + 20, `forest adds trees (${withForest - before} on 40 × 40 m)`);
   // a clearing over the natural woods
   const wood = base.forest.filter((p) => p.k === TREE);
   const spot = wood[Math.floor(wood.length / 2)];
   const ct = tileAt(hf, spot.x, spot.u);
   const clearing = brushTiles(ct.i, ct.j, 3).map(([i, j]) => ({ k: 'clearing', i, j }));
-  const cleared = buildWorld(hf, surf, base, { pistes, pieces: clearing }).props;
+  const cleared = buildWorld(hf, surf, base, { pieces: clearing }).props;
   const near = (list) => list.filter((p) => p.k === TREE && Math.abs(p.x - spot.x) < 8 && Math.abs(p.u - spot.u) < 8).length;
   assert.ok(near(cleared) < near(base.forest), 'clearing');
-  // powder on the piste
+  // the snow is packed everywhere, powder where you paint it
   const pt = tileAt(hf, 0, 300);
-  buildWorld(hf, surf, base, { pistes, pieces: brushTiles(pt.i, pt.j, 3).map(([i, j]) => ({ k: 'powder', i, j })) });
-  assert.ok(surf.at(0, hf.startZ + 305).powder > 0.8, 'powder on the piste');
-  assert.ok(surf.at(0, hf.startZ + 200).g > 0.95, 'groomed elsewhere');
+  buildWorld(hf, surf, base, { pieces: brushTiles(pt.i, pt.j, 3).map(([i, j]) => ({ k: 'powder', i, j })) });
+  assert.ok(surf.at(0, hf.startZ + 305).powder > 0.8, 'powder');
+  const packed = surf.at(60, hf.startZ + 200);
+  assert.ok(packed.powder < 0.01 && packed.groomed < 0.01, 'packed snow elsewhere');
+});
+
+test('the start gate goes anywhere, faces down the fall line, and nothing grows on it', () => {
+  const { hf, surf, base } = fresh('small', 'medium', 5);
+  // in the middle of the woods
+  const wood = base.forest.filter((p) => p.k === TREE && p.u > 200);
+  const spot = wood[Math.floor(wood.length / 2)];
+  const start = { x: spot.x, z: hf.startZ + spot.u };
+  const w = buildWorld(hf, surf, base, { start });
+  const close = w.props.filter((p) => Math.hypot(p.x - start.x, hf.startZ + p.u - start.z) < GATE_CLEAR - 0.5);
+  assert.equal(close.length, 0, 'clear around the gate');
+  const [dx, dz] = fallLine(hf, start.x, start.z);
+  const drop = hf.heightAt(start.x, start.z) - hf.heightAt(start.x + dx * 8, start.z + dz * 8);
+  assert.ok(drop > 0.5, `downhill (${drop.toFixed(2)} m over 8 m)`);
+  const d = defaultStart(hf, base);
+  assert.ok(d.z < hf.startZ + 60, 'the default start is near the top');
 });
 
 test('rebuilding the mountain is fast enough to preview while dragging', () => {
   const { hf, surf, base } = fresh('medium', 'medium', 8);
-  const pistes = [{ id: 1, pts: [P(hf, 0, 30), P(hf, 60, 300), P(hf, -60, 700), P(hf, 0, 1050)], from: null, to: null }];
   const t = tileAt(hf, 0, 500);
   const pieces = brushTiles(t.i, t.j, 3).map(([i, j]) => ({ k: 'bump', i, j }));
-  buildWorld(hf, surf, base, { pistes, pieces });
+  const start = { x: 0, z: hf.startZ + 30 };
+  buildWorld(hf, surf, base, { pieces, start });
   const t0 = performance.now();
-  for (let i = 0; i < 4; i++) buildWorld(hf, surf, base, { pistes, pieces });
+  for (let i = 0; i < 4; i++) buildWorld(hf, surf, base, { pieces, start });
   const ms = (performance.now() - t0) / 4;
   assert.ok(ms < 80, `${ms.toFixed(1)} ms per rebuild`);
-  assert.ok(gridCols(hf) === 72 && gridRows(hf) > 100);
+  assert.ok(gridCols(hf) === 68 && gridRows(hf) > 100, `${gridCols(hf)} × ${gridRows(hf)} tiles`);
 });
 
 // ---------- riding it ----------
 
-test('a skier sent down a piste rides it to the finish line', () => {
+test('a skier sent from the gate rides to the bottom of the mountain', () => {
   const { hf, surf, base } = fresh('small', 'medium', 5);
-  const pistes = [{ id: 1, pts: [P(hf, 0, 25), P(hf, 0, 250), P(hf, 0, 450), P(hf, 0, 620)], from: null, to: null }];
-  const w = buildWorld(hf, surf, base, { pistes });
+  const start = { x: 0, z: hf.startZ + 25 };
+  const w = buildWorld(hf, surf, base, { start });
   const props = new PropSet(hf);
   props.set(w.props);
-  const sk = new Skier(hf, w.ends.start);
+  const sk = new Skier(hf, { ...start, dir: fallLine(hf, start.x, start.z) });
   sk.props = props;
   sk.surface = surf;
-  sk.finishes = w.ends.finishes;
-  for (let t = 0; t < 120 && sk.status === 'running'; t += 1 / 60) sk.update(1 / 60);
+  // hands off, but tuck so the trees don't get a wipeout every few seconds
+  for (let t = 0; t < 240 && sk.status === 'running'; t += 1 / 60) sk.update(1 / 60);
   assert.equal(sk.status, 'finished');
-  const f = w.ends.finishes[0];
-  assert.ok(Math.abs(sk.pos[2] - f.z) < 15, 'at the finish line, not the bottom of the mountain');
-  assert.equal(sk.wipeouts, 0, 'no trees on the piste to hit');
+  assert.ok(sk.pos[2] >= hf.finishZ - 1, 'at the bottom');
 });
 
-test('the start sends the skier down the piste, not straight down the fall line', () => {
-  const { hf, surf, base } = fresh('small', 'gentle', 5);
-  const pistes = [{ id: 1, pts: [P(hf, -80, 40), P(hf, 40, 120), P(hf, 120, 260)], from: null, to: null }];
-  const w = buildWorld(hf, surf, base, { pistes });
-  assert.ok(w.ends.start.dir[0] > 0.5, 'heading across the slope, to the right');
-  const sk = new Skier(hf, w.ends.start);
+test('a paused run picks up where it was, on the snow as it is now', () => {
+  const { hf, surf, base } = fresh('small', 'medium', 5);
+  const start = { x: 0, z: hf.startZ + 25 };
+  buildWorld(hf, surf, base, { start });
+  const sk = new Skier(hf, { ...start, dir: fallLine(hf, start.x, start.z) });
   sk.surface = surf;
-  assert.ok(sk.vel[0] > 5, 'pushed off along the piste');
+  for (let k = 0; k < 240 * 6; k++) sk.step(1 / 240);
+  const v = sk.speed;
+  const pos = [...sk.pos];
+  // build a bump right under him while paused
+  const t = tileOf(hf, pos[0], pos[2]);
+  buildWorld(hf, surf, base, { start, pieces: brushTiles(t.i, t.j, 3).map(([i, j]) => ({ k: 'bump', i, j })) });
+  sk.resume();
+  assert.ok(Math.abs(sk.pos[1] - hf.heightAt(sk.pos[0], sk.pos[2])) < 1e-6, 'back on the snow');
+  assert.ok(Math.abs(sk.speed - v) < v * 0.25, `same speed (${sk.speed.toFixed(1)} vs ${v.toFixed(1)})`);
+  assert.ok(Math.hypot(sk.pos[0] - pos[0], sk.pos[2] - pos[2]) < 1e-6, 'same place');
+  for (let k = 0; k < 240; k++) sk.step(1 / 240);
+  assert.equal(sk.status, 'running');
+});
+
+// ---------- the feel of the skis ----------
+
+const plane = (deg) => {
+  const hf = new Heightfield(600, 2400, 1.5);
+  hf.fill((x, z) => 1200 - Math.tan((deg * Math.PI) / 180) * z);
+  return hf;
+};
+const moving = (hf, v, deg) => {
+  const s = new Skier(hf, { x: 0, z: hf.startZ + 200, dir: [0, 1] });
+  const a = (deg * Math.PI) / 180;
+  s.vel = [0, -v * Math.sin(a), v * Math.cos(a)];
+  s.heading = s.vel.map((c) => c / v);
+  return s;
+};
+const turn90 = (s, stick) => {
+  let turned = 0;
+  let prev = Math.atan2(s.vel[0], s.vel[2]);
+  let t = 0;
+  while (t < 8 && Math.abs(turned) < Math.PI / 2) {
+    s.input.steer = stick;
+    s.step(1 / 240);
+    t += 1 / 240;
+    const a = Math.atan2(s.vel[0], s.vel[2]);
+    turned += a - prev;
+    prev = a;
+  }
+  return { t, R: s.distance / Math.abs(turned) };
+};
+
+test('a carve holds its speed and tightens as you slow down; full stick skids it round and scrubs speed', () => {
+  const hf = plane(22);
+  const slow = turn90(moving(hf, 8, 22), 0.85);
+  const fast = turn90(moving(hf, 22, 22), 0.85);
+  assert.ok(slow.R < 12, `tight at 29 km/h (${slow.R.toFixed(1)} m)`);
+  assert.ok(fast.R > slow.R * 2.5, `longer arcs at 79 km/h (${fast.R.toFixed(1)} m)`);
+  const carve = moving(hf, 15, 22);
+  turn90(carve, 0.85);
+  const skid = moving(hf, 15, 22);
+  const sk = turn90(skid, 1);
+  assert.ok(carve.speed > 15, `the carve keeps its speed (${(carve.speed * 3.6).toFixed(0)} km/h)`);
+  assert.ok(skid.speed < carve.speed * 0.7, `the skid scrubs it (${(skid.speed * 3.6).toFixed(0)} km/h)`);
+  assert.ok(sk.R < turn90(moving(hf, 15, 22), 0.85).R, 'and turns tighter');
+});
+
+test('a hockey stop stops you in a few seconds, and the edges hold you still across the slope', () => {
+  const hf = plane(22);
+  const s = moving(hf, 14, 22);
+  let t = 0;
+  while (t < 6 && s.speed > 0.3) {
+    s.input.brake = true;
+    s.step(1 / 240);
+    t += 1 / 240;
+  }
+  assert.ok(t < 4, `stopped from 50 km/h in ${t.toFixed(2)} s`);
+  for (let k = 0; k < 240 * 2; k++) s.step(1 / 240);
+  assert.ok(s.speed < 0.5, `still standing (${s.speed.toFixed(2)} m/s)`);
+});
+
+test('powder is slower than packed snow, and poling gets you going on the flat', () => {
+  const hf = plane(20);
+  const surf = new SurfaceMap(hf);
+  const deep = new SurfaceMap(hf);
+  deep.pow.fill(255);
+  const a = new Skier(hf, { x: 0, z: hf.startZ + 50, dir: [0, 1] });
+  a.surface = surf;
+  const b = new Skier(hf, { x: 0, z: hf.startZ + 50, dir: [0, 1] });
+  b.surface = deep;
+  for (let k = 0; k < 240 * 15; k++) {
+    a.step(1 / 240);
+    b.step(1 / 240);
+  }
+  assert.ok(b.speed < a.speed * 0.8, `powder ${(b.speed * 3.6).toFixed(0)} vs packed ${(a.speed * 3.6).toFixed(0)} km/h`);
+  const flat = new Heightfield(300, 300, 1.5);
+  flat.h.fill(10);
+  const c = new Skier(flat, { x: 0, z: 0, dir: [0, 1] });
+  c.input.pitch = 1;
+  for (let k = 0; k < 240 * 4; k++) c.step(1 / 240);
+  assert.equal(c.status, 'running');
+  assert.ok(c.speed > 3, `poling (${c.speed.toFixed(1)} m/s)`);
+});
+
+test('the body leans into a carve, along the push of the snow', () => {
+  const hf = plane(18);
+  const s = moving(hf, 15, 18);
+  for (let k = 0; k < 240 * 1.2; k++) {
+    s.input.steer = 0.85;
+    s.step(1 / 240);
+  }
+  // turning right (towards -x when heading down +z): the body leans that way
+  const lean = Math.acos(Math.min(1, s.tilt[0] * s.n[0] + s.tilt[1] * s.n[1] + s.tilt[2] * s.n[2]));
+  assert.ok(lean > 0.5, `leaning ${((lean * 180) / Math.PI).toFixed(0)}°`);
+  assert.ok(s.tilt[0] < s.n[0], 'into the turn');
 });

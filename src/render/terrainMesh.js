@@ -72,9 +72,10 @@ const frag = /* glsl */ `
   uniform float uCell;
   uniform vec3 uIceLit;
   uniform vec3 uIceShadow;
-  // the build grid: per tile R = ghost (1 fits, ~0.5 doesn't), G = a piece is here, B = erase
+  // the build grid of hexagons (see core/hex.js): per tile R = ghost (1 fits, ~0.5 doesn't),
+  // G = a piece is here, B = erase
   uniform sampler2D uTiles;
-  uniform vec4 uTileInfo; // x of the left edge, z of the start line, tile size, rows
+  uniform vec4 uTileInfo; // x of the left edge, z of the start line, hexagon radius, rows
   uniform float uTileCols;
   uniform float uTileOn;
   uniform vec3 uGhost;
@@ -95,6 +96,30 @@ const frag = /* glsl */ `
   }
   varying vec3 vWorld;
   varying vec3 vNormal;
+
+  // The hexagon under grid point p (metres from the left edge and the top line), radius R:
+  // xy = its column and row, z = how far p is inside it from the nearest side (0 on a side)
+  vec3 hexTile(vec2 p, float R) {
+    float W = 1.7320508 * R;
+    vec2 c = p - vec2(0.5 * W, R);
+    float q = (0.57735027 * c.x - c.y / 3.0) / R;
+    float r = (0.66666667 * c.y) / R;
+    float s = -q - r;
+    float rq = floor(q + 0.5);
+    float rr = floor(r + 0.5);
+    float rs = floor(s + 0.5);
+    float dq = abs(rq - q);
+    float dr = abs(rr - r);
+    float ds = abs(rs - s);
+    if (dq > dr && dq > ds) rq = -rr - rs;
+    else if (dr > ds) rr = -rq - rs;
+    float oddRow = mod(rr, 2.0);
+    float col = rq + (rr - oddRow) * 0.5;
+    vec2 centre = vec2(W * (col + 0.5 + 0.5 * oddRow), R + 1.5 * R * rr);
+    vec2 l = p - centre;
+    float side = max(abs(l.x), max(abs(0.5 * l.x + 0.8660254 * l.y), abs(0.5 * l.x - 0.8660254 * l.y)));
+    return vec3(col, rr, 0.5 * W - side);
+  }
 
   // diverging ramp for local relief: hollows cool blue, flat pale, crests warm orange
   vec3 reliefRamp(float k) {
@@ -156,14 +181,14 @@ const frag = /* glsl */ `
     vec3 rock = level < 1.0 ? mix(uRockShadow, uRockMid, level) : mix(uRockMid, uRockLit, level - 1.0);
     // what the snow is like: groomed piste, untouched powder, ice, or bare rock
     vec2 suv = ((vWorld.xz + uHalf) / uCell + 0.5) / uSurfSize;
-    vec3 sf = texture2D(uSurf, suv).rgb;
+    vec4 sf = texture2D(uSurf, suv);
     float groomed = sf.r;
     float ice = sf.g;
     // rock: cliffs and rock bands (where the snow can't hold: their flat tops stay white),
     // and any face steeper than about 71 degrees; a clean cut with a thin ink line
     float aas = fwidth(slope) + 0.002;
     float rockAmt = max(smoothstep(0.68 - aas, 0.68 + aas, slope), smoothstep(0.45, 0.6, sf.b * smoothstep(0.05, 0.16, slope)));
-    float powder = max(0.0, 1.0 - groomed - ice);
+    float powder = sf.a;
     float camDist = length(cameraPosition - vWorld);
     if (uRelief < 0.5) {
       // fresh powder is a touch brighter and softer
@@ -267,17 +292,18 @@ const frag = /* glsl */ `
 
     // building: the grid on the snow, the ghost of the piece under the finger
     if (uTileOn > 0.5) {
-      vec2 tc = vec2((vWorld.x - uTileInfo.x) / uTileInfo.z, (vWorld.z - uTileInfo.y) / uTileInfo.z);
-      if (tc.x >= 0.0 && tc.y >= 0.0 && tc.x < uTileCols && tc.y < uTileInfo.w) {
-        vec4 tv = texture2D(uTiles, (floor(tc) + 0.5) / vec2(uTileCols, uTileInfo.w));
-        vec2 fw = fwidth(tc);
-        vec2 dl = abs(fract(tc + 0.5) - 0.5) / max(fw, vec2(1e-4));
-        float line = 1.0 - smoothstep(0.6, 1.6, min(dl.x, dl.y));
-        float gridFade = (1.0 - smoothstep(260.0, 620.0, dist)) * (1.0 - smoothstep(0.25, 0.6, max(fw.x, fw.y)));
-        col = mix(col, uInk, line * 0.2 * gridFade);
-        // distance to this tile's own edge, for outlines
-        vec2 fe = min(fract(tc), 1.0 - fract(tc)) / max(fw, vec2(1e-4));
-        float edge = 1.0 - smoothstep(1.5, 3.5, min(fe.x, fe.y));
+      vec3 hx = hexTile(vec2(vWorld.x - uTileInfo.x, vWorld.z - uTileInfo.y), uTileInfo.z);
+      // the side distance in pixels: thin even lines at any distance, fading out where the
+      // tiles get too small on screen to read (derivatives before any branch)
+      float fw = max(fwidth(vWorld.x), fwidth(vWorld.z));
+      float px = hx.z / max(fwidth(hx.z), 1e-4);
+      if (hx.x >= 0.0 && hx.y >= 0.0 && hx.x < uTileCols && hx.y < uTileInfo.w) {
+        vec4 tv = texture2D(uTiles, (hx.xy + 0.5) / vec2(uTileCols, uTileInfo.w));
+        float line = 1.0 - smoothstep(0.5, 1.5, px);
+        float gridFade = (1.0 - smoothstep(260.0, 620.0, dist)) * (1.0 - smoothstep(0.25, 0.6, fw / (1.7320508 * uTileInfo.z)));
+        col = mix(col, uInk, line * 0.22 * gridFade);
+        // close to this tile's own sides, for outlines
+        float edge = 1.0 - smoothstep(1.5, 3.5, px);
         // placed pieces: tinted in their category's colour, so you can see what is where
         int ci = int(tv.a * 255.0 + 0.5);
         vec3 cc = uCatCol[0];
@@ -442,7 +468,7 @@ export class TerrainMesh {
       uIceLit: { value: c('#eef4ff') },
       uIceShadow: { value: c('#9fb6f0') },
       uTiles: { value: null },
-      uTileInfo: { value: new THREE.Vector4(-240, hf.startZ, 10, 1) },
+      uTileInfo: { value: new THREE.Vector4(-240, hf.startZ, 6, 1) },
       uTileCols: { value: 1 },
       uTileOn: { value: 0 },
       uGhost: { value: c('#4f7be8') },
@@ -560,6 +586,7 @@ export class TerrainMesh {
         d[i * 4] = sf.g[i];
         d[i * 4 + 1] = sf.ice[i];
         d[i * 4 + 2] = sf.rock ? sf.rock[i] : 0;
+        d[i * 4 + 3] = sf.pow ? sf.pow[i] : 0;
       }
     } else {
       for (let i = 0; i < d.length; i += 4) d[i] = 255; // no map: groomed everywhere
@@ -670,11 +697,12 @@ export class TerrainMesh {
     }
     this.localDirty = true;
     this.version = (this.version || 0) + 1;
-    // upload only the touched rows: a full-mesh upload every frame stutters on phones
+    // upload only the touched rows: a full-mesh upload every frame stutters on phones. The
+    // ranges pile up until the next frame uploads (and clears) them, so two updates between
+    // frames both reach the GPU
     const start = j0 * res * 3;
     const count = (j1 - j0 + 1) * res * 3;
     for (const attr of [this.geo.attributes.position, this.geo.attributes.normal]) {
-      attr.clearUpdateRanges();
       attr.addUpdateRange(start, count);
       attr.needsUpdate = true;
     }

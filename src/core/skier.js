@@ -13,6 +13,11 @@ import { propRadius, propHeight, TREE } from './props.js';
 // Landing is judged on impact, how far the skis point from the direction of travel and
 // how far from upright he is: clean, sketchy (lose speed) or a wipeout (tumble, lose the
 // combo, get back up and keep going).
+//
+// Snow: the surface map says where the piste is groomed (fast, grippy), where it's deep
+// powder (slower, the skis sink and plough, softer landings) and where it's ice (slick,
+// little grip). Rails and boxes: ride onto one lined up with it and he locks on and grinds
+// to the end (steer to turn the skis across it for a slide, release Jump to pop off).
 
 export const PHYS = {
   g: 9.81,
@@ -58,6 +63,18 @@ export const PHYS = {
   assistPitch: 1.5,
   wipeoutTime: 1.6,
   hitWipeout: 11, // m/s straight into a tree or rock that knocks you down; less is a glancing bump
+  // snow
+  muPowder: 0.06, // friction in deep powder
+  muIce: 0.016,
+  powderDrag: 0.0042, // extra drag from ploughing through powder (1/m)
+  powderGrip: 0.65, // grip multiplier in powder (softer turns)
+  iceGrip: 0.35, // ... and on ice (skids)
+  powderSoak: 4, // m/s of extra landing tolerance in powder
+  // rails and boxes
+  railMu: 0.05,
+  boxMu: 0.07,
+  railSpin: 4.5, // rad/s the skis turn on a rail while steering
+  grindCooldown: 0.3, // s before he can lock onto a rail again after leaving one
 };
 
 export class Skier {
@@ -100,6 +117,18 @@ export class Skier {
     this.pitchVel = 0;
     this.flipTotal = 0; // accumulated pitch this jump (signed)
     this.props = null; // PropSet of trees and rocks to collide with
+    this.structures = null; // StructureSet: rails, buildings, nets, gates...
+    this.surface = null; // SurfaceMap: groomed / powder / ice (null: groomed everywhere)
+    this._surf = { g: 1, ice: 0, powder: 0 };
+    this.powder = 0; // 0..1 under the skis right now
+    this.ice = 0;
+    this.sink = 0; // metres the skis sink into powder (for drawing)
+    this.grind = null; // { rail, s, va, time, dist, slideTime, entry }
+    this.grindCooldown = 0;
+    this.grinds = 0;
+    this.gatesPassed = 0;
+    this._gates = new Set();
+    this._crossed = [];
     this.events = []; // { type: 'pop' | 'land' | 'wipeout' | 'recover', t, ... }
     this.path = [[...this.pos]];
     this._pathTimer = 0;
@@ -159,6 +188,20 @@ export class Skier {
     const speed0 = Math.hypot(vel[0], vel[1], vel[2]);
     const out = this.wipeout > 0;
     const inp = out ? NO_INPUT : this.input;
+    if (this.surface) {
+      const sf = this.surface.at(pos[0], pos[2], this._surf);
+      this.powder = sf.powder;
+      this.ice = sf.ice;
+    }
+    if (this.grindCooldown > 0) this.grindCooldown -= dt;
+    if (this.grind) {
+      const gx = pos[0];
+      const gy = pos[1];
+      const gz = pos[2];
+      this.stepGrind(dt, inp);
+      this.after(dt, gx, gy, gz, false, inp);
+      return;
+    }
 
     // derived controls
     const tuck = inp.tuck || inp.crouch || (this.grounded && inp.pitch > 0.4);
@@ -178,7 +221,8 @@ export class Skier {
     // forces
     vel[1] -= P.g * dt;
     const dragMul = braking ? 1 + (P.brakeDrag - 1) * brakeAmt : tuck ? P.tuckDrag : 1;
-    const dragK = P.drag * dragMul * speed0 * dt;
+    const plough = this.grounded ? P.powderDrag * this.powder : 0;
+    const dragK = (P.drag * dragMul + plough) * speed0 * dt;
     vel[0] -= vel[0] * dragK;
     vel[1] -= vel[1] * dragK;
     vel[2] -= vel[2] * dragK;
@@ -193,7 +237,9 @@ export class Skier {
       vt[2] -= vnn * n[2];
       const vtl = Math.hypot(vt[0], vt[1], vt[2]);
       if (vtl > 1e-6) {
-        const mu = out ? 0.45 : P.mu * (1 + (P.brakeFriction - 1) * brakeAmt);
+        let base = P.mu + (P.muPowder - P.mu) * this.powder;
+        base += (P.muIce - base) * this.ice;
+        const mu = out ? 0.45 : base * (1 + (P.brakeFriction - 1) * brakeAmt);
         const dv = Math.min(vtl, mu * P.g * Math.max(0, n[1]) * dt);
         vel[0] -= (vt[0] / vtl) * dv;
         vel[1] -= (vt[1] / vtl) * dv;
@@ -241,7 +287,33 @@ export class Skier {
     }
 
     if (this.props && this.wipeout <= 0) this.collide();
+    if (this.structures && this.wipeout <= 0) {
+      if (this.grindCooldown <= 0) {
+        const hit = this.structures.findRail(this);
+        if (hit) this.startGrind(hit);
+      }
+      if (!this.grind) this.structures.collide(this);
+    }
 
+    // how deep the skis ride in powder: deeper when slow
+    const sinkTo = this.grounded ? this.powder * (0.42 - 0.24 * Math.min(1, this.speed / 25)) : 0;
+    this.sink += (sinkTo - this.sink) * Math.min(1, dt * 6);
+
+    this.after(dt, ox, oy, oz, braking, inp);
+  }
+
+  // Bookkeeping shared by snow and rail steps: wipeout timer, gates, time, path, edges, end
+  after(dt, ox, oy, oz, braking, inp = this.input) {
+    const { P, hf, pos, vel } = this;
+    if (this.structures) {
+      this._crossed.length = 0;
+      for (const g of this.structures.gatesCrossed(this, this._crossed)) {
+        if (this._gates.has(g)) continue;
+        this._gates.add(g);
+        this.gatesPassed++;
+        this.events.push({ type: 'gate', t: this.time, order: g.order, total: this.structures.gates.length, count: this.gatesPassed });
+      }
+    }
     // tumbling: count down, then get back up facing down the hill
     if (this.wipeout > 0) {
       this.wipeout -= dt;
@@ -281,7 +353,7 @@ export class Skier {
       this.status = 'finished';
     } else if (this.time > P.maxTime) {
       this.status = 'timeout';
-    } else if (this.grounded && speed < P.stuckSpeed && !braking && this.wipeout <= 0 && !inp.crouch) {
+    } else if (this.grounded && !this.grind && speed < P.stuckSpeed && !braking && this.wipeout <= 0 && !inp.crouch) {
       this.slowTime += dt;
       if (this.slowTime > P.stuckTime) this.status = 'stuck';
     } else {
@@ -335,6 +407,93 @@ export class Skier {
       vel[2] *= k;
       if (approach > 2) this.events.push({ type: 'bump', t: this.time, value: approach, what });
     }
+  }
+
+  // ---------- rails and boxes ----------
+
+  startGrind({ rail: r, s }) {
+    const { vel, pos } = this;
+    const va = vel[0] * r.tx + vel[1] * r.ty + vel[2] * r.tz;
+    this.grind = { rail: r, s, va, time: 0, dist: 0, slideTime: 0, air: !this.grounded };
+    this.grounded = false;
+    this.curAir = 0;
+    this.sinceGround = 0;
+    this.spinVel = 0;
+    this.pitch = 0;
+    this.pitchVel = 0;
+    this.placeOnRail();
+    this.events.push({ type: 'grindStart', t: this.time, box: r.box });
+  }
+
+  placeOnRail() {
+    const g = this.grind;
+    const r = g.rail;
+    this.pos[0] = r.x0 + r.tx * g.s;
+    this.pos[1] = r.y0 + r.ty * g.s;
+    this.pos[2] = r.z0 + r.tz * g.s;
+    this.vel[0] = r.tx * g.va;
+    this.vel[1] = r.ty * g.va;
+    this.vel[2] = r.tz * g.va;
+  }
+
+  // Skis across the rail: 0 lined up .. π/2 square across it (switch counts as lined up)
+  railAngle() {
+    const r = this.grind.rail;
+    const h = this.heading;
+    const hl = Math.hypot(h[0], h[2]) || 1;
+    const tl = Math.hypot(r.tx, r.tz) || 1;
+    const c = Math.abs((h[0] * r.tx + h[2] * r.tz) / (hl * tl));
+    return Math.acos(Math.min(1, c));
+  }
+
+  stepGrind(dt, inp) {
+    const { P } = this;
+    const g = this.grind;
+    const r = g.rail;
+    if (inp.crouch) this.crouchTime += dt;
+    const release = this._wasCrouching && !inp.crouch;
+    this._wasCrouching = inp.crouch;
+    // gravity along the rail, a little metal friction, air drag
+    g.va += -P.g * r.ty * dt;
+    const fr = (r.box ? P.boxMu : P.railMu) * P.g * Math.sqrt(Math.max(0, 1 - r.ty * r.ty)) * dt;
+    g.va = g.va > 0 ? Math.max(0, g.va - fr) : Math.min(0, g.va + fr);
+    g.va -= g.va * Math.abs(g.va) * P.drag * dt;
+    g.s += g.va * dt;
+    g.time += dt;
+    g.dist += Math.abs(g.va) * dt;
+    // steering turns the skis on the rail: across it is a slide
+    if (Math.abs(inp.steer) > 0.05) rotateAround(this.heading, UP, -inp.steer * P.railSpin * dt);
+    this.heading[1] = 0;
+    normalizeInPlace(this.heading);
+    if (this.railAngle() > 0.9) g.slideTime += dt;
+    this.n[0] = 0;
+    this.n[1] = 1;
+    this.n[2] = 0;
+    this.placeOnRail();
+    if (release && !this.crouchSpent && this.wipeout <= 0) {
+      const charge = Math.min(1, this.crouchTime / P.chargeTime);
+      this.leaveGrind();
+      this.pop(charge);
+    } else if (g.s >= r.len || g.s <= 0 || Math.abs(g.va) < 0.4) {
+      this.leaveGrind();
+    }
+    if (!inp.crouch) {
+      this.crouchTime = 0;
+      this.crouchSpent = false;
+    }
+  }
+
+  leaveGrind() {
+    const g = this.grind;
+    if (!g) return;
+    this.grind = null;
+    this.grindCooldown = this.P.grindCooldown;
+    this.takeOff();
+    if (g.dist < 1.5) return;
+    this.grinds++;
+    const r = g.rail;
+    const sw = this.heading[0] * r.tx + this.heading[2] * r.tz < 0;
+    this.events.push({ type: 'grind', t: this.time, dist: g.dist, time: g.time, slide: g.slideTime > g.time * 0.5, box: r.box, switch: sw });
   }
 
   pop(charge) {
@@ -425,7 +584,7 @@ export class Skier {
     pos[1] = ground;
     const impact = -dot(vel, n);
     // bending the knees into the landing soaks up some of the hit
-    const soak = this.input.crouch && this.wipeout <= 0 ? P.absorb : 0;
+    const soak = (this.input.crouch && this.wipeout <= 0 ? P.absorb : 0) + P.powderSoak * this.powder;
     const vn = dot(vel, n);
     vel[0] -= vn * n[0];
     vel[1] -= vn * n[1];
@@ -553,7 +712,8 @@ export class Skier {
     const sgn = c < 0 ? -1 : 1;
     c = Math.abs(c);
     const sinA = Math.sqrt(Math.max(0, 1 - c * c));
-    const grip = brakeAmt > 0.05 ? 1.5 : P.grip + (P.carveGrip - P.grip) * Math.min(1, Math.abs(steer) * 1.5);
+    let grip = brakeAmt > 0.05 ? 1.5 : P.grip + (P.carveGrip - P.grip) * Math.min(1, Math.abs(steer) * 1.5);
+    grip *= 1 + (P.powderGrip - 1) * this.powder + (P.iceGrip - 1) * this.ice;
     const f = Math.min(1, grip * dt);
     const nd = [vd[0] + (sgn * h[0] - vd[0]) * f, vd[1] + (sgn * h[1] - vd[1]) * f, vd[2] + (sgn * h[2] - vd[2]) * f];
     normalizeInPlace(nd);

@@ -20,6 +20,19 @@ export function speedRate(kmh) {
   return kmh < SPEED_BONUS_KMH ? 0 : 40 + (kmh - SPEED_BONUS_KMH) * 3; // points per second
 }
 
+// Rails and boxes: points for the distance ground, more for a slide (skis across), a
+// little more on a rail than a box, and switch.
+export const GATE_POINTS = 150;
+export function judgeGrind(ev) {
+  const what = ev.box ? 'Box' : 'Rail';
+  const move = ev.slide ? 'Slide' : '50-50';
+  let points = 120 + ev.dist * (ev.box ? 45 : 60);
+  if (ev.slide) points *= 1.5;
+  if (ev.switch) points *= 1.2;
+  const name = `${ev.switch ? 'Switch ' : ''}${what} ${move}`;
+  return { name, points: Math.round(points / 10) * 10, quality: 'clean', note: `${ev.dist.toFixed(1)} m`, isTrick: true };
+}
+
 export function spinPoints(deg) {
   if (!deg) return 0;
   return SPIN_POINTS[deg] ?? 2800 + ((deg - 1080) / 180) * 800;
@@ -127,8 +140,14 @@ export class ScoreKeeper {
   }
 
   onEvent(ev) {
-    if (ev.type === 'land') {
-      const trick = judgeLanding(ev);
+    if (ev.type === 'gate') {
+      this.total += GATE_POINTS;
+      this.gatePoints = (this.gatePoints || 0) + GATE_POINTS;
+      this.feed.push({ kind: 'gate', text: `Gate ${ev.count}/${ev.total}`, sub: '', points: GATE_POINTS });
+      return;
+    }
+    if (ev.type === 'land' || ev.type === 'grind') {
+      const trick = ev.type === 'grind' ? judgeGrind(ev) : judgeLanding(ev);
       if (!trick) return;
       this.tricks.push(trick);
       if (!this.bestTrick || trick.points > this.bestTrick.points) this.bestTrick = trick;
@@ -188,4 +207,8 @@ const WIPEOUT_HINT = {
   edge: 'Off the side of the piste',
   tree: 'Straight into a tree: steer around them',
   rock: 'Hit a rock: jump it or go around',
+  wall: 'Hit a building: ride around it',
+  pylon: 'Hit a lift pylon: steer around it',
+  cannon: 'Hit a snow cannon: steer around it',
+  tunnel: 'Hit the tunnel: ride in through the opening',
 };

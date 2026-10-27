@@ -15,7 +15,8 @@ export const STAMPS = {
 export const DEFAULT_LENGTH = { kicker: 22, table: 46, berm: 60, rollers: 70 };
 
 // Height profile of each stamp at (along, across). L = length, W = width, H = height.
-function profile(kind, along, across, L, W, H) {
+// Shared with the run editor's elements (elements.js).
+export function stampShape(kind, along, across, L, W, H) {
   const ax = Math.abs(across);
   switch (kind) {
     case 'kicker': {
@@ -120,7 +121,7 @@ export function applyStamp(hf, base, kind, ax, az, bx, bz, size, strength) {
       const along = rx * dx + rz * dz;
       const across = rx * px + rz * pz;
       const k = j * hf.nx + i;
-      const v = base[k] + profile(kind, along, across, L, W, H);
+      const v = base[k] + stampShape(kind, along, across, L, W, H);
       hf.h[k] = v < MIN_H ? MIN_H : v > MAX_H ? MAX_H : v;
     }
   }

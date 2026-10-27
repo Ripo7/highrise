@@ -351,6 +351,16 @@ export class StructureSet {
     return null;
   }
 
+  // the tunnel the point (x, z) is in, or about to enter (for the ride camera)
+  tunnelAt(x, z, ahead = 0) {
+    for (const t of this.tunnels) {
+      const la = (x - t.x) * t.dx + (z - t.z) * t.dz;
+      const lb = (x - t.x) * t.dz - (z - t.z) * t.dx;
+      if (la > -ahead && la < t.L + 2 && Math.abs(lb) < t.hw + 0.5) return t;
+    }
+    return null;
+  }
+
   /** Slalom gates passed between the previous position and this one. */
   gatesCrossed(sk, out = []) {
     const items = this.near(sk.pos[0], sk.pos[2]);

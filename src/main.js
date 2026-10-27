@@ -692,7 +692,12 @@ function applyRun(run, keepSculpt) {
   rebuildTerrain();
   propMeshes.rebuild();
   structMeshes.rebuild();
-  tracks.redrape();
+  // a brand new run starts on fresh snow; an edited one keeps its tracks
+  if (keepSculpt) tracks.redrape();
+  else {
+    tracks.clear();
+    saveTracks();
+  }
   placeGate();
   skier = null;
   skierMesh.visible = false;
@@ -1060,7 +1065,12 @@ function updateRideCamera(dt) {
   }
   const ground = hf.heightAt(_want.x, _want.z);
   if (_want.y < ground + 1.5) _want.y = ground + 1.5;
-  if (state.rideCam === 'chase') {
+  // in (or just before) a snow tunnel: stay low enough to see through it
+  const tun = structs.tunnels.length ? structs.tunnelAt(x, z, 14) : null;
+  if (tun) {
+    _want.y = Math.min(_want.y, ground + tun.ht * 0.62);
+    _look.y = Math.min(_look.y, hf.heightAt(_look.x, _look.z) + tun.ht * 0.45);
+  } else if (state.rideCam === 'chase') {
     for (let tries = 0; tries < 8 && !lineOfSight(_want, _p); tries++) _want.y += 2;
   }
   if (rig.snap) {

@@ -21,7 +21,7 @@ jobs:
         run: npm run build
       - name: Install Chromium for the smoke test
         run: npx playwright install --with-deps chromium
-      - name: Browser smoke test (draw a run, build a kicker, ride it)
+      - name: Browser smoke test (design a run, build a kicker, ride it)
         run: npm run smoke
       - name: Keep the smoke-test screenshots
         if: always()

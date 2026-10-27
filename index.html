@@ -26,14 +26,10 @@
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 19h20"/><path d="m3 19 5-8 4 5 3-4 6 7"/><path d="M8 11V5M12 16v-4M15 12V8"/></svg>
         <span>Relief</span><kbd>T</kbd>
       </button>
-      <button id="edit-run" class="view-toggle run-toggle" type="button" title="Edit the run: sections and elements (P)">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M3 15h18M9 3v18M15 3v18"/></svg>
-        <span>Edit run</span><kbd>P</kbd>
-      </button>
     </div>
 
     <p class="hint">
-      <span class="desktop-only">Click the snow to edit that spot · Drag to orbit · Scroll to zoom</span>
+      <span class="desktop-only">Pick a piece, then drag on the snow · Right-drag to orbit · Scroll to zoom</span>
     </p>
 
     <section class="hud panel" aria-label="Run">
@@ -58,10 +54,16 @@
       <div class="progress" aria-hidden="true"><span id="progress-fill"></span></div>
     </section>
 
-    <div id="build-kinds" class="build-kinds panel" role="radiogroup" aria-label="Feature to build" hidden></div>
-
     <footer class="dock">
-      <nav id="tools" class="tools panel" aria-label="Tools"></nav>
+      <div id="buildbar" class="buildbar panel" aria-label="Build">
+        <div class="bb-tabs" role="tablist"></div>
+        <div class="bb-strip">
+          <button type="button" class="bb-fixed bb-fixed-look" data-tool="view" title="Look around: move the camera without building (Esc)"></button>
+          <button type="button" class="bb-fixed bb-fixed-erase" data-tool="erase" title="Erase pieces (X)"></button>
+          <button type="button" id="bb-rotate" class="bb-fixed bb-rot" title="Rotate (Q)" hidden></button>
+          <div class="bb-pieces" role="listbox" aria-label="Pieces"></div>
+        </div>
+      </div>
 
       <div class="panel brush">
         <div class="slider">
@@ -72,16 +74,18 @@
           <span id="strength-label"><span id="strength-name">Strength</span> <output id="strength-out"></output></span>
           <div id="strength" class="range" aria-labelledby="strength-label" data-min="5" data-max="100" data-step="5"></div>
         </div>
+      </div>
+
+      <div class="go">
         <div id="extras" class="extras">
           <label class="check"><input id="contours" type="checkbox" /> Contours <kbd>C</kbd></label>
           <button id="mute" class="btn btn-quiet" type="button" aria-pressed="false" title="Sound (M)">Sound on</button>
           <button id="reset-view" class="btn btn-quiet" type="button" title="Reset view (R)">Reset view</button>
+          <button id="move-start" class="btn btn-quiet" type="button" title="Move the start gate (G)">Move start</button>
+          <button id="advanced" class="btn btn-quiet" type="button" aria-pressed="false" title="Hand sculpting brushes (A)">Sculpt by hand: off</button>
           <button id="fresh-snow" class="btn btn-quiet" type="button" title="Cover your ski tracks with fresh snow">Fresh snow</button>
-          <button id="reset" class="btn btn-quiet" type="button">New run</button>
+          <button id="reset" class="btn btn-quiet" type="button">New mountain</button>
         </div>
-      </div>
-
-      <div class="go">
         <div class="panel history">
           <button id="undo" class="icon-btn" type="button" aria-label="Undo" title="Undo (Ctrl+Z)">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 14 4 9l5-5"/><path d="M4 9h10a6 6 0 0 1 0 12h-3"/></svg>
@@ -102,8 +106,8 @@
     <!-- ride mode: left thumb steers (drag), right thumb jumps (hold, release) -->
     <div id="ride" class="ride" hidden>
       <div class="ride-top">
-        <button id="ride-exit" class="btn ride-btn" type="button" title="Back to sculpting (Esc)" aria-label="Back to sculpting">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 18 9 12l6-6"/></svg><span class="ride-label">Sculpt</span>
+        <button id="ride-exit" class="btn ride-btn" type="button" title="Back to building (Esc)" aria-label="Back to building">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 18 9 12l6-6"/></svg><span class="ride-label">Build</span>
         </button>
         <button id="ride-cam" class="btn ride-btn" type="button" title="Switch camera (C)">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 8h3l2-3h8l2 3h3v11H3z"/><circle cx="12" cy="13" r="3.5"/></svg><span id="ride-cam-label" class="ride-label">Chase cam</span>
@@ -124,7 +128,7 @@
         <span class="jump-label">Jump</span>
         <span class="jump-sub">hold · release</span>
       </button>
-      <p class="ride-keys desktop-only">← → steer &amp; spin · ↑ ↓ flip (↓ brakes on snow) · hold Space, release to jump · R restart · C camera · Esc sculpt</p>
+      <p class="ride-keys desktop-only">← → steer &amp; spin · ↑ ↓ flip (↓ brakes on snow) · hold Space, release to jump · R restart · C camera · Esc back to building</p>
     </div>
 
     <div id="tricks" class="tricks" aria-live="polite"></div>
@@ -144,7 +148,7 @@
           <div class="res-wide"><dt>Best combo</dt><dd id="res-combo">—</dd></div>
         </dl>
         <div class="res-actions">
-          <button id="res-sculpt" class="btn res-btn" type="button">Sculpt <kbd>Esc</kbd></button>
+          <button id="res-sculpt" class="btn res-btn" type="button">Build <kbd>Esc</kbd></button>
           <button id="res-retry" class="send res-retry" type="button">Ride again <kbd>R</kbd></button>
         </div>
       </div>
@@ -152,77 +156,44 @@
 
     <div id="toast" class="toast" role="status" hidden></div>
 
-    <!-- run editor: the descent as a stack of sections, each with a grid of cells -->
-    <div id="runed" class="runed" hidden>
-      <header class="runed-head">
-        <div class="runed-title">
-          <p class="intro-eyebrow">Your run</p>
-          <h1>Design the run</h1>
+    <!-- new mountain: how steep, how long -->
+    <div id="mountain" class="intro" hidden>
+      <div class="intro-card panel mountain-card" role="dialog" aria-modal="true" aria-labelledby="mt-title">
+        <p class="intro-eyebrow">New mountain</p>
+        <h1 id="mt-title">Choose your mountain</h1>
+        <div id="mt-slopes" class="mt-slopes" role="radiogroup" aria-label="Steepness"></div>
+        <div class="mt-row">
+          <span class="ctl-l">Length</span>
+          <div id="mt-length" class="seg" role="group" aria-label="Length"></div>
         </div>
-        <dl class="runed-read">
-          <div><dt>Length</dt><dd id="re-len">0 m</dd></div>
-          <div><dt>Drop</dt><dd id="re-drop">0 m</dd></div>
-          <div><dt>Average</dt><dd id="re-avg">0°</dd></div>
-          <div><dt>Steepest</dt><dd id="re-max">0°</dd></div>
-        </dl>
-      </header>
-      <div class="runed-side">
-        <canvas id="re-canvas" aria-label="The run seen from the side. Tap a section to edit it."></canvas>
-        <ul class="runed-legend" aria-label="Slope colours">
-          <li><i class="diff" data-d="green"></i>&lt; 12°</li>
-          <li><i class="diff" data-d="blue"></i>12–22°</li>
-          <li><i class="diff" data-d="red"></i>22–32°</li>
-          <li><i class="diff" data-d="black"></i>32°+</li>
-        </ul>
-      </div>
-      <div class="runed-panel">
-        <div id="re-templates" class="runed-templates" role="group" aria-label="Start from" hidden></div>
-        <div id="re-scroll" class="runed-scroll">
-          <ol id="re-list" class="runed-list"></ol>
-          <button id="re-add" class="btn add-sec" type="button">+ Add section</button>
+        <label class="check mt-starter"><input id="mt-starter" type="checkbox" checked /> Start with a few jumps, a box and gates</label>
+        <div class="res-actions">
+          <button id="mt-cancel" class="btn res-btn" type="button">Cancel</button>
+          <button id="mt-go" class="send res-retry" type="button">Build it</button>
         </div>
-        <footer class="runed-foot">
-          <div class="runed-hist">
-            <button id="re-undo" class="icon-btn" type="button" aria-label="Undo" title="Undo (Ctrl+Z)">
-              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 14 4 9l5-5"/><path d="M4 9h10a6 6 0 0 1 0 12h-3"/></svg>
-            </button>
-            <button id="re-redo" class="icon-btn" type="button" aria-label="Redo" title="Redo (Ctrl+Shift+Z)">
-              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 14 5-5-5-5"/><path d="M20 9H10a6 6 0 0 0 0 12h3"/></svg>
-            </button>
-            <span id="re-msg" class="runed-msg"></span>
-          </div>
-          <div class="runed-actions">
-            <button id="re-cancel" class="btn" type="button">Cancel</button>
-            <button id="re-build" class="send re-build" type="button">Build this run</button>
-          </div>
-        </footer>
       </div>
-      <div id="re-sheet" class="sheet" hidden></div>
     </div>
 
     <div id="intro" class="intro" hidden>
       <div class="intro-card panel" role="dialog" aria-modal="true" aria-labelledby="intro-title">
         <p class="intro-eyebrow">How to play</p>
-        <h1 id="intro-title">Design it. Build it. Ride it.</h1>
-        <p class="intro-lede">Stack sections down the mountain, fill their grid with jumps, trees, rails and chalets, then ride it: pop off kickers, grind rails, float through powder and chain tricks into combos.</p>
+        <h1 id="intro-title">Build it. Ride it.</h1>
+        <p class="intro-lede">Pick a mountain, then build on it like in a building game: choose a piece, drag on the snow, and pieces side by side join up. Then ride it: pop off kickers, grind rails, float through powder and chain tricks into combos.</p>
         <ol class="intro-steps">
           <li>
-            <b>Design</b>
-            <span>Each section has a slope, a length, a groomed piste width, a bend, ups and downs and forest. Tap a cell in its grid to add an element. Edit the run any time with Edit run.</span>
+            <b>Build</b>
+            <span class="desktop-only">Pick a piece in the bar at the bottom, then click or drag on the snow: it snaps to the 10 m grid. Kickers side by side make one wide kicker, rails end to end one long rail. Erase removes pieces, Look moves the camera.</span>
+            <span class="touch-only">Pick a piece in the bar at the bottom, then drag your finger on the snow: the piece follows it on the 10 m grid and goes down when you let go. Kickers side by side make one wide kicker, rails end to end one long rail. Erase removes pieces.</span>
           </li>
           <li>
             <b>Look around</b>
-            <span class="desktop-only">Drag to orbit, right-drag to pan, scroll to zoom. Click the snow to edit that spot. Relief (T) shows bumps and hollows in colour.</span>
-            <span class="touch-only">One finger to orbit, two fingers to move and pinch to zoom. Tap the snow to edit that spot. Relief shows bumps and hollows in colour.</span>
+            <span class="desktop-only">Right-drag to orbit, middle-drag to pan, scroll to zoom. Or pick Look and left-drag. Relief (T) shows bumps and hollows in colour.</span>
+            <span class="touch-only">Two fingers to move and pinch to zoom. Pick Look to turn the view with one finger. Relief shows bumps and hollows in colour.</span>
           </li>
           <li>
             <b>Ride</b>
             <span class="desktop-only">← → steer, ↓ brakes. Hold Space to crouch, release to jump: time it at a kicker's lip. In the air, ← → spin and ↑ ↓ flip. Ride onto a rail lined up with it to grind. Powder is slower than the groomed piste; your tracks stay in the snow.</span>
             <span class="touch-only">Left thumb: slide to steer, drag down to brake. Right thumb: hold Jump to crouch, release to pop at a kicker's lip. In the air, slide to spin and drag up or down to flip. Ride onto a rail lined up with it to grind. Your tracks stay in the snow.</span>
-          </li>
-          <li>
-            <b>Sculpt by hand</b>
-            <span>Advanced (in the tool bar) brings back the raise, lower, smooth and flatten brushes and the Build tool for fine touches.</span>
           </li>
         </ol>
         <button id="intro-go" class="send intro-go" type="button">Got it</button>

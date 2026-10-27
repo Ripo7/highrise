@@ -70,6 +70,13 @@ const frag = /* glsl */ `
   uniform float uCell;
   uniform vec3 uIceLit;
   uniform vec3 uIceShadow;
+  // the build grid: per tile R = ghost (1 fits, ~0.5 doesn't), G = a piece is here, B = erase
+  uniform sampler2D uTiles;
+  uniform vec4 uTileInfo; // x of the left edge, z of the start line, tile size, rows
+  uniform float uTileCols;
+  uniform float uTileOn;
+  uniform vec3 uGhost;
+  uniform vec3 uCatCol[6]; // tint of placed pieces, by category (A channel)
 
   // Manual bilinear lookup: iPhones can't filter float textures in hardware (they read
   // back as zero with linear filtering), so the texture uses nearest and we blend here.
@@ -240,6 +247,35 @@ const frag = /* glsl */ `
 
     float dist = length(cameraPosition - vWorld);
 
+    // building: the grid on the snow, the ghost of the piece under the finger
+    if (uTileOn > 0.5) {
+      vec2 tc = vec2((vWorld.x - uTileInfo.x) / uTileInfo.z, (vWorld.z - uTileInfo.y) / uTileInfo.z);
+      if (tc.x >= 0.0 && tc.y >= 0.0 && tc.x < uTileCols && tc.y < uTileInfo.w) {
+        vec4 tv = texture2D(uTiles, (floor(tc) + 0.5) / vec2(uTileCols, uTileInfo.w));
+        vec2 fw = fwidth(tc);
+        vec2 dl = abs(fract(tc + 0.5) - 0.5) / max(fw, vec2(1e-4));
+        float line = 1.0 - smoothstep(0.6, 1.6, min(dl.x, dl.y));
+        float gridFade = (1.0 - smoothstep(260.0, 620.0, dist)) * (1.0 - smoothstep(0.25, 0.6, max(fw.x, fw.y)));
+        col = mix(col, uInk, line * 0.2 * gridFade);
+        // distance to this tile's own edge, for outlines
+        vec2 fe = min(fract(tc), 1.0 - fract(tc)) / max(fw, vec2(1e-4));
+        float edge = 1.0 - smoothstep(1.5, 3.5, min(fe.x, fe.y));
+        // placed pieces: tinted in their category's colour, so you can see what is where
+        int ci = int(tv.a * 255.0 + 0.5);
+        vec3 cc = uCatCol[0];
+        if (ci == 1) cc = uCatCol[1];
+        else if (ci == 2) cc = uCatCol[2];
+        else if (ci == 3) cc = uCatCol[3];
+        else if (ci == 4) cc = uCatCol[4];
+        else if (ci == 5) cc = uCatCol[5];
+        col = mix(col, cc, tv.g * (0.2 + 0.25 * edge) * gridFade);
+        float ghost = step(0.25, tv.r);
+        vec3 gc = tv.r > 0.75 ? uGhost : vec3(0.95, 0.3, 0.32);
+        col = mix(col, gc, ghost * (0.34 + 0.5 * edge));
+        col = mix(col, vec3(0.95, 0.3, 0.32), tv.b * (0.4 + 0.5 * edge));
+      }
+    }
+
     // close-up snow texture: soft grain, wind ripples and sparkles; it's what makes
     // speed readable when the camera skims the surface
     float near = (1.0 - smoothstep(25.0, 140.0, dist)) * (1.0 - uRelief);
@@ -385,7 +421,14 @@ export class TerrainMesh {
       uCell: { value: hf.cell },
       uIceLit: { value: c('#eef4ff') },
       uIceShadow: { value: c('#9fb6f0') },
+      uTiles: { value: null },
+      uTileInfo: { value: new THREE.Vector4(-240, hf.startZ, 10, 1) },
+      uTileCols: { value: 1 },
+      uTileOn: { value: 0 },
+      uGhost: { value: c('#4f7be8') },
+      uCatCol: { value: ['#4f7be8', '#ff7a45', '#2f9e86', '#8a6fd8', '#b9855d', '#8a7aa3'].map(c) },
     };
+    this.setTileGrid(1, 1, -240, 10);
     // the surface map (groomed in red, ice in green) as a texture
     const n = hf.nx * hf.nz;
     this.surfData = new Uint8Array(n * 2);
@@ -467,6 +510,27 @@ export class TerrainMesh {
     this.refreshLocalMean();
   }
 
+  // the build grid's texture: one texel per tile (see the shader)
+  setTileGrid(cols, rows, x0, tile) {
+    if (this.tileTex && this.tileCols === cols && this.tileRows === rows) return;
+    this.tileTex?.dispose();
+    this.tileCols = cols;
+    this.tileRows = rows;
+    this.tileData = new Uint8Array(cols * rows * 4);
+    this.tileTex = new THREE.DataTexture(this.tileData, cols, rows, THREE.RGBAFormat, THREE.UnsignedByteType);
+    this.tileTex.magFilter = THREE.NearestFilter;
+    this.tileTex.minFilter = THREE.NearestFilter;
+    this.tileTex.generateMipmaps = false;
+    this.tileTex.needsUpdate = true;
+    this.uniforms.uTiles.value = this.tileTex;
+    this.uniforms.uTileCols.value = cols;
+    this.uniforms.uTileInfo.value.set(x0, this.hf.startZ, tile, rows);
+  }
+
+  updateTiles() {
+    this.tileTex.needsUpdate = true;
+  }
+
   // copy the surface map into the texture (after a run is built)
   refreshSurface() {
     const sf = this.surface;
@@ -530,6 +594,7 @@ export class TerrainMesh {
     this.sides[0]?.material.dispose();
     this.localTex.dispose();
     this.surfTex.dispose();
+    this.tileTex?.dispose();
   }
 
   setStart(x, z) {

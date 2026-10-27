@@ -83,9 +83,10 @@ export class Skier {
     this.P = params;
     const y = hf.heightAt(start.x, start.z);
     this.pos = [start.x, y, start.z];
-    // a strong push down the fall line out of the gate
+    // a strong push out of the gate, down the piste (or straight down the fall line)
     const n = hf.normalAt(start.x, start.z);
-    const push = [0, 0, 11];
+    const dir = start.dir || [0, 1];
+    const push = [dir[0] * 11, 0, dir[1] * 11];
     const vn = dot(push, n);
     this.vel = [push[0] - vn * n[0], push[1] - vn * n[1], push[2] - vn * n[2]];
     this.n = n;
@@ -119,6 +120,7 @@ export class Skier {
     this.props = null; // PropSet of trees and rocks to collide with
     this.structures = null; // StructureSet: rails, buildings, nets, gates...
     this.surface = null; // SurfaceMap: groomed / powder / ice (null: groomed everywhere)
+    this.finishes = null; // finish lines [{ x, z, dir, w }]: crossing one ends the run (so does the bottom edge)
     this._surf = { g: 1, ice: 0, powder: 0 };
     this.powder = 0; // 0..1 under the skis right now
     this.ice = 0;
@@ -349,7 +351,7 @@ export class Skier {
       pos[2] = -hf.halfZ + 2;
       vel[2] = Math.abs(vel[2]);
     }
-    if (pos[2] >= hf.finishZ) {
+    if (pos[2] >= hf.finishZ || this.crossedFinish(ox, oz)) {
       this.status = 'finished';
     } else if (this.time > P.maxTime) {
       this.status = 'timeout';
@@ -360,6 +362,18 @@ export class Skier {
       this.slowTime = 0;
     }
     if (this.status !== 'running') this.path.push([pos[0], pos[1], pos[2]]);
+  }
+
+  // did the last step cross one of the finish lines (going the right way)?
+  crossedFinish(ox, oz) {
+    if (!this.finishes) return false;
+    const [x, , z] = this.pos;
+    for (const f of this.finishes) {
+      const a0 = (ox - f.x) * f.dir[0] + (oz - f.z) * f.dir[1];
+      const a1 = (x - f.x) * f.dir[0] + (z - f.z) * f.dir[1];
+      if (a0 < 0 && a1 >= 0 && Math.abs((x - f.x) * -f.dir[1] + (z - f.z) * f.dir[0]) < f.w / 2 + 2) return true;
+    }
+    return false;
   }
 
   // Trees and rocks: slide around them on a glancing hit, wipe out on a direct one.

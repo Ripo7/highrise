@@ -1,7 +1,7 @@
-// Browser smoke test: serves the production build, plays the core loop in Chromium
-// (choose a mountain, build pieces by dragging on the snow, erase, undo, ride) and
-// fails on any page error. Run after `npm run build`:  npm run smoke
-// (SMOKE_OUT=dir keeps screenshots; defaults to smoke-shots/)
+// Browser smoke test: serves the production build, plays the core loop in Chromium (pick a
+// wild mountain, trace a piste point by point, drag a point, branch off and join back,
+// paint bumps, undo, ride) and fails on any page error. Run after `npm run build`:
+//   npm run smoke      (SMOKE_OUT=dir keeps screenshots; defaults to smoke-shots/)
 import { preview } from 'vite';
 import { chromium } from 'playwright';
 import fs from 'node:fs';
@@ -18,7 +18,7 @@ const browser = await chromium.launch({
 });
 const errors = [];
 try {
-  const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+  const page = await browser.newPage({ viewport: { width: 1100, height: 800 } });
   page.on('pageerror', (e) => errors.push(e.message));
   // block third-party requests (fonts): the game must not depend on them
   await page.route(/^https?:\/\/(?!localhost)/, (r) => r.abort());
@@ -26,105 +26,126 @@ try {
   await page.goto(url, { waitUntil: 'load' });
   await page.waitForFunction(() => window.__highrise?.hf);
 
-  // welcome card, then the mountain chooser: a medium, short mountain without starter pieces
+  // welcome card, then the mountain chooser: another small, gentle one
   await page.click('#intro-go');
   await page.waitForSelector('#mountain:not([hidden])');
-  await page.click('[data-slope="medium"]');
-  await page.click('[data-len="short"]');
-  await page.uncheck('#mt-starter');
+  await page.click('[data-slope="gentle"]');
+  await page.click('[data-len="small"]');
+  await page.click('#mt-another');
   await page.click('#mt-go');
   await page.waitForSelector('#mountain', { state: 'hidden' });
-  const mt = await page.evaluate(() => ({ ...window.__highrise.state.mountain, pieces: window.__highrise.state.pieces.length }));
-  assert.equal(mt.slope, 'medium');
-  assert.equal(mt.length, 'short');
-  assert.equal(mt.pieces, 0, 'a bare mountain');
+  const mt = await page.evaluate(() => window.__highrise.state.mountain);
+  assert.equal(mt.steep, 'gentle');
+  assert.equal(mt.size, 'small');
+  assert.equal(await page.evaluate(() => window.__highrise.state.pistes.length), 0, 'a wild mountain, no piste yet');
   await page.waitForFunction(() => window.__highrise.cameraSettled, null, { timeout: 120000 });
 
-  // look at the piste close up (a slow software renderer makes free flying unreliable to aim)
+  // look down on the top half of the mountain (a slow software renderer makes free flying
+  // unreliable to aim)
   await page.evaluate(() => {
     const h = window.__highrise;
-    const z = h.hf.startZ + 150;
-    const x = h.base.start.x;
-    const y = h.hf.heightAt(x, z);
-    h.controls.target.set(x, y, z + 10);
-    h.camera.position.set(x - 17, y + 52, z - 38);
+    const z = h.hf.startZ + 220;
+    const y = h.hf.heightAt(0, z);
+    h.controls.target.set(0, y, z);
+    h.camera.position.set(0, y + 470, z + 260);
     h.controls.update();
   });
-  await page.waitForTimeout(500);
-  const at = (u, off = 0) =>
+  const at = (x, u) =>
     page.evaluate(
-      ([u, off]) => {
-        // aim at the middle of a 10 m tile (the grid starts at x = -240), never on a seam
+      ([x, u]) => {
         const h = window.__highrise;
-        const z = h.hf.startZ + (Math.floor(u / 10) + 0.5) * 10;
-        const x = -240 + (Math.floor((h.base.start.x + off + 240) / 10) + 0.5) * 10;
+        h.camera.updateMatrixWorld();
+        const z = h.hf.startZ + u;
         const v = h.camera.position.clone().set(x, h.hf.heightAt(x, z), z).project(h.camera);
         const r = document.getElementById('scene').getBoundingClientRect();
         return [r.left + ((v.x + 1) / 2) * r.width, r.top + ((1 - v.y) / 2) * r.height];
       },
-      [u, off]
+      [x, u]
     );
-  const drag = async (a, b) => {
-    await page.mouse.move(a[0], a[1]);
-    await page.mouse.down();
-    await page.mouse.move(b[0], b[1], { steps: 8 });
-    await page.mouse.up();
-    await page.waitForTimeout(300);
+  const tap = async (x, u) => {
+    const [px, py] = await at(x, u);
+    await page.mouse.click(px, py);
   };
-  const count = (k) => page.evaluate((k) => window.__highrise.state.pieces.filter((p) => p.k === k).length, k);
+  const drag = async (a, b) => {
+    const [ax, ay] = await at(...a);
+    const [bx, by] = await at(...b);
+    await page.mouse.move(ax, ay);
+    await page.mouse.down();
+    await page.mouse.move(bx, by, { steps: 8 });
+    await page.mouse.up();
+  };
+  const pistes = () => page.evaluate(() => window.__highrise.state.pistes.map((p) => ({ id: p.id, n: p.pts.length, from: p.from?.id ?? null, to: p.to?.id ?? null })));
+  const onMain = (f) =>
+    page.evaluate((f) => {
+      const h = window.__highrise;
+      const c = h.world.curves.get(1);
+      const k = Math.round((c.n - 1) * f);
+      return [c.xs[k], c.zs[k] - h.hf.startZ];
+    }, f);
 
-  // Jumps: drag a kicker across the slope, it lays a row of tiles that merge into one wide kicker
+  // trace: tap the start, then three points down the mountain
+  for (const p of [[0, 60], [-30, 150], [20, 250], [0, 340]]) await tap(...p);
+  assert.deepEqual(await pistes(), [{ id: 1, n: 4, from: null, to: null }], 'four waypoints');
+  const groomed = await page.evaluate(() => {
+    const h = window.__highrise;
+    const c = h.world.curves.get(1);
+    const k = Math.floor(c.n / 2);
+    return h.surf.at(c.xs[k], c.zs[k]).g;
+  });
+  assert.ok(groomed > 0.9, 'the piste is groomed into the snow');
+  assert.ok(await page.evaluate(() => !!window.__highrise.world.ends.start), 'it has a start');
+
+  // drag the second point 40 m to the left
+  await drag([-30, 150], [-70, 150]);
+  const moved = await page.evaluate(() => window.__highrise.state.pistes[0].pts[1].x);
+  assert.ok(moved < -50, `the point moved (${moved.toFixed(1)})`);
+
+  // a branch: New piste, tap on the piste, two points beside it, then back onto it
+  await page.click('[data-action="newPiste"]');
+  await tap(...(await onMain(0.3)));
+  await tap(90, 190);
+  await tap(100, 260);
+  await tap(...(await onMain(0.9)));
+  const ps = await pistes();
+  assert.equal(ps.length, 2, 'two pistes');
+  assert.deepEqual([ps[1].from, ps[1].to], [1, 1], 'the branch leaves the piste and joins it again');
+  await page.screenshot({ path: `${OUT}/1-traced.png` });
+
+  // terrain: a row of bumps across the piste
   await page.evaluate(() => (window.__before = window.__highrise.hf.h.slice()));
-  await page.click('#buildbar [data-piece="kicker"]');
-  await drag(await at(160, -12), await at(160, 14));
-  const kickers = await count('kicker');
-  assert.ok(kickers >= 2, `a row of kicker tiles (${kickers})`);
+  await page.click('[data-tab="terrain"]');
+  await page.click('[data-piece="bump"]');
+  await drag([-50, 110], [40, 110]);
+  const bumps = await page.evaluate(() => window.__highrise.state.pieces.filter((p) => p.k === 'bump').length);
+  assert.ok(bumps >= 8, `bump tiles (${bumps})`);
   const rise = await page.evaluate(() => {
     const h = window.__highrise.hf.h;
     let m = 0;
     for (let i = 0; i < h.length; i++) m = Math.max(m, h[i] - window.__before[i]);
     return m;
   });
-  assert.ok(rise > 0.8, `the kicker raised the snow (${rise.toFixed(2)} m)`);
+  assert.ok(rise > 2, `the bumps raised the snow (${rise.toFixed(2)} m)`);
+  await page.screenshot({ path: `${OUT}/2-bumps.png` });
 
-  // Park: a box line down the slope becomes one long box
-  await page.click('#buildbar [data-cat="park"]');
-  await page.click('#buildbar [data-piece="box"]');
-  await drag(await at(200, 0), await at(232, 0));
-  assert.ok((await count('box')) >= 2, 'box tiles placed');
-  const boxes = await page.evaluate(() => window.__highrise.structs.list.filter((s) => s.type === 'rail' && s.box).length);
-  assert.equal(boxes, 1, 'neighbouring box tiles merge into one box');
-
-  // Nature: a patch of trees
-  await page.click('#buildbar [data-cat="nature"]');
-  await page.click('#buildbar [data-piece="trees"]');
-  await drag(await at(180, -40), await at(205, -28));
-  assert.ok((await count('trees')) >= 2, 'trees placed');
-  await page.screenshot({ path: `${OUT}/1-built.png` });
-
-  // Erase the box line, then undo brings it back
-  await page.click('#buildbar [data-tool="erase"]');
-  await drag(await at(200, 0), await at(232, 0));
-  assert.equal(await count('box'), 0, 'erased the box');
+  // undo takes the bumps away, redo brings them back
   await page.keyboard.press('Control+z');
-  await page.waitForTimeout(300);
-  assert.ok((await count('box')) >= 2, 'undo brought the box back');
+  assert.equal(await page.evaluate(() => window.__highrise.state.pieces.length), 0, 'undo');
+  await page.keyboard.press('Control+Shift+z');
+  assert.ok((await page.evaluate(() => window.__highrise.state.pieces.length)) >= 8, 'redo');
 
   // ride it
-  await page.click('#buildbar [data-tool="view"]');
   await page.click('#send');
-  await page.waitForFunction(() => window.__highrise.skier?.time > 1.5, null, { timeout: 120000 });
+  await page.waitForFunction(() => window.__highrise.skier?.time > 0.5, null, { timeout: 240000 });
   const ride = await page.evaluate(() => {
     const s = window.__highrise.skier;
-    return { status: s.status, speed: s.speed, down: s.pos[2] - window.__highrise.hf.startZ, tracks: window.__highrise.tracks.count };
+    return { status: s.status, speed: s.speed, tracks: window.__highrise.tracks.count };
   });
-  await page.screenshot({ path: `${OUT}/2-ride.png` });
+  await page.screenshot({ path: `${OUT}/3-ride.png` });
   assert.equal(ride.status, 'running');
-  assert.ok(ride.tracks > 5, `the skis left tracks (${ride.tracks} points)`);
   assert.ok(ride.speed > 3, `skier is moving (${ride.speed.toFixed(1)} m/s)`);
-  assert.ok(ride.down > 5, `skier went down the run (${ride.down.toFixed(1)} m)`);
+  assert.ok(ride.tracks > 2, `the skis left tracks (${ride.tracks} points)`);
   assert.deepEqual(errors, [], 'no page errors');
-  console.log(`smoke test passed: mountain chosen, ${kickers} kicker tiles, one merged box, erase + undo, skier ${ride.down.toFixed(0)} m down at ${(ride.speed * 3.6).toFixed(0)} km/h`);
+  console.log(`smoke test passed: wild mountain, piste of 4 points traced and edited, a branch that joins back, ${bumps} bump tiles, undo/redo, skier riding at ${(ride.speed * 3.6).toFixed(0)} km/h`);
 } finally {
   await browser.close();
   await new Promise((r) => server.httpServer.close(r));

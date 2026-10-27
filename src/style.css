@@ -2158,3 +2158,150 @@ body.menu-open .extras {
     font-size: 16px;
   }
 }
+
+/* the mountain card: a preview from above beside the choices */
+.mt-body {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 14px;
+  align-items: start;
+}
+.mt-preview {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+.mt-preview canvas {
+  width: 150px;
+  height: auto;
+  max-height: 300px;
+  border: var(--edge);
+  border-radius: 12px;
+  background: #e6e9ff;
+  box-shadow: 0 3px 0 var(--ink);
+}
+.mt-another {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 38px;
+  padding: 0 12px;
+  font-size: 13px;
+}
+.mt-another svg {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+}
+.mt-another svg circle {
+  fill: currentColor;
+  stroke: none;
+}
+.mt-opts {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+.mt-opts .mt-slopes {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 6px;
+}
+.mt-opts .mt-slope {
+  display: grid;
+  grid-template-columns: 54px minmax(0, 1fr) auto;
+  grid-template-areas: 'pic name deg' 'pic blurb blurb';
+  align-items: center;
+  column-gap: 10px;
+  row-gap: 0;
+  padding: 6px 10px;
+}
+.mt-opts .mt-slope svg {
+  grid-area: pic;
+  width: 54px;
+  height: 34px;
+  margin: 0;
+}
+.mt-opts .mt-slope b {
+  grid-area: name;
+}
+.mt-opts .mt-slope small {
+  grid-area: deg;
+}
+.mt-opts .mt-slope em {
+  grid-area: blurb;
+}
+@media (max-width: 520px) {
+  .mountain-card {
+    gap: 10px;
+  }
+  .mt-body {
+    grid-template-columns: 92px minmax(0, 1fr);
+    gap: 10px;
+  }
+  .mt-preview canvas {
+    width: 92px;
+    max-height: 150px;
+  }
+  .mt-another {
+    min-height: 34px;
+    padding: 0 8px;
+    font-size: 12px;
+    gap: 4px;
+  }
+  .mt-opts {
+    gap: 8px;
+  }
+  .mt-opts .mt-slope {
+    grid-template-columns: 36px minmax(0, 1fr);
+    grid-template-areas: 'pic name' 'pic deg';
+    padding: 5px 8px;
+    column-gap: 8px;
+  }
+  .mt-opts .mt-slope svg {
+    width: 36px;
+    height: 26px;
+  }
+  .mt-opts .mt-slope b {
+    font-size: 15px;
+  }
+  .mt-opts .mt-slope small {
+    font-size: 11px;
+  }
+  .mt-opts .seg button {
+    min-height: 40px;
+    font-size: 14px;
+  }
+}
+
+/* brush size: S / M / L at the end of the bar */
+.bb-size {
+  flex: none;
+  flex-direction: column;
+  width: 40px;
+  align-self: stretch;
+}
+.bb-size[hidden] {
+  display: none;
+}
+.bb-size button {
+  min-height: 0;
+  padding: 2px;
+  border-left: 0;
+  border-top: 1.5px solid var(--panel-line);
+  font-size: 13px;
+}
+.bb-size button:first-child {
+  border-top: 0;
+}
+.bb-piece:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.bb-piece:disabled:active {
+  transform: none;
+}

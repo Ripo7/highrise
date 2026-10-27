@@ -10,7 +10,7 @@ import { lightUniforms, shadowVertPars, shadowVert, shadowFragPars, outlineMater
 // name (snow / needles / bark / rock) and painted with the theme's three colour bands, so the
 // palette lives in theme.js, not in the model. Until the file has loaded, simple stand-ins show.
 
-const MAX_TREES = 9000;
+const MAX_TREES = 16000;
 const MAX_ROCKS = 3000;
 const KIND = { snow: 0, needles: 1, bark: 2, rock: 3 };
 // visual size for scale 1, matching the collision sizes in core/props.js

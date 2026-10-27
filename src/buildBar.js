@@ -1,99 +1,134 @@
-// The build bar: like a building game's hotbar. Category tabs on top, the pieces of the
-// open category below, with Look (move the camera, build nothing) and Erase always at
-// hand. Pick a piece, then drag on the snow: it snaps to the grid and joins its neighbours.
+// The build bar: three tabs. Piste: trace it point by point (tap the snow from the top down,
+// drag a point to move it), start a new piste or a branch, make the selected stretch
+// narrower or wider, delete a point. Terrain and Nature: pick a piece and paint it on the
+// snow, with a brush one, two or three tiles across. Look (move the camera only) is always
+// at hand.
 
-import { PIECES, CATEGORIES } from './core/pieces.js';
+import { KINDS } from './core/terrain.js';
 import { PIECE_ICONS, BAR_ICONS, CATEGORY_COLORS } from './pieceIcons.js';
 
-const SCULPT = [
-  { id: 'raise', label: 'Raise' },
-  { id: 'lower', label: 'Lower' },
-  { id: 'smooth', label: 'Smooth' },
-  { id: 'flatten', label: 'Flatten' },
+const TABS = [
+  { id: 'piste', label: 'Piste' },
+  { id: 'terrain', label: 'Terrain' },
+  { id: 'nature', label: 'Nature' },
+];
+
+const PISTE_ITEMS = [
+  { tool: 'trace', label: 'Trace', icon: 'trace', title: 'Tap the snow to add points down the mountain, drag a point to move it' },
+  { action: 'newPiste', label: 'New piste', icon: 'newPiste', title: 'Start another piste: tap on a piste to branch from it, or anywhere else' },
+  { action: 'narrower', label: 'Narrower', icon: 'narrower', title: 'Make the selected stretch narrower', needsSel: true },
+  { action: 'wider', label: 'Wider', icon: 'wider', title: 'Make the selected stretch wider', needsSel: true },
+  { action: 'delete', label: 'Delete', icon: 'delete', title: 'Delete the selected point (Delete)', needsSel: true },
 ];
 
 const svg = (paths) => `<svg viewBox="0 0 24 24" aria-hidden="true">${paths}</svg>`;
 
-export function createBuildBar({ onPiece, onTool, onRotate }) {
+export function createBuildBar({ onTool, onPiece, onAction, onSize }) {
   const root = document.getElementById('buildbar');
   const tabs = root.querySelector('.bb-tabs');
   const list = root.querySelector('.bb-pieces');
-  const rot = root.querySelector('#bb-rotate');
-  let cat = 'jumps';
-  let advanced = false;
-  let current = { tool: 'view', piece: null };
+  const sizes = root.querySelector('.bb-size');
+  let tab = 'piste';
+  let current = { tool: 'trace', piece: 'bump' };
+  let hasSel = false;
+  let size = 2;
 
-  const renderTabs = () => {
-    const cats = advanced ? [...CATEGORIES, { id: 'sculpt', label: 'Sculpt' }] : CATEGORIES;
-    tabs.innerHTML = cats
-      .map((c) => `<button type="button" role="tab" data-cat="${c.id}" aria-selected="${c.id === cat}" style="--c:${CATEGORY_COLORS[c.id]}">${c.label}</button>`)
-      .join('');
-  };
-  const renderPieces = () => {
-    const items =
-      cat === 'sculpt'
-        ? SCULPT.map((t) => ({ id: t.id, label: t.label, icon: BAR_ICONS[t.id], tool: true }))
-        : Object.entries(PIECES)
-            .filter(([, p]) => p.cat === cat)
-            .map(([id, p]) => ({ id, label: p.label, icon: PIECE_ICONS[id] }));
-    list.innerHTML = items
-      .map(
-        (it) =>
-          `<button type="button" class="bb-piece" ${it.tool ? `data-tool="${it.id}"` : `data-piece="${it.id}"`} style="--c:${CATEGORY_COLORS[cat]}" title="${
-            it.tool ? it.label : PIECES[it.id].hint
-          }">${svg(it.icon)}<span>${it.label}</span></button>`
-      )
-      .join('');
+  const btn = (attrs, icon, label, title, c) =>
+    `<button type="button" class="bb-piece" ${attrs} style="--c:${c}" title="${title}">${svg(icon)}<span>${label}</span></button>`;
+
+  const render = () => {
+    tabs.innerHTML = TABS.map(
+      (t) => `<button type="button" role="tab" data-tab="${t.id}" aria-selected="${t.id === tab}" style="--c:${CATEGORY_COLORS[t.id]}">${t.label}</button>`
+    ).join('');
+    const c = CATEGORY_COLORS[tab];
+    let html = '';
+    if (tab === 'piste') {
+      html = PISTE_ITEMS.map((it) =>
+        btn(
+          it.tool ? `data-tool="${it.tool}"` : `data-action="${it.action}"${it.needsSel ? ' data-sel' : ''}`,
+          BAR_ICONS[it.icon],
+          it.label,
+          it.title,
+          c
+        )
+      ).join('');
+    } else {
+      html = btn('data-tool="erase" data-erase', BAR_ICONS.erase, 'Erase', 'Erase pieces (X)', 'var(--bad)');
+      html += Object.entries(KINDS)
+        .filter(([, k]) => k.cat === tab)
+        .map(([id, k]) => btn(`data-piece="${id}"`, PIECE_ICONS[id], k.label, k.hint, c))
+        .join('');
+    }
+    list.innerHTML = html;
     list.scrollLeft = 0;
+    sizes.hidden = tab === 'piste';
     sync();
   };
+
   const sync = () => {
-    root.querySelectorAll('[data-piece]').forEach((b) => b.setAttribute('aria-pressed', String(current.tool === 'piece' && current.piece === b.dataset.piece)));
+    root.querySelectorAll('[data-piece]').forEach((b) => b.setAttribute('aria-pressed', String(current.tool === 'paint' && current.piece === b.dataset.piece)));
     root.querySelectorAll('[data-tool]').forEach((b) => b.setAttribute('aria-pressed', String(current.tool === b.dataset.tool)));
-    rot.hidden = !(current.tool === 'piece' && PIECES[current.piece]?.rotates);
+    root.querySelectorAll('[data-sel]').forEach((b) => (b.disabled = !hasSel));
+    sizes.querySelectorAll('[data-size]').forEach((b) => b.setAttribute('aria-pressed', String(+b.dataset.size === size)));
   };
 
   root.querySelector('.bb-fixed-look').innerHTML = `${svg(BAR_ICONS.look)}<span>Look</span>`;
-  root.querySelector('.bb-fixed-erase').innerHTML = `${svg(BAR_ICONS.erase)}<span>Erase</span>`;
-  rot.innerHTML = `${svg(BAR_ICONS.rotate)}<span>Rotate</span>`;
+  sizes.innerHTML = [1, 2, 3].map((n) => `<button type="button" data-size="${n}" title="Brush: ${n * 10} m">${['S', 'M', 'L'][n - 1]}</button>`).join('');
 
   root.addEventListener('click', (e) => {
-    const t = e.target.closest('[data-cat]');
+    // only this bar's own buttons (the page body carries a data-tool too)
+    const hit = (sel) => {
+      const el = e.target.closest(sel);
+      return el && root.contains(el) ? el : null;
+    };
+    const t = hit('[data-tab]');
     if (t) {
-      cat = t.dataset.cat;
-      renderTabs();
-      renderPieces();
+      tab = t.dataset.tab;
+      render();
+      // a tab opens on its main tool: tracing, or the first piece
+      if (tab === 'piste') onTool('trace');
+      else {
+        const first = Object.entries(KINDS).find(([, k]) => k.cat === tab)[0];
+        onPiece(KINDS[current.piece]?.cat === tab ? current.piece : first);
+      }
       return;
     }
-    const p = e.target.closest('[data-piece]');
+    const p = hit('[data-piece]');
     if (p) return onPiece(p.dataset.piece);
-    const tl = e.target.closest('[data-tool]');
+    const tl = hit('[data-tool]');
     if (tl) return onTool(tl.dataset.tool);
-    if (e.target.closest('#bb-rotate')) onRotate();
+    const a = hit('[data-action]');
+    if (a && !a.disabled) return onAction(a.dataset.action);
+    const s = hit('[data-size]');
+    if (s) {
+      size = +s.dataset.size;
+      sync();
+      onSize(size);
+    }
   });
 
-  renderTabs();
-  renderPieces();
+  render();
 
   return {
-    // tool: 'view' | 'piece' | 'erase' | 'start' | a sculpting brush
+    // tool: 'view' | 'trace' | 'paint' | 'erase'
     set(tool, piece) {
       current = { tool, piece };
-      if (tool === 'piece' && PIECES[piece] && PIECES[piece].cat !== cat) {
-        cat = PIECES[piece].cat;
-        renderTabs();
-        renderPieces();
-      }
+      const want = tool === 'trace' ? 'piste' : tool === 'paint' ? KINDS[piece]?.cat : null;
+      if (want && want !== tab) {
+        tab = want;
+        render();
+      } else sync();
+    },
+    setSelection(on) {
+      hasSel = on;
       sync();
     },
-    setAdvanced(on) {
-      advanced = on;
-      if (!on && cat === 'sculpt') cat = 'terrain';
-      renderTabs();
-      renderPieces();
+    setSize(n) {
+      size = n;
+      sync();
     },
-    setRotation(r) {
-      rot.classList.toggle('turned', r === 1);
+    get tab() {
+      return tab;
     },
   };
 }

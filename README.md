@@ -1,58 +1,60 @@
 # Highrise
 
-Design a mountain, send a skier, chase the perfect line. A browser 3D game where building the mountain is the gameplay.
+Trace your pistes through a wild mountain, shape the snow, send a skier, chase the perfect line. A browser 3D game where making the mountain is the gameplay.
 
 This is **Phase 0**: a grey-box prototype to prove the core loop is fun before any art investment.
 
-**Build → send → watch → tweak → repeat.**
+**Trace → shape → send → watch → tweak → repeat.**
 
 ## Play
 
-**Build** a mountain, **ride** it, and score on **style**.
+**Trace** a piste through a wild mountain, **ride** it, and score on **style**.
 
-### Building the mountain
+### A wild mountain
 
-No drawing, no 2D editor: you **build straight on the 3D mountain**, like in a building game.
+Every mountain is generated (a seed): a summit shoulder at the top, steeper pitches and rolls on the way down, spurs and gullies running down the fall line, a couple of wide bowls, knolls, bands of rock across the slope on the steeper ones, and a run-out at the bottom. Forest grows below the treeline in woods with clearings, thicker on the spurs than in the gullies (avalanche paths stay open), never on the rock; boulders sit on the steep bits and below the cliffs.
 
-1. **Choose a mountain**: Gentle (about 14°, green and blue), Medium (21°, blue with red pitches) or Steep (29°, black), and Short (500 m), Medium (900 m) or Long (1.5 km). It comes with a natural descent (easier at the top, steeper pitches and rolls, a run-out at the bottom), a groomed piste meandering down, powder and forest on either side, and optionally a few starter pieces. **New mountain** (`N`, ••• menu) picks another one.
-2. **Pick a piece** in the build bar at the bottom (Terrain, Jumps, Nature, Park, Resort).
-3. **Drag on the snow**: a ghost of the piece follows your finger or mouse, snapped to the **10 m grid**, and the mountain shows what it will become while you drag. Release to place. Dragging lays a row (jumps, rails, poles…) or paints an area (terrain, trees, moguls…).
-4. **Neighbours join up**: two kickers side by side make one wide kicker, rails or boxes end to end one long rail, chalets in a rectangle one bigger building, mounds side by side a ridge.
+Pick how steep (**Gentle** about 15°, **Medium** 22°, **Steep** 29°) and how big (**Small** 600 × 700 m, **Medium** 720 m × 1.1 km, **Large** 840 m × 1.6 km). The chooser shows the mountain from above; **Another one** rolls a new one with the same settings. **New mountain** (`N`, ••• menu) brings the chooser back.
 
-**Erase** (`X`) removes whatever is under the drag, **Look** (`Esc`/`V`) only moves the camera, **Rotate** (`Q`) turns the pieces that can turn (safety nets). Undo / redo (`Ctrl+Z` / `Ctrl+Shift+Z`) cover everything.
+### Tracing a piste
 
-### Pieces
+1. **Tap the snow near the top**: that's the start.
+2. **Tap further down**, again and again: the piste follows your points as one smooth curve, carved into the mountain (levelled across, graded where the mountain is too steep, with soft snowy banks), groomed, and the trees on it cleared.
+3. **Drag a point** to move it, **drag the piste** to put a new point in and bend it there. Tap a point to select it, then make the piste **Narrower** or **Wider** there (24, 36 or 52 m) or **Delete** the point (`Delete`).
+4. **New piste** starts another one. Start it **on a piste** and it branches off there; end it **on a piste** and it joins it. Where pistes meet, their snow merges into one surface.
 
-| Category | Pieces | How they join |
-| --- | --- | --- |
-| Terrain | Mound, Hollow, Flat, Steeper, Drop, Groom, Powder | Mounds, hollows, shelves and pitches blend into one surface (a ridge, a bowl, a full-width face); a drop grows with its rectangle; Groom and Powder paint the snow |
-| Jumps | Kicker, Table, Wall (berm), Rollers | Kickers and tables side by side get wider; walls and rollers end to end get longer |
-| Nature | Trees, Rock, Moguls, Gully, Cornice, Frozen lake | Trees paint a forest, moguls a field, lakes one sheet of ice; gullies run on and widen; cornices across make one lip |
-| Park | Rail, Box, Half-pipe | Rails and boxes end to end become one long rail or box (ride onto them lined up to grind); a half-pipe gets longer |
-| Resort | Chalet, Lift pylon, Bridge, Tunnel, Safety net, Piste poles, Slalom gate (+150 each), Snow cannon | Chalets in a rectangle make one building; pylons in the same column are joined by a chairlift with moving chairs; bridges across make a longer span; tunnels get longer and wider; nets join into one (rotate to run them across) |
+The run starts at the top of the first piste and ends at a finish line at the end of every piste that doesn't join another (or at the bottom of the mountain, if you go off into the powder). **Trace a piste for me** (••• menu, or ticked in the chooser) puts down a natural line from the top to the bottom to start from.
 
-Terrain pieces, snow (Groom, Powder) and objects sit on three layers, so a kicker can go on a mound on powder. Every piece clears the forest under it (and in front of a jump, its landing).
+### Shaping the snow
 
-**Sculpt by hand** (`A`, ••• menu) adds a Sculpt tab with the raise / lower / smooth / flatten brushes for free-form touches. Hand sculpting is stored on top of the pieces, so it survives adding or removing pieces.
+**Terrain** and **Nature** pieces are painted on a 10 m grid (shown on the snow while you paint), with a brush 1, 2 or 3 tiles across (`[` `]`):
 
-The catalogue and the merge rules are `src/core/pieces.js`; the mountains `src/core/mountain.js`; collisions, grinding and gates `src/core/structures.js`; the meshes `src/render/structureMeshes.js`.
+| Piece | What it does |
+| --- | --- |
+| Bump / Hollow | Raises or digs the snow. Side by side they make a ridge, a hill, a bowl or a gully; bigger areas grow higher or deeper in the middle. |
+| Flat | The slope eases off: a shelf, with a lip at its lower edge to pop off. |
+| Wall | A steeper pitch, easing back below. |
+| Rocks | A band of rock across the slope: a cliff face to drop, a run-out below. |
+| Forest / Clearing | Plants trees (they join the woods around) or opens up the natural forest. |
+| Powder | Deep untouched snow, even on a piste. |
+
+**Everything merges.** Pieces don't stamp a shape per tile: all the tiles of one kind make one mask, blurred into a smooth field that shapes the snow, so neighbours are one shape with no seam, step or edge, a bump beside a hollow rolls into it, and a piste across them simply follows the snow. A tile holds one shape, one cover and powder or not (three layers), so trees can grow on a bump. **Erase** (`X`) clears tiles.
 
 ### Snow
 
 - The **groomed piste** is fast and grippy, with corduroy and groomer passes in the snow.
 - Off the piste it's **deep powder**: slower, the skis sink, turns are softer, landings more forgiving, and the spray turns into clouds.
-- **Ice** (frozen lakes) is slick, with little grip.
+- **Bare rock** on cliffs, rock bands and any face too steep to hold snow (about 45°) rides like hard snow.
 - **Ski tracks stay in the snow** run after run: thin carves on the piste, trenches in powder, smears where you skid. **Fresh snow** (••• menu) covers them. They're saved in the browser.
 
 ### The camera (drone view)
 
 | Action | Mouse / keyboard | Touch |
 | --- | --- | --- |
-| Orbit | Right-drag, Alt-drag, or left-drag with Look | One finger with Look |
-| Pan / zoom | Middle-drag / scroll | Two fingers / pinch (with any piece) |
+| Orbit | Left-drag on the snow while tracing, right-drag while painting, or pick Look (`V`) | One finger on the snow while tracing, or pick Look |
+| Pan / zoom | Middle-drag / scroll | Two fingers / pinch |
 | Reset the view | `R` | ••• menu |
 | Relief view | `T` | Relief button |
-| Move the start gate | `G` then click | ••• menu |
 
 ### Riding
 
@@ -66,28 +68,32 @@ The catalogue and the merge rules are `src/core/pieces.js`; the mountains `src/c
 | Restart / camera / back to building | `R` / `C` / `Esc` | Buttons top left |
 | Sound | `M` | ••• menu |
 
-Hold to load a jump (the ring fills) and release at a kicker's lip to fly higher. Land with the skis straight and upright: clean landings score full points, sketchy ones half and cost speed, and only a really bad one is a wipeout (you lose the combo, tumble, get up and carry on). Let go of the stick in the air and the skier straightens up and finishes a nearly-complete flip by himself. Hitting the edge of the piste just bumps you back.
+Hold to load a jump (the ring fills) and release at a lip (a bump's crest, the edge of a flat, a cliff) to fly higher. Land with the skis straight and upright: clean landings score full points, sketchy ones half and cost speed, and only a really bad one is a wipeout (you lose the combo, tumble, get up and carry on). Let go of the stick in the air and the skier straightens up and finishes a nearly-complete flip by himself. Hitting the edge of the mountain just bumps you back.
 
 **Speed bonus:** above 100 km/h a speed streak builds (40 points a second at 100 km/h, +3 per extra km/h: about 170/s at 145 km/h). It's banked once you've been back under 100 for 0.8 s, or at the finish, and lost on a wipeout. Tricks landed within 2.6 s of each other chain into a combo (×1.5, ×2, … up to ×5). A see-through ghost replays your best run.
 
-Your mountain, pieces, hand sculpting, start gate, best score, ghost and ski tracks autosave in the browser. Runs from older versions load as a mountain of their own: a section-editor run keeps its descent and its elements become pieces.
+Your mountain (its seed), pistes, pieces, best score, ghost and ski tracks autosave in the browser. Saves from older versions (before wild mountains) are kept aside, untouched, and you start on a new mountain.
 
 ## How the mountain is built
 
-`src/core/mountain.js` makes the base once per mountain: the descent profile, the meandering piste (groomed, with a small ridge of snow at its edge), powder pillows and forest outside it. `src/core/world.js` resets the snow to that base and builds the pieces on it (`applyPieces` in `src/core/pieces.js`): terrain first, then the snow layer, then the objects, each group of joined tiles built as one piece. Rebuilding takes a few milliseconds, which is what lets the ghost show the mountain changing while you drag. `src/core/surface.js` records groomed / powder / ice for the physics and the snow shader; the build grid is drawn on the terrain by its shader (`src/render/terrainMesh.js`). The build bar is `src/buildBar.js`.
+- `src/core/wild.js` generates the mountain from its seed as pure functions of position (height, rock bands, forest density), so it can be sampled at full resolution for the game or coarsely for the chooser's preview (`src/mountainPreview.js`). Its heights, rock and natural forest are computed once and kept as the base.
+- `src/core/piste.js` turns waypoints into curves (centripetal Catmull-Rom: through every point, no loops or overshoot), resolves branches and joins, and carves the pistes into the snow: each cell is levelled towards the centre line's height (a quarter of the natural tilt kept), the centre line is smoothed and graded to 38° at most (half cut, half fill), banks widen where the piste cuts across a slope, and where pistes overlap their targets are blended into one surface.
+- `src/core/terrain.js` holds the pieces and their fields: per kind, the painted tiles become a mask and three box blurs make it a near-gaussian field; bumps and hollows add a tight and a wide field (so big areas dome); flats, walls and rock bands change the slope along the fall line, column by column, then ease back to the mountain below.
+- `src/core/world.js` puts it together on every edit: base, pistes, pieces, then the snow (groomed / powder / rock in `src/core/surface.js`) and the trees and boulders, kept off the pistes and the rock. A rebuild takes about 20 ms, so the snow follows a dragged point or a paint stroke live.
+- `src/render/pisteGizmo.js` draws the waypoints (pins the same size on screen, never hidden by the snow), the dashed centre lines and the preview of the next stretch; the build grid and finish lines are drawn by the terrain shader (`src/render/terrainMesh.js`); `src/buildBar.js` is the bar at the bottom.
 
 ## Trees and rocks
 
-Forest grows beside the piste: patches of woods with glades between them, thinning out next to the piste so the powder there is rideable, thicker towards the far edges, and rocks on the steep bits. The piste itself, the start, the finish and every piece's footprint (and a kicker's landing) are kept clear. They're obstacles: brushing one is a bump that costs a little speed, hitting one head-on (over ~40 km/h straight into it) is a wipeout. Rocks can be jumped. Add more with the Trees and Rock pieces. They're drawn as two instanced meshes, so thousands cost two draw calls.
+They're obstacles: brushing one is a bump that costs a little speed, hitting one head-on (over ~40 km/h straight into it) is a wipeout. Rocks can be jumped. They're drawn as instanced meshes, so thousands cost a few draw calls.
 
 ## What's in the prototype
 
-- **Heightfield terrain**: 480 m wide, as long as the mountain (1.5 m cells, up to 2.15 m on a 4 km run) with raise, lower, smooth and flatten brushes, soft cosine falloff and a live cursor ring.
-- **Skier physics**: a point mass with gravity, snow friction and air drag. It leaves the ground on its own when the slope falls away faster than gravity can follow, so kickers and crests create real jumps. Landings are judged by impact speed into the slope: soft, rough (speed loss) or crash.
+- **Heightfield terrain**: as big as the mountain (1.5 m cells, 1.8 m on the large one), kept under about 430,000 vertices for phones.
+- **Skier physics**: a point mass with gravity, snow friction and air drag. It leaves the ground on its own when the slope falls away faster than gravity can follow, so bumps, lips and cliffs create real jumps. Landings are judged by impact speed into the slope: soft, rough (speed loss) or crash.
 - **Tricks and style**: crouch-and-pop jumps with a short grace window after the lip, spins and front/back flips in the air, landings judged on impact, ski angle and balance, named tricks ("Switch Double Backflip 540"), combos, a results card and a ghost of your best run (`src/core/score.js`, tested).
 - **Ride mode**: sending the skier drops the camera low behind him (chase cam or helmet cam) and you can steer, tuck and brake. Speed shows: the lens widens, the camera rumbles, snow sprays off the skis (rooster tails when carving, bursts on landing) and the screen edges streak. The skis have a heading and edge grip carves the velocity towards it; hands off, the skier simply follows the terrain. Land with the skis sideways and you crash.
-- **Run outcomes**: finish, crash, stopped (not enough slope), off the edge, too slow.
-- **Relief view** (Relief button or `T`): colours every point by how far it sits above or below its surroundings (a ~50 m blur) — crests warm orange, hollows cool blue — with low two-sun shading and 2 m / 10 m contours, so bumps, trenches and kickers read at any distance.
+- **Run outcomes**: finish (a finish line, or the bottom of the mountain), stopped (not enough slope), too slow.
+- **Relief view** (Relief button or `T`): colours every point by how far it sits above or below its surroundings (a ~50 m blur) — crests warm orange, hollows cool blue — with low two-sun shading and 2 m / 10 m contours, so bumps, hollows and cliffs read at any distance.
 - **Feedback**: live trail, the previous run as a dashed blue ghost line, topographic contours (2 m / 10 m), run stats and personal best.
 - **Diorama look**: the mountain is a block with stratified sides on a base slab.
 
@@ -100,9 +106,9 @@ Hand it to a few people. Do they say "one more tweak" and keep going? If not, fi
 ```bash
 npm install
 npm run dev      # local dev server
-npm test         # physics, scoring, pieces and brush tests (Node, no browser needed)
+npm test         # physics, scoring, mountains, pistes and pieces (Node, no browser needed)
 npm run build    # production build into dist/
-npm run smoke    # browser smoke test on the build: choose a mountain, build pieces, erase, undo, ride (needs Chromium: npx playwright install chromium)
+npm run smoke    # browser smoke test on the build: pick a mountain, trace and edit a piste, branch and join, paint bumps, undo, ride (needs Chromium: npx playwright install chromium)
 ```
 
 Add `?debug` to the URL for a frame-cost readout (fps, worst frame, draw calls, triangles). CI (`.github/workflows/ci.yml`) runs the tests, the build and the smoke test on every pull request.
@@ -113,8 +119,8 @@ Stack: [Vite](https://vite.dev) + [Three.js](https://threejs.org). The simulatio
 
 ```
 src/
-  core/        heightfield, mountains, pieces, structures, skier physics, scoring (pure JS)
-  render/      terrain mesh + shader, structures, skier, spray, ski tracks
+  core/        heightfield, wild mountains, pistes, terrain pieces, skier physics, scoring (pure JS)
+  render/      terrain mesh + shader, piste handles, trees and rocks, skier, spray, ski tracks
   buildBar.js  the build bar
   ui.js        overlay controls
   main.js      scene, input, game loop

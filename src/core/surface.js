@@ -1,7 +1,8 @@
-// What the snow is like, everywhere on the mountain: groomed piste, deep powder or ice.
-// Stored per terrain cell (same grid as the heightfield), 0..255 per channel. The physics
-// reads it every step (friction, drag, grip, how deep the skis sink), the renderer draws
-// it (corduroy on the piste, soft pillows in the powder, blue ice on frozen lakes).
+// What the snow is like, everywhere on the mountain: groomed piste, deep powder, ice, or
+// bare rock. Stored per terrain cell (same grid as the heightfield), 0..255 per channel.
+// The physics reads it every step (friction, drag, grip, how deep the skis sink), the
+// renderer draws it (corduroy on the piste, soft pillows in the powder, blue ice, rock
+// faces). Rock rides like hard snow: no powder to sink into.
 
 export class SurfaceMap {
   constructor(hf) {
@@ -19,9 +20,11 @@ export class SurfaceMap {
     if (!this.g || this.g.length !== n) {
       this.g = new Uint8Array(n);
       this.ice = new Uint8Array(n);
+      this.rock = new Uint8Array(n);
     } else {
       this.g.fill(0);
       this.ice.fill(0);
+      this.rock.fill(0);
     }
     this.version++;
     return this;
@@ -46,7 +49,7 @@ export class SurfaceMap {
     const c = j1 * this.nx + i0;
     const d = j1 * this.nx + i1;
     const lerp2 = (arr) => ((arr[a] * (1 - fx) + arr[b] * fx) * (1 - fz) + (arr[c] * (1 - fx) + arr[d] * fx) * fz) / 255;
-    out.g = lerp2(this.g);
+    out.g = Math.min(1, lerp2(this.g) + lerp2(this.rock));
     out.ice = lerp2(this.ice);
     out.powder = Math.max(0, 1 - out.g - out.ice);
     return out;

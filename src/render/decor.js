@@ -4,8 +4,9 @@ import { THEME } from './theme.js';
 import { toonRamp, outlineMaterial } from './toon.js';
 
 // Run decor from Blender (art/export_decor.py -> public/models/decor.glb): the wooden start
-// gate and the inflatable finish arch. No piste markers: it's free mountain, not a marked path.
-// Nothing here collides; it's scenery that tells you where the run starts and ends.
+// gate at the top of the first piste and the inflatable finish arch at its end, both turned
+// to face along the piste. Nothing here collides; it's scenery that tells you where the run
+// starts and ends. Hidden until there is a piste.
 
 const ARCH_SCALE = 1.7;
 
@@ -39,8 +40,9 @@ export class Decor {
     this.arch = new THREE.Group();
     this.group.add(this.gate, this.arch);
     this.ink = outlineMaterial({ width: 1.8, fade: 2500 });
-    this.start = { x: 0, z: 0 };
-    this.finishX = 0;
+    this.gateFade = 1;
+    this.start = null; // { x, z, dir }
+    this.finish = null;
     new GLTFLoader().load(
       `${import.meta.env.BASE_URL}models/decor.glb`,
       (gltf) => this.use(gltf),
@@ -71,7 +73,7 @@ export class Decor {
   setGateFade(a) {
     if (a === this.gateFade) return;
     this.gateFade = a;
-    this.gate.visible = a > 0.02;
+    this.gate.visible = a > 0.02 && !!this.start;
     this.gate.traverse((o) => {
       if (!o.isMesh) return;
       // ink lines can't fade (they're opaque), so they drop out as soon as the gate does
@@ -85,14 +87,10 @@ export class Decor {
     });
   }
 
-  setStart(x, z) {
-    this.start = { x, z };
-    this.placeGate();
-  }
-
-  // the finish arch spans the piste where it ends
-  setFinishX(x) {
-    this.finishX = x;
+  // start: { x, z, dir: [dx, dz] } or null; finish likewise (the arch spans the piste)
+  setEnds(start, finish) {
+    this.start = start;
+    this.finish = finish;
     this.refresh();
   }
 
@@ -103,17 +101,22 @@ export class Decor {
     }
   }
 
-  placeGate() {
-    const { x, z } = this.start;
-    this.gate.position.set(x, this.hf.heightAt(x, z) - 0.2, z);
-  }
-
-  // sit everything back on the snow (after sculpting or a new run)
+  // sit everything back on the snow (after an edit or a new mountain)
   refresh() {
     const hf = this.hf;
-    this.placeGate();
-    const fz = hf.finishZ;
-    const fx = this.finishX;
-    this.arch.position.set(fx, Math.min(hf.heightAt(fx - 12 * ARCH_SCALE, fz), hf.heightAt(fx + 12 * ARCH_SCALE, fz)) - 0.4, fz);
+    const s = this.start;
+    this.gate.visible = !!s && this.gateFade > 0.02;
+    if (s) {
+      this.gate.position.set(s.x, hf.heightAt(s.x, s.z) - 0.2, s.z);
+      this.gate.rotation.y = Math.atan2(s.dir[0], s.dir[1]);
+    }
+    const f = this.finish;
+    this.arch.visible = !!f;
+    if (f) {
+      const ax = -f.dir[1] * 12 * ARCH_SCALE;
+      const az = f.dir[0] * 12 * ARCH_SCALE;
+      this.arch.position.set(f.x, Math.min(hf.heightAt(f.x - ax, f.z - az), hf.heightAt(f.x + ax, f.z + az)) - 0.4, f.z);
+      this.arch.rotation.y = Math.atan2(f.dir[0], f.dir[1]);
+    }
   }
 }

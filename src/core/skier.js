@@ -412,7 +412,7 @@ export class Skier {
   // ---------- rails and boxes ----------
 
   startGrind({ rail: r, s }) {
-    const { vel, pos } = this;
+    const { vel } = this;
     const va = vel[0] * r.tx + vel[1] * r.ty + vel[2] * r.tz;
     this.grind = { rail: r, s, va, time: 0, dist: 0, slideTime: 0, air: !this.grounded };
     this.grounded = false;

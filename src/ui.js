@@ -1,27 +1,6 @@
-// DOM overlay: tools, brush settings, run HUD, trick pop-ups, results, dialogs, toasts.
+// DOM overlay: brush settings, run HUD, trick pop-ups, results, dialogs, toasts, menu.
 import { makeSlider } from './slider.js';
-
-const ICONS = {
-  raise: '<path d="M3 19h18M5 19c2-6 4-9 7-9s5 3 7 9"/><path d="M12 3v5M9.5 5.5 12 3l2.5 2.5"/>',
-  lower: '<path d="M3 9h18M5 9c2 6 4 9 7 9s5-3 7-9"/><path d="M12 2v5M9.5 4.5 12 7l2.5-2.5"/>',
-  smooth: '<path d="M3 9c3-3 5 3 9 0s6 3 9 0"/><path d="M3 15c3-1.5 5 1.5 9 0s6 1.5 9 0"/>',
-  flatten: '<path d="M3 15h18"/><path d="M6 11h12"/><path d="M8 7l4-3 4 3"/>',
-  build: '<path d="M2 19h20"/><path d="M4 19c6 0 10-3 13-9l1 9"/><path d="M17 10h3"/>',
-  start: '<path d="M6 21V4"/><path d="M6 4h11l-2.5 3.5L17 11H6"/>',
-  view: '<circle cx="12" cy="12" r="3"/><path d="M21 12c0 2.2-4 4-9 4s-9-1.8-9-4 4-4 9-4"/><path d="m18.5 6.5 2.5 1.5-1.5 2.5"/>',
-  advanced: '<path d="M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1"/><circle cx="15" cy="6" r="2"/><circle cx="9" cy="12" r="2"/><circle cx="17" cy="18" r="2"/>',
-};
-
-const KIND_ICONS = {
-  kicker: '<path d="M2 18h20"/><path d="M4 18c7 0 11-2 14-8v8"/>',
-  table: '<path d="M2 18h20"/><path d="M3 18 8 11h7l6 7"/>',
-  berm: '<path d="M2 18h20"/><path d="M5 18c2-9 12-9 14 0"/>',
-  rollers: '<path d="M2 18h20"/><path d="M2 18c2-5 4-5 6 0s4-5 6 0 4-5 6 0"/>',
-  tree: '<path d="M12 3 6 12h3l-4 6h14l-4-6h3z"/><path d="M12 18v3"/>',
-  rock: '<path d="M2 20h20"/><path d="M5 20l.5-5L9 10l5-1 4 3 1.5 8"/><path d="m9 10 2 4 3-5M11 14l-5.5 1"/>',
-  forest: '<path d="M7 4 3 11h2.5L2 16h10L8.5 11H11z"/><path d="M16 7l-3.5 6h2L11 18h10l-3.5-5h2z"/><path d="M7 16v3M16 18v3"/>',
-  clear: '<path d="M4 20 20 4"/><path d="M8 4 4 11h2.5L3 16h6"/><path d="M15 20h6"/>',
-};
+import { SLOPES, LENGTHS } from './core/mountain.js';
 
 const STATUS_LABEL = {
   idle: 'Ready',
@@ -36,51 +15,6 @@ const fmt = (n) => Math.round(n).toLocaleString('en-US');
 
 export function createUI(opts) {
   const $ = (s) => document.querySelector(s);
-  // Orbit and Start are always there; the hand sculpting tools sit behind Advanced
-  const toolList = [
-    { id: 'view', label: 'Orbit', key: 'V', title: 'Orbit the view; tap the snow to edit that spot' },
-    { id: 'start', label: 'Start', key: '5', title: 'Move the start gate' },
-    { id: 'advanced', label: 'Advanced', key: 'A', toggle: true, title: 'Hand sculpting tools' },
-    ...Object.entries(opts.tools).map(([id, t]) => ({ id, label: t.label, key: t.key, adv: true })),
-    { id: 'build', label: 'Build', key: 'B', adv: true },
-  ];
-
-  const nav = $('#tools');
-  nav.innerHTML = toolList
-    .map(
-      (t) => `
-      <button class="tool${t.toggle ? ' tool-toggle' : ''}" type="button" ${t.toggle ? 'data-adv-toggle' : `data-tool="${t.id}"`} ${t.adv ? 'data-adv hidden' : ''} aria-pressed="false" title="${t.title || t.label} (${t.key})">
-        <svg viewBox="0 0 24 24" aria-hidden="true">${ICONS[t.id]}</svg>
-        <span class="tool-label">${t.label}</span>
-        <kbd>${t.key}</kbd>
-      </button>`
-    )
-    .join('');
-  const advBtn = nav.querySelector('[data-adv-toggle]');
-  nav.addEventListener('click', (e) => {
-    if (e.target.closest('[data-adv-toggle]')) {
-      opts.onAdvanced(advBtn.getAttribute('aria-pressed') !== 'true');
-      return;
-    }
-    const b = e.target.closest('[data-tool]');
-    if (b) opts.onTool(b.dataset.tool);
-  });
-
-  // Build tool: what to build
-  const kinds = $('#build-kinds');
-  kinds.innerHTML = Object.entries(opts.stamps)
-    .map(
-      ([id, k]) => `
-      <button class="kind" type="button" role="radio" data-kind="${id}" aria-checked="false" title="${k.hint}">
-        <svg viewBox="0 0 24 24" aria-hidden="true">${KIND_ICONS[id]}</svg><span>${k.label}</span>
-      </button>`
-    )
-    .join('');
-  kinds.addEventListener('click', (e) => {
-    const b = e.target.closest('[data-kind]');
-    if (b) opts.onKind(b.dataset.kind);
-  });
-
   const radius = makeSlider($('#radius'));
   const strength = makeSlider($('#strength'));
   const radiusOut = $('#radius-out');
@@ -105,15 +39,58 @@ export function createUI(opts) {
   $('#redo').addEventListener('click', opts.onRedo);
   $('#reset-view').addEventListener('click', () => opts.onResetView());
 
-  // run designer
+  // menu
   $('#reset').addEventListener('click', () => {
     setMenu(false);
-    opts.onNewRun();
+    opts.onNewMountain();
   });
-  $('#edit-run').addEventListener('click', () => opts.onEditRun());
   $('#fresh-snow').addEventListener('click', () => {
     setMenu(false);
     opts.onFreshSnow();
+  });
+  $('#move-start').addEventListener('click', () => {
+    setMenu(false);
+    opts.onMoveStart();
+  });
+  const advBtn = $('#advanced');
+  advBtn.addEventListener('click', () => {
+    setMenu(false);
+    opts.onAdvanced(advBtn.getAttribute('aria-pressed') !== 'true');
+  });
+
+  // the new-mountain card: how steep, how long
+  const mt = $('#mountain');
+  let mtPick = { slope: 'medium', length: 'medium' };
+  const profileSvg = (deg) => {
+    const t = Math.tan((deg * Math.PI) / 180);
+    const y = Math.min(36, 6 + 38 * t);
+    const path = `M4 6 C 20 ${(6 + (y - 6) * 0.3).toFixed(1)}, 36 ${(6 + (y - 6) * 0.8).toFixed(1)}, 56 ${y.toFixed(1)}`;
+    return `<svg viewBox="0 0 60 40" aria-hidden="true"><path class="fill" d="${path} L56 40 L4 40 Z"/><path d="${path}"/></svg>`;
+  };
+  const renderMt = () => {
+    $('#mt-slopes').innerHTML = SLOPES.map(
+      (sl) => `<button type="button" role="radio" class="mt-slope" data-slope="${sl.id}" aria-checked="${sl.id === mtPick.slope}" data-d="${sl.deg < 18 ? 'blue' : sl.deg < 25 ? 'red' : 'black'}">
+        ${profileSvg(sl.deg)}<b>${sl.label}</b><small>about ${sl.deg}°</small><em>${sl.blurb}</em></button>`
+    ).join('');
+    $('#mt-length').innerHTML = LENGTHS.map(
+      (l) => `<button type="button" data-len="${l.id}" aria-pressed="${l.id === mtPick.length}">${l.label}<small>${l.m >= 1000 ? `${l.m / 1000} km` : `${l.m} m`}</small></button>`
+    ).join('');
+  };
+  const closeMt = () => {
+    mt.hidden = true;
+  };
+  mt.addEventListener('click', (e) => {
+    const sl = e.target.closest('[data-slope]');
+    const ln = e.target.closest('[data-len]');
+    if (sl) mtPick.slope = sl.dataset.slope;
+    if (ln) mtPick.length = ln.dataset.len;
+    if (sl || ln) renderMt();
+    if (e.target === mt && !$('#mt-cancel').hidden) closeMt();
+  });
+  $('#mt-cancel').addEventListener('click', closeMt);
+  $('#mt-go').addEventListener('click', () => {
+    closeMt();
+    opts.onMountain({ ...mtPick, starter: $('#mt-starter').checked });
   });
 
   const toggle = (sel, initial, cb) => {
@@ -189,6 +166,7 @@ export function createUI(opts) {
   window.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
       if (!intro.hidden) closeIntro();
+      else if (!mt.hidden && !$('#mt-cancel').hidden) closeMt();
       setMenu(false);
     }
   });
@@ -219,29 +197,29 @@ export function createUI(opts) {
   return {
     openIntro,
     get blocking() {
-      return !intro.hidden;
+      return !intro.hidden || !mt.hidden;
+    },
+    openMountain(current, canCancel = true) {
+      setMenu(false);
+      if (current && current.slope) mtPick = { slope: current.slope, length: current.length || 'medium' };
+      $('#mt-cancel').hidden = !canCancel;
+      renderMt();
+      mt.hidden = false;
+      $('#mt-go').focus({ preventScroll: true });
     },
     get resultsOpen() {
       return !results.hidden;
     },
     setTool(id) {
-      nav.querySelectorAll('[data-tool]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.tool === id)));
       document.body.dataset.tool = id;
-      kinds.hidden = id !== 'build';
-      // in Build mode the sliders size the feature
-      $('#radius-name').textContent = id === 'build' ? 'Width' : 'Size';
-      $('#strength-name').textContent = id === 'build' ? 'Height' : 'Strength';
     },
     setAdvanced(on) {
       advBtn.setAttribute('aria-pressed', String(on));
-      nav.querySelectorAll('[data-adv]').forEach((b) => (b.hidden = !on));
+      advBtn.textContent = on ? 'Sculpt by hand: on' : 'Sculpt by hand: off';
       document.body.classList.toggle('advanced', on);
     },
     toggleAdvanced() {
       advBtn.click();
-    },
-    setKind(kind) {
-      kinds.querySelectorAll('[data-kind]').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.kind === kind)));
     },
     setHistory(canUndo, canRedo) {
       $('#undo').disabled = !canUndo;

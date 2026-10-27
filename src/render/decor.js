@@ -40,6 +40,7 @@ export class Decor {
     this.group.add(this.gate, this.arch);
     this.ink = outlineMaterial({ width: 1.8, fade: 2500 });
     this.start = { x: 0, z: 0 };
+    this.finishX = 0;
     new GLTFLoader().load(
       `${import.meta.env.BASE_URL}models/decor.glb`,
       (gltf) => this.use(gltf),
@@ -89,6 +90,12 @@ export class Decor {
     this.placeGate();
   }
 
+  // the finish arch spans the piste where it ends
+  setFinishX(x) {
+    this.finishX = x;
+    this.refresh();
+  }
+
   setFog(near, far) {
     for (const m of [this.ink]) {
       m.uniforms.uFogNear.value = near;
@@ -106,6 +113,7 @@ export class Decor {
     const hf = this.hf;
     this.placeGate();
     const fz = hf.finishZ;
-    this.arch.position.set(0, Math.min(hf.heightAt(-12 * ARCH_SCALE, fz), hf.heightAt(12 * ARCH_SCALE, fz)) - 0.4, fz);
+    const fx = this.finishX;
+    this.arch.position.set(fx, Math.min(hf.heightAt(fx - 12 * ARCH_SCALE, fz), hf.heightAt(fx + 12 * ARCH_SCALE, fz)) - 0.4, fz);
   }
 }

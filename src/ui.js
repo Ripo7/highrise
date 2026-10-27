@@ -9,6 +9,7 @@ const ICONS = {
   build: '<path d="M2 19h20"/><path d="M4 19c6 0 10-3 13-9l1 9"/><path d="M17 10h3"/>',
   start: '<path d="M6 21V4"/><path d="M6 4h11l-2.5 3.5L17 11H6"/>',
   view: '<circle cx="12" cy="12" r="3"/><path d="M21 12c0 2.2-4 4-9 4s-9-1.8-9-4 4-4 9-4"/><path d="m18.5 6.5 2.5 1.5-1.5 2.5"/>',
+  advanced: '<path d="M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1"/><circle cx="15" cy="6" r="2"/><circle cx="9" cy="12" r="2"/><circle cx="17" cy="18" r="2"/>',
 };
 
 const KIND_ICONS = {
@@ -35,25 +36,32 @@ const fmt = (n) => Math.round(n).toLocaleString('en-US');
 
 export function createUI(opts) {
   const $ = (s) => document.querySelector(s);
+  // Orbit and Start are always there; the hand sculpting tools sit behind Advanced
   const toolList = [
-    ...Object.entries(opts.tools).map(([id, t]) => ({ id, label: t.label, key: t.key })),
-    { id: 'build', label: 'Build', key: 'B' },
-    { id: 'start', label: 'Start', key: '5' },
-    { id: 'view', label: 'Orbit', key: 'V' },
+    { id: 'view', label: 'Orbit', key: 'V', title: 'Orbit the view; tap the snow to edit that spot' },
+    { id: 'start', label: 'Start', key: '5', title: 'Move the start gate' },
+    { id: 'advanced', label: 'Advanced', key: 'A', toggle: true, title: 'Hand sculpting tools' },
+    ...Object.entries(opts.tools).map(([id, t]) => ({ id, label: t.label, key: t.key, adv: true })),
+    { id: 'build', label: 'Build', key: 'B', adv: true },
   ];
 
   const nav = $('#tools');
   nav.innerHTML = toolList
     .map(
       (t) => `
-      <button class="tool" type="button" data-tool="${t.id}" aria-pressed="false" title="${t.label} (${t.key})">
+      <button class="tool${t.toggle ? ' tool-toggle' : ''}" type="button" ${t.toggle ? 'data-adv-toggle' : `data-tool="${t.id}"`} ${t.adv ? 'data-adv hidden' : ''} aria-pressed="false" title="${t.title || t.label} (${t.key})">
         <svg viewBox="0 0 24 24" aria-hidden="true">${ICONS[t.id]}</svg>
         <span class="tool-label">${t.label}</span>
         <kbd>${t.key}</kbd>
       </button>`
     )
     .join('');
+  const advBtn = nav.querySelector('[data-adv-toggle]');
   nav.addEventListener('click', (e) => {
+    if (e.target.closest('[data-adv-toggle]')) {
+      opts.onAdvanced(advBtn.getAttribute('aria-pressed') !== 'true');
+      return;
+    }
     const b = e.target.closest('[data-tool]');
     if (b) opts.onTool(b.dataset.tool);
   });
@@ -103,6 +111,10 @@ export function createUI(opts) {
     opts.onNewRun();
   });
   $('#edit-run').addEventListener('click', () => opts.onEditRun());
+  $('#fresh-snow').addEventListener('click', () => {
+    setMenu(false);
+    opts.onFreshSnow();
+  });
 
   const toggle = (sel, initial, cb) => {
     const btn = $(sel);
@@ -219,6 +231,14 @@ export function createUI(opts) {
       // in Build mode the sliders size the feature
       $('#radius-name').textContent = id === 'build' ? 'Width' : 'Size';
       $('#strength-name').textContent = id === 'build' ? 'Height' : 'Strength';
+    },
+    setAdvanced(on) {
+      advBtn.setAttribute('aria-pressed', String(on));
+      nav.querySelectorAll('[data-adv]').forEach((b) => (b.hidden = !on));
+      document.body.classList.toggle('advanced', on);
+    },
+    toggleAdvanced() {
+      advBtn.click();
     },
     setKind(kind) {
       kinds.querySelectorAll('[data-kind]').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.kind === kind)));

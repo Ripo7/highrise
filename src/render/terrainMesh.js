@@ -65,6 +65,11 @@ const frag = /* glsl */ `
   uniform sampler2D uLocalMean;
   uniform vec2 uHalf;
   uniform vec2 uLocalSize;
+  uniform sampler2D uSurf;
+  uniform vec2 uSurfSize;
+  uniform float uCell;
+  uniform vec3 uIceLit;
+  uniform vec3 uIceShadow;
 
   // Manual bilinear lookup: iPhones can't filter float textures in hardware (they read
   // back as zero with linear filtering), so the texture uses nearest and we blend here.
@@ -144,8 +149,36 @@ const frag = /* glsl */ `
     // drawn face is skiable, so it reads as snow; the edge is a clean cut with a thin ink line
     float aas = fwidth(slope) + 0.002;
     float rockAmt = smoothstep(0.68 - aas, 0.68 + aas, slope);
+    // what the snow is like: groomed piste, untouched powder, or ice
+    vec2 suv = ((vWorld.xz + uHalf) / uCell + 0.5) / uSurfSize;
+    vec2 sf = texture2D(uSurf, suv).rg;
+    float groomed = sf.r;
+    float ice = sf.g;
+    float powder = max(0.0, 1.0 - groomed - ice);
+    float camDist = length(cameraPosition - vWorld);
+    if (uRelief < 0.5) {
+      // fresh powder is a touch brighter and softer
+      snow = mix(snow, min(vec3(1.0), snow * 1.035 + 0.012), powder);
+      // groomer passes: wide bands across the piste, a hair lighter and darker
+      float band = step(0.5, fract((vWorld.x + 0.8 * sin(vWorld.z * 0.013)) / 4.4));
+      snow *= 1.0 + groomed * (band - 0.5) * 0.026 * (1.0 - smoothstep(250.0, 700.0, camDist));
+      // corduroy: fine ridges along the run, only close up
+      float cw = fwidth(vWorld.x) * 3.3;
+      float cord = (0.5 + 0.5 * sin(vWorld.x * 20.94)) * (1.0 - smoothstep(0.25, 0.6, cw));
+      snow *= 1.0 - groomed * cord * 0.06;
+      // ice: pale blue, streaked, with a sharp glint of sun
+      vec3 iceCol = level < 1.0 ? mix(uIceShadow, mix(uIceShadow, uIceLit, 0.5), level) : mix(mix(uIceShadow, uIceLit, 0.5), uIceLit, level - 1.0);
+      float streak = vnoise(vec2(vWorld.x * 0.4, vWorld.z * 3.0));
+      iceCol *= 0.94 + 0.1 * streak;
+      vec3 vd = normalize(cameraPosition - vWorld);
+      float glint = pow(max(0.0, dot(reflect(-L, n), vd)), 60.0) * smoothstep(0.35, 0.65, sunShadow());
+      snow = mix(snow, iceCol + glint * 0.5, ice * 0.9);
+    }
     vec3 col = mix(snow, rock, rockAmt);
     col = mix(col, uInk, (1.0 - smoothstep(0.0, aas * 1.6, abs(slope - 0.68))) * 0.55);
+    // the edge of the piste, where the groomer stopped
+    float ge = fwidth(groomed) * 1.5 + 0.002;
+    col = mix(col, uSnowShadow, (1.0 - smoothstep(0.0, ge, abs(groomed - 0.5))) * 0.35 * (1.0 - uRelief));
 
     // ink along crests and lips seen edge-on: where the surface turns away from the camera
     // fast (a kicker lip, the top of a roller), not on broad slopes merely seen at an angle
@@ -272,8 +305,9 @@ const sideFrag = /* glsl */ `
 `;
 
 export class TerrainMesh {
-  constructor(hf, { finishZ, start }) {
+  constructor(hf, { finishZ, start, surface = null }) {
     this.hf = hf;
+    this.surface = surface;
     const { nx, nz } = hf;
     this.group = new THREE.Group();
 
@@ -346,7 +380,21 @@ export class TerrainMesh {
       uLocalMean: { value: null },
       uHalf: { value: new THREE.Vector2(hf.halfX, hf.halfZ) },
       uLocalSize: { value: new THREE.Vector2(1, 1) },
+      uSurf: { value: null },
+      uSurfSize: { value: new THREE.Vector2(hf.nx, hf.nz) },
+      uCell: { value: hf.cell },
+      uIceLit: { value: c('#eef4ff') },
+      uIceShadow: { value: c('#9fb6f0') },
     };
+    // the surface map (groomed in red, ice in green) as a texture
+    const n = hf.nx * hf.nz;
+    this.surfData = new Uint8Array(n * 2);
+    this.surfTex = new THREE.DataTexture(this.surfData, hf.nx, hf.nz, THREE.RGFormat, THREE.UnsignedByteType);
+    this.surfTex.magFilter = THREE.LinearFilter;
+    this.surfTex.minFilter = THREE.LinearFilter;
+    this.surfTex.generateMipmaps = false;
+    this.uniforms.uSurf.value = this.surfTex;
+    this.refreshSurface();
     // blurred copy of the terrain at 1/6 resolution: the "surroundings" the relief view
     // compares each point against
     this.ds = 6;
@@ -419,6 +467,21 @@ export class TerrainMesh {
     this.refreshLocalMean();
   }
 
+  // copy the surface map into the texture (after a run is built)
+  refreshSurface() {
+    const sf = this.surface;
+    const d = this.surfData;
+    if (sf && sf.g.length * 2 === d.length) {
+      for (let i = 0, n = sf.g.length; i < n; i++) {
+        d[i * 2] = sf.g[i];
+        d[i * 2 + 1] = sf.ice[i];
+      }
+    } else {
+      for (let i = 0; i < d.length; i += 2) d[i] = 255; // no map: groomed everywhere
+    }
+    this.surfTex.needsUpdate = true;
+  }
+
   setRelief(on) {
     this.uniforms.uRelief.value = on ? 1 : 0;
   }
@@ -466,6 +529,7 @@ export class TerrainMesh {
     this.material.dispose();
     this.sides[0]?.material.dispose();
     this.localTex.dispose();
+    this.surfTex.dispose();
   }
 
   setStart(x, z) {

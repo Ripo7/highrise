@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover, user-scalable=no" />
     <title>Highrise</title>
-    <meta name="description" content="Sculpt a mountain, send a skier, chase the perfect line." />
+    <meta name="description" content="Design a mountain, send a skier, chase the perfect line." />
     <meta name="theme-color" content="#99adf9" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -26,14 +26,14 @@
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 19h20"/><path d="m3 19 5-8 4 5 3-4 6 7"/><path d="M8 11V5M12 16v-4M15 12V8"/></svg>
         <span>Relief</span><kbd>T</kbd>
       </button>
-      <button id="edit-run" class="view-toggle run-toggle" type="button" title="Redraw the run profile (P)">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 5c4 0 5 2 7 6s4 7 13 8"/><path d="M2 21h20" opacity=".5"/><circle cx="2.5" cy="5" r="1.5"/></svg>
-        <span>Profile</span><kbd>P</kbd>
+      <button id="edit-run" class="view-toggle run-toggle" type="button" title="Edit the run: sections and elements (P)">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M3 15h18M9 3v18M15 3v18"/></svg>
+        <span>Edit run</span><kbd>P</kbd>
       </button>
     </div>
 
     <p class="hint">
-      <span class="desktop-only">Drag to sculpt · Right-drag or Alt-drag to orbit · Scroll to zoom</span>
+      <span class="desktop-only">Click the snow to edit that spot · Drag to orbit · Scroll to zoom</span>
     </p>
 
     <section class="hud panel" aria-label="Run">
@@ -76,6 +76,7 @@
           <label class="check"><input id="contours" type="checkbox" /> Contours <kbd>C</kbd></label>
           <button id="mute" class="btn btn-quiet" type="button" aria-pressed="false" title="Sound (M)">Sound on</button>
           <button id="reset-view" class="btn btn-quiet" type="button" title="Reset view (R)">Reset view</button>
+          <button id="fresh-snow" class="btn btn-quiet" type="button" title="Cover your ski tracks with fresh snow">Fresh snow</button>
           <button id="reset" class="btn btn-quiet" type="button">New run</button>
         </div>
       </div>
@@ -151,64 +152,77 @@
 
     <div id="toast" class="toast" role="status" hidden></div>
 
-    <!-- run designer: draw the descent seen from the side -->
-    <div id="profile" class="profile" hidden>
-      <canvas id="profile-canvas" aria-label="Draw the run seen from the side"></canvas>
-      <header class="profile-head">
-        <div class="profile-title">
+    <!-- run editor: the descent as a stack of sections, each with a grid of cells -->
+    <div id="runed" class="runed" hidden>
+      <header class="runed-head">
+        <div class="runed-title">
           <p class="intro-eyebrow">Your run</p>
-          <h1>Draw the descent</h1>
-          <p id="profile-hint" class="profile-hint"></p>
+          <h1>Design the run</h1>
         </div>
-        <dl class="profile-read">
-          <div><dt>Length</dt><dd id="pr-len">0 m</dd></div>
-          <div><dt>Drop</dt><dd id="pr-drop">0 m</dd></div>
-          <div><dt>Average</dt><dd id="pr-avg">0°</dd></div>
-          <div><dt>Steepest</dt><dd id="pr-max">0°</dd></div>
+        <dl class="runed-read">
+          <div><dt>Length</dt><dd id="re-len">0 m</dd></div>
+          <div><dt>Drop</dt><dd id="re-drop">0 m</dd></div>
+          <div><dt>Average</dt><dd id="re-avg">0°</dd></div>
+          <div><dt>Steepest</dt><dd id="re-max">0°</dd></div>
         </dl>
       </header>
-      <footer class="profile-foot">
-        <ul class="profile-legend" aria-label="Slope colours">
+      <div class="runed-side">
+        <canvas id="re-canvas" aria-label="The run seen from the side. Tap a section to edit it."></canvas>
+        <ul class="runed-legend" aria-label="Slope colours">
           <li><i class="diff" data-d="green"></i>&lt; 12°</li>
           <li><i class="diff" data-d="blue"></i>12–22°</li>
           <li><i class="diff" data-d="red"></i>22–32°</li>
           <li><i class="diff" data-d="black"></i>32°+</li>
         </ul>
-        <div class="profile-actions">
-          <button id="pr-undo" class="icon-btn" type="button" aria-label="Undo stroke" title="Undo stroke (Ctrl+Z)">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 14 4 9l5-5"/><path d="M4 9h10a6 6 0 0 1 0 12h-3"/></svg>
-          </button>
-          <button id="pr-clear" class="btn btn-quiet" type="button">Clear</button>
-          <button id="pr-cancel" class="btn" type="button">Cancel</button>
-          <button id="pr-build" class="send pr-build" type="button">Build this run</button>
+      </div>
+      <div class="runed-panel">
+        <div id="re-templates" class="runed-templates" role="group" aria-label="Start from" hidden></div>
+        <div id="re-scroll" class="runed-scroll">
+          <ol id="re-list" class="runed-list"></ol>
+          <button id="re-add" class="btn add-sec" type="button">+ Add section</button>
         </div>
-      </footer>
+        <footer class="runed-foot">
+          <div class="runed-hist">
+            <button id="re-undo" class="icon-btn" type="button" aria-label="Undo" title="Undo (Ctrl+Z)">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 14 4 9l5-5"/><path d="M4 9h10a6 6 0 0 1 0 12h-3"/></svg>
+            </button>
+            <button id="re-redo" class="icon-btn" type="button" aria-label="Redo" title="Redo (Ctrl+Shift+Z)">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 14 5-5-5-5"/><path d="M20 9H10a6 6 0 0 0 0 12h3"/></svg>
+            </button>
+            <span id="re-msg" class="runed-msg"></span>
+          </div>
+          <div class="runed-actions">
+            <button id="re-cancel" class="btn" type="button">Cancel</button>
+            <button id="re-build" class="send re-build" type="button">Build this run</button>
+          </div>
+        </footer>
+      </div>
+      <div id="re-sheet" class="sheet" hidden></div>
     </div>
 
     <div id="intro" class="intro" hidden>
       <div class="intro-card panel" role="dialog" aria-modal="true" aria-labelledby="intro-title">
         <p class="intro-eyebrow">How to play</p>
-        <h1 id="intro-title">Draw it. Build it. Ride it.</h1>
-        <p class="intro-lede">Draw your own descent, shape it into a playground, then ride it: pop off kickers, spin and flip, land clean and chain tricks into combos.</p>
+        <h1 id="intro-title">Design it. Build it. Ride it.</h1>
+        <p class="intro-lede">Stack sections down the mountain, fill their grid with jumps, trees, rails and chalets, then ride it: pop off kickers, grind rails, float through powder and chain tricks into combos.</p>
         <ol class="intro-steps">
           <li>
-            <b>Draw</b>
-            <span>Trace the run seen from the side, as long and as steep as you like (up to 4 km). Redraw it any time with Profile: your sculpting moves with it.</span>
-          </li>
-          <li>
-            <b>Build</b>
-            <span class="desktop-only">Drag on the snow to raise or dig. Use Build (B) to drag out kickers, tables, berms and rollers.</span>
-            <span class="touch-only">Drag on the snow to raise or dig. Use Build to drag out kickers, tables, berms and rollers.</span>
+            <b>Design</b>
+            <span>Each section has a slope, a length, a groomed piste width, a bend, ups and downs and forest. Tap a cell in its grid to add an element. Edit the run any time with Edit run.</span>
           </li>
           <li>
             <b>Look around</b>
-            <span class="desktop-only">Right-drag or Alt-drag to orbit, scroll to zoom, Relief (T) to see bumps and hollows in colour.</span>
-            <span class="touch-only">Two fingers to move and pinch to zoom; pick Orbit to turn the view. Relief shows bumps and hollows in colour.</span>
+            <span class="desktop-only">Drag to orbit, right-drag to pan, scroll to zoom. Click the snow to edit that spot. Relief (T) shows bumps and hollows in colour.</span>
+            <span class="touch-only">One finger to orbit, two fingers to move and pinch to zoom. Tap the snow to edit that spot. Relief shows bumps and hollows in colour.</span>
           </li>
           <li>
             <b>Ride</b>
-            <span class="desktop-only">← → steer, ↓ brakes. Hold Space to crouch, release to jump: time it at a kicker's lip. In the air, ← → spin and ↑ ↓ flip. Hold Space again to soak up big landings. Stay above 100 km/h for a speed bonus.</span>
-            <span class="touch-only">Left thumb: slide to steer, drag down to brake. Right thumb: hold Jump to crouch, release to pop at a kicker's lip. In the air, slide to spin and drag up or down to flip. Hold Jump again to soak up big landings. Stay above 100 km/h for a speed bonus.</span>
+            <span class="desktop-only">← → steer, ↓ brakes. Hold Space to crouch, release to jump: time it at a kicker's lip. In the air, ← → spin and ↑ ↓ flip. Ride onto a rail lined up with it to grind. Powder is slower than the groomed piste; your tracks stay in the snow.</span>
+            <span class="touch-only">Left thumb: slide to steer, drag down to brake. Right thumb: hold Jump to crouch, release to pop at a kicker's lip. In the air, slide to spin and drag up or down to flip. Ride onto a rail lined up with it to grind. Your tracks stay in the snow.</span>
+          </li>
+          <li>
+            <b>Sculpt by hand</b>
+            <span>Advanced (in the tool bar) brings back the raise, lower, smooth and flatten brushes and the Build tool for fine touches.</span>
           </li>
         </ol>
         <button id="intro-go" class="send intro-go" type="button">Got it</button>

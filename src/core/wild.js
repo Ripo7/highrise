@@ -1,4 +1,4 @@
-// Wild mountains: a generated face of snow to trace your pistes through. Every mountain
+// Wild mountains: a generated face of snow to shape and ride anywhere. Every mountain
 // is different (a seed), you pick how big and how steep. It has the shapes of a real
 // mountain: a summit shoulder at the top, steeper pitches and rolls on the way down, spurs
 // and gullies running down the fall line, a couple of wide bowls (combes), knolls, bands
@@ -193,7 +193,7 @@ export function makeWild(m) {
 
 /**
  * Resize hf (and surf) to the mountain and fill them: heights, the rock bands, the natural
- * forest and boulders. Returns the base the pistes and pieces are built on:
+ * forest and boulders. Returns the base the pieces are built on:
  * { m, W, L, gen, h, rock, forest } (rock: the bands; steep faces are found on the final
  * snow, see world.js).
  */

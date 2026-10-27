@@ -1,8 +1,9 @@
 import * as THREE from 'three';
 
 // Snow spray kicked up by the skis: a pooled point cloud with soft round sprites.
-// More spray the faster you go, a big rooster tail when carving or braking,
-// and a burst on landing.
+// A little dust off the tails as you go, a fan of snow thrown out of the turn when the
+// edges bite or the skis skid (a wall of it in a hockey stop), clouds in powder, and a
+// burst on landing. Thrown from behind the boots, so it never hides the skier.
 
 const MAX = 1600;
 
@@ -82,11 +83,12 @@ export class Spray {
     this.grav[i] = grav;
   }
 
-  // Spray from a moving skier. `carve` 0..1 (steering/skid), `brake` boolean.
+  // Spray from a moving skier: how hard the edges bite (skier.latAcc), how much they skid
+  // (skier.skid), the snow under them (skier.powder)
   fromSkier(skier, dt) {
     if (!skier.grounded || skier.status !== 'running') return;
     const sp = skier.speed;
-    if (sp < 4) return;
+    if (sp < 3) return;
     const v = skier.vel;
     const n = skier.n;
     const h = skier.heading;
@@ -94,31 +96,36 @@ export class Spray {
     const rx = h[1] * n[2] - h[2] * n[1];
     const ry = h[2] * n[0] - h[0] * n[2];
     const rz = h[0] * n[1] - h[1] * n[0];
-    const steer = skier.input.steer;
-    const brake = skier.input.brake || skier.input.pitch < -0.4;
-    const carve = Math.abs(steer) + (brake ? 1.5 : 0);
-    // deep powder: much more of it, bigger, and it hangs in the air as a cloud
+    const skid = skier.skid || 0;
+    const bite = Math.min(1, Math.abs(skier.latAcc || 0) / 18);
+    const carve = bite * 0.6 + skid * 1.6;
+    // deep powder: much more of it, and it hangs in the air as a cloud
     const pw = skier.powder || 0;
-    const rate = (sp * 3 + carve * sp * 7) * (1 + 1.6 * pw);
+    const rate = (sp * 1.2 + carve * sp * 6) * (1 + 1.4 * pw);
     this.carry += rate * dt;
-    // spray goes to the outside of the turn
-    const side = steer !== 0 ? steer : brake ? (Math.random() < 0.5 ? -1 : 1) : 0;
+    // spray goes to the outside of the turn (away from the side the body leans to)
+    const t = skier.tilt || n;
+    const lean = t[0] * rx + t[1] * ry + t[2] * rz;
+    const side = Math.abs(lean) > 0.04 ? -Math.sign(lean) : 0;
+    const vl = Math.max(1, sp);
     while (this.carry >= 1) {
       this.carry -= 1;
-      const back = 0.15 + Math.random() * 0.25;
-      const lat = (side * (3 + Math.random() * 6) + (Math.random() - 0.5) * 3) * (0.4 + carve * 0.6);
-      const up = 2 + Math.random() * (3 + carve * 4);
+      const back = 0.1 + Math.random() * 0.2;
+      const lat = (side * (1.5 + Math.random() * 4) + (Math.random() - 0.5) * 1.5) * (0.3 + carve * 0.7);
+      const up = 1 + Math.random() * (1.5 + carve * 2.5);
+      // from the tails of the skis, behind the boots
+      const tail = 0.5 + Math.random() * 0.4;
       const p = [
-        skier.pos[0] + (Math.random() - 0.5) * 0.8,
-        skier.pos[1] + 0.2,
-        skier.pos[2] + (Math.random() - 0.5) * 0.8,
+        skier.pos[0] - (v[0] / vl) * tail + rx * side * 0.2 + (Math.random() - 0.5) * 0.3,
+        skier.pos[1] + 0.08,
+        skier.pos[2] - (v[2] / vl) * tail + rz * side * 0.2 + (Math.random() - 0.5) * 0.3,
       ];
-      const puff = pw > 0.3 && Math.random() < 0.35 * pw;
+      const puff = pw > 0.3 && Math.random() < 0.3 * pw;
       this.emitOne(
         p,
         [v[0] * back + rx * lat + n[0] * up * (1 + pw * 0.4), v[1] * back + ry * lat + n[1] * up * (1 + pw * 0.4), v[2] * back + rz * lat + n[2] * up * (1 + pw * 0.4)],
-        (0.8 + Math.random() * 1.0 + carve * 0.6) * (puff ? 2.6 + Math.random() * 1.8 : 1 + 0.4 * pw),
-        (0.45 + Math.random() * 0.45) * (puff ? 2.8 : 1 + 0.7 * pw),
+        (0.35 + Math.random() * 0.45 + carve * 0.3) * (puff ? 2.2 + Math.random() * 1.2 : 1 + 0.3 * pw),
+        (0.35 + Math.random() * 0.4) * (puff ? 2.4 : 1 + 0.6 * pw),
         puff ? 0.9 : 6 - 3 * pw
       );
     }
@@ -127,16 +134,16 @@ export class Spray {
   burst(skier, strength = 1) {
     const v = skier.vel;
     const pw = skier.powder || 0;
-    const n = 60 * strength * (1 + pw);
+    const n = 45 * strength * (1 + pw);
     for (let k = 0; k < n; k++) {
       const a = Math.random() * Math.PI * 2;
-      const r = 3 + Math.random() * 6;
+      const r = 2 + Math.random() * 4;
       const puff = pw > 0.3 && k % 3 === 0;
       this.emitOne(
-        [skier.pos[0], skier.pos[1] + 0.2, skier.pos[2]],
-        [v[0] * 0.3 + Math.cos(a) * r, 2 + Math.random() * (4 + 3 * pw), v[2] * 0.3 + Math.sin(a) * r],
-        (0.7 + Math.random() * 0.8) * (puff ? 3.5 : 1),
-        (0.6 + Math.random() * 0.5) * (puff ? 3 : 1 + pw),
+        [skier.pos[0], skier.pos[1] + 0.1, skier.pos[2]],
+        [v[0] * 0.3 + Math.cos(a) * r, 1.5 + Math.random() * (3 + 2 * pw), v[2] * 0.3 + Math.sin(a) * r],
+        (0.35 + Math.random() * 0.45) * (puff ? 3 : 1),
+        (0.5 + Math.random() * 0.4) * (puff ? 2.6 : 1 + pw),
         puff ? 0.8 : 6 - 3 * pw
       );
     }

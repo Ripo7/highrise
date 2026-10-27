@@ -5,14 +5,17 @@ import { THEME } from './theme.js';
 import { toonRamp, outlineMaterial } from './toon.js';
 
 // The skier: a cartoon character modelled, rigged and posed in Blender
-// (art/export_skier.py -> public/models/skier.glb), drawn ~2x life size so he reads from
-// orbit distance. Six held poses (Stance, Crouch, Tuck, Air, Brake, Tumble) play at once and
-// their weights follow what the rider is doing. Simple blocks stand in until the file loads.
+// (art/export_skier.py -> public/models/skier.glb), life size (about 1.9 m with the hat), so
+// speed reads true against the trees and the snow. Six held poses (Stance, Crouch, Tuck,
+// Air, Brake, Tumble) play at once and their weights follow what the rider is doing. He
+// leans the way the physics says (the snow's push, see Skier.tilt) with the skis staying on
+// the snow, his upper body a little less than his legs (angulation) and turned a little
+// towards where he's going in a skid. Simple blocks stand in until the file loads.
 // Also: a ground disc for judging landings and a fading speed trail.
 
-const SCALE = 2.2;
-const MODEL_SCALE = 2.0;
-const CY = 1.0 * SCALE; // flip pivot height (around the hips)
+const SCALE = 1.05;
+const MODEL_SCALE = 1.0;
+const CY = 0.9; // flip pivot height (around the hips)
 const POSES = ['Stance', 'Crouch', 'Tuck', 'Air', 'Brake', 'Tumble'];
 const PART_COLORS = () => ({
   jacket: THEME.jacket,
@@ -102,8 +105,9 @@ export class SkierMesh {
     this._fwd2 = new THREE.Vector3();
     this._worldUp = new THREE.Vector3(0, 1, 0);
     this.crouch = 0;
-    this.lean = 0;
-    this._prevFwd = new THREE.Vector3(0, 0, 1);
+    this._qi = new THREE.Quaternion();
+    this._n = new THREE.Vector3();
+    this._v = new THREE.Vector3();
     this.mixer = null;
     this.weights = Object.fromEntries(POSES.map((p) => [p, p === 'Stance' ? 1 : 0]));
     loadSkier()
@@ -139,6 +143,7 @@ export class SkierMesh {
         this.parts.push({ mesh: line, name, ink: true });
       }
     }
+    this.spine = model.getObjectByName('spine') || null;
     this.mixer = new THREE.AnimationMixer(model);
     this.actions = {};
     for (const clip of gltf.animations) {
@@ -156,17 +161,25 @@ export class SkierMesh {
     if (this.firstPerson) this.setFirstPerson(true);
   }
 
-  // blend the held poses towards what the rider is doing
+  // blend the held poses towards what the rider is doing (a little hop over a bump keeps
+  // the riding pose: arms out only on a real jump)
   pose(skier, dt) {
     const want = Object.fromEntries(POSES.map((p) => [p, 0]));
+    const flying = !skier.grounded && skier.curAir > 0.18;
+    const braking = skier.input.brake || skier.input.pitch < -0.4;
     if (skier.wipeout > 0) want.Tumble = 1;
-    else if (!skier.grounded) {
+    else if (flying) {
       if (skier.crouching) want.Crouch = 1; // absorbing a landing
       else want.Air = 1;
     } else if (skier.crouching) want.Crouch = 1;
-    else if (skier.input.pitch > 0.4) want.Tuck = 1;
-    else if (skier.input.pitch < -0.4) want.Brake = 1;
-    else want.Stance = 1;
+    else if ((skier.input.tuck || skier.input.pitch > 0.4) && !skier.poling) want.Tuck = 1;
+    else if (braking && skier.speed > 2) want.Brake = 1;
+    else {
+      // carving: sink a little into the turn; soaking up a bump: knees bend
+      const bend = Math.min(0.55, Math.abs(skier.latAcc || 0) / 30 + (1 - (skier.contact ?? 1)) * 0.6);
+      want.Stance = 1 - bend;
+      want.Crouch = bend;
+    }
     const k = Math.min(1, dt * 12);
     let sum = 0;
     for (const p of POSES) {
@@ -175,6 +188,20 @@ export class SkierMesh {
     }
     for (const p of POSES) this.actions[p]?.setEffectiveWeight(this.weights[p] / Math.max(1e-4, sum));
     this.mixer.update(dt);
+    this.angulate(skier);
+  }
+
+  // the upper body: a little more upright than the legs in a carve, turned towards the
+  // direction of travel in a skid (the spine bone, after the poses are applied)
+  angulate(skier) {
+    if (!this.spine || skier.wipeout > 0) return;
+    const q = this._qi.copy(this.group.quaternion).invert();
+    const n = this._n.set(skier.n[0], skier.n[1], skier.n[2]).applyQuaternion(q);
+    const roll = skier.grounded ? Math.atan2(n.x, n.y) : 0;
+    const v = this._v.set(skier.vel[0], skier.vel[1], skier.vel[2]).applyQuaternion(q);
+    const yaw = skier.grounded && skier.speed > 2 ? Math.atan2(v.x, Math.abs(v.z) + 1e-3) : 0;
+    this.spine.rotateZ(-0.4 * roll);
+    this.spine.rotateY(Math.max(-0.7, Math.min(0.7, 0.45 * yaw)));
   }
 
   addTo(scene) {
@@ -196,7 +223,7 @@ export class SkierMesh {
     const f = this._fwd2.crossVectors(right, up).normalize();
     this._m.makeBasis(right, up, f);
     this._q.setFromRotationMatrix(this._m);
-    this.group.quaternion.slerp(this._q, Math.min(1, dt * 14));
+    this.group.quaternion.slerp(this._q, dt <= 0 ? 1 : Math.min(1, dt * 16));
   }
 
   // Place + pose from simulation state
@@ -205,9 +232,12 @@ export class SkierMesh {
     const [x, y, z] = skier.drawPos ? skier.drawPos(this._dp || (this._dp = [0, 0, 0])) : skier.pos;
     // in deep powder the skis ride under the surface
     this.group.position.set(x, y - (skier.sink || 0), z);
-    const n = skier.n;
+    // lean along the push of the snow (into turns, back in a skid): the skis stay on the
+    // snow because the group's origin is the feet
     const up = this._up;
-    if (skier.grounded) up.set(n[0], n[1], n[2]);
+    const t = skier.tilt || skier.n;
+    if (skier.grounded && skier.wipeout <= 0) up.set(t[0], t[1], t[2]);
+    else if (skier.grounded) up.set(skier.n[0], skier.n[1], skier.n[2]);
     else up.lerp(this._worldUp, Math.min(1, dt * 4)).normalize();
     // face where the skis point (the steering heading), not just the direction of travel
     const h = skier.heading;
@@ -220,30 +250,23 @@ export class SkierMesh {
     if (this.mixer) this.pose(skier, dt);
     else this.body.scale.set(SCALE, SCALE * (1 - 0.24 * this.crouch), SCALE);
 
-    // lean into carves: banked by the turn's sideways pull (turn rate x speed)
-    const cy = this._prevFwd.z * this._fwd.x - this._prevFwd.x * this._fwd.z;
-    this._prevFwd.copy(this._fwd);
-    const yawRate = dt > 0 ? Math.asin(Math.max(-1, Math.min(1, cy))) / dt : 0;
-    const wantLean = skier.grounded && skier.wipeout <= 0 ? Math.atan((yawRate * skier.speed) / 9.81) : 0;
-    this.lean += (Math.max(-0.7, Math.min(0.7, wantLean)) - this.lean) * Math.min(1, dt * 8);
-
     if (skier.wipeout > 0) {
       // tumble: a couple of rolls, then lying in the snow
       const t = 1 - skier.wipeout / skier.P.wipeoutTime;
       const roll = Math.min(1, t / 0.45);
       this.flipper.rotation.set(-roll * Math.PI * 3, 0, 1.35 * Math.min(1, t * 3));
-      this.flipper.position.y = CY * (1 - 0.6 * Math.min(1, t * 3));
+      this.flipper.position.y = CY * (1 - 0.7 * Math.min(1, t * 3));
     } else {
       // flips: the body pitches around the hips (+pitch = backflip, nose up and over)
-      this.flipper.rotation.set(-skier.pitch, 0, -this.lean);
+      this.flipper.rotation.set(-skier.pitch, 0, 0);
       this.flipper.position.y = CY;
     }
 
     const gy = hf.heightAt(x, z);
-    this.shadow.position.set(x, gy + 0.15, z);
+    this.shadow.position.set(x, gy + 0.08, z);
     // the sun casts the real shadow; this disc right under him only helps judge landings
     const air = Math.max(0, y - gy);
-    const s = 1 + air * 0.04;
+    const s = 0.55 + air * 0.03;
     this.shadow.scale.setScalar(s);
     this.shadow.material.opacity = (0.26 * Math.min(1, Math.max(0, air - 0.8) / 2)) / (1 + air * 0.08);
   }
@@ -267,9 +290,7 @@ export class SkierMesh {
     this.flipper.rotation.set(0, 0, 0);
     this.flipper.position.y = CY;
     this.crouch = 0;
-    this.lean = 0;
     this._fwd.set(0, 0, 1);
-    this._prevFwd.set(0, 0, 1);
     for (const p of POSES) this.weights[p] = p === 'Stance' ? 1 : 0;
   }
 }

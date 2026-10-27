@@ -1,8 +1,8 @@
-// Terrain pieces: shapes you paint onto the mountain on a 10 m grid. They don't stamp a
-// shape per tile: all the tiles of one kind make one mask, the mask is blurred into a
-// smooth field, and the field shapes the snow. So pieces side by side are one shape (a row
-// of bumps is a ridge, a block of them a hill, bumps beside a hollow roll into it), with no
-// seam, step or edge anywhere, and a piste across them simply follows the snow.
+// Terrain pieces: shapes you paint onto the mountain's hexagon tiles (about 10 m across,
+// see hex.js). They don't stamp a shape per tile: all the tiles of one kind make one mask,
+// the mask is blurred into a smooth field, and the field shapes the snow. So pieces side
+// by side are one shape (a row of bumps is a ridge, a cluster of them a hill, bumps beside
+// a hollow roll into it), with no seam, step or edge anywhere.
 //
 //   bump / hollow   raise or dig the snow (bigger areas grow higher or deeper in the middle)
 //   flat            the slope eases off: a shelf, with a lip at its lower edge
@@ -10,17 +10,18 @@
 //   rocks           a band of rock: a cliff face across the slope, a run-out below it
 //   forest          trees (they join any forest around them)
 //   clearing        no trees: opens up the natural forest
-//   powder          deep untouched snow, even on a piste
+//   powder          deep untouched snow
 //
 // Each tile holds one shape (bump, hollow, flat, wall or rocks), one cover (forest or
 // clearing) and powder or not: three layers, so trees can grow on a bump.
 //
-//   piece: { k, i, j }: tile column i (from the left edge), row j (from the top line)
+//   piece: { k, i, j }: hexagon column i (from the left edge), row j (from the top line)
 
 import { smoothstep, MIN_H, MAX_H, makeValueNoise } from './heightfield.js';
 import { TREE, rng } from './props.js';
+import { HEX_R, hexAt, hexCenter, hexCols, hexRows, hexDisk, hexLine } from './hex.js';
 
-export const TILE = 10;
+export { HEX_R };
 
 export const KINDS = {
   bump: { cat: 'terrain', layer: 's', label: 'Bump', hint: 'Raises the snow. Side by side: a ridge, a hill.' },
@@ -30,12 +31,17 @@ export const KINDS = {
   rocks: { cat: 'terrain', layer: 's', label: 'Rocks', hint: 'A rock band: a cliff to drop off.' },
   forest: { cat: 'nature', layer: 'c', label: 'Forest', hint: 'Pines. They join the forest around.' },
   clearing: { cat: 'nature', layer: 'c', label: 'Clearing', hint: 'Opens up the forest.' },
-  powder: { cat: 'nature', layer: 'p', label: 'Powder', hint: 'Deep untouched snow, even on a piste.' },
+  powder: { cat: 'nature', layer: 'p', label: 'Powder', hint: 'Deep untouched snow.' },
 };
 
-export const gridCols = (hf) => Math.floor(hf.sizeX / TILE);
-export const gridRows = (hf) => Math.floor((hf.finishZ - hf.startZ) / TILE);
-export const tileOf = (hf, x, z) => ({ i: Math.floor((x + hf.halfX) / TILE), j: Math.floor((z - hf.startZ) / TILE) });
+export const gridCols = (hf) => hexCols(hf.sizeX);
+export const gridRows = (hf) => hexRows(hf.finishZ - hf.startZ);
+// the tile at world (x, z), and the world centre of a tile
+export const tileOf = (hf, x, z) => hexAt(x + hf.halfX, z - hf.startZ);
+export function tileCenter(hf, i, j) {
+  const [x, u] = hexCenter(i, j);
+  return { x: x - hf.halfX, z: hf.startZ + u };
+}
 const key = (i, j) => `${i},${j}`;
 const layer = (k) => KINDS[k].layer;
 
@@ -58,21 +64,32 @@ export function eraseTiles(pieces, tiles) {
   return out.length === pieces.length ? pieces : out;
 }
 
-// the tiles a brush of `size` tiles covers around tile (i, j)
-export function brushTiles(i, j, size) {
-  const out = [];
-  const a = Math.floor((size - 1) / 2);
-  for (let dj = 0; dj < size; dj++) for (let di = 0; di < size; di++) out.push([i - a + di, j - a + dj]);
-  return out;
-}
+// the tiles a brush covers around tile (i, j): size 1 is the tile, 2 adds its six
+// neighbours (7 tiles), 3 the ring around those (19)
+export const BRUSH_TILES = [1, 7, 19];
+export const brushTiles = (i, j, size) => hexDisk(i, j, Math.max(0, size - 1));
 
 // tiles along a straight line between two tiles (inclusive), so a fast drag leaves no gaps
-export function lineTiles(a, b) {
+export const lineTiles = (a, b) => hexLine(a, b);
+
+// Saves from before the hexagons painted 10 m squares: every hexagon takes the pieces of
+// the square its centre was in, so the shapes stay where they were.
+export function squaresToHexes(pieces, cols, rows) {
+  const at = new Map();
+  for (const p of pieces) {
+    if (!KINDS[p.k]) continue;
+    const k = key(p.i, p.j);
+    if (!at.has(k)) at.set(k, []);
+    at.get(k).push(p.k);
+  }
+  if (!at.size) return [];
   const out = [];
-  const n = Math.max(Math.abs(b.i - a.i), Math.abs(b.j - a.j));
-  for (let t = 0; t <= n; t++) {
-    const f = n ? t / n : 0;
-    out.push([Math.round(a.i + (b.i - a.i) * f), Math.round(a.j + (b.j - a.j) * f)]);
+  for (let j = 0; j < rows; j++) {
+    for (let i = 0; i < cols; i++) {
+      const [x, u] = hexCenter(i, j);
+      const ks = at.get(key(Math.floor(x / 10), Math.floor(u / 10)));
+      if (ks) for (const k of ks) out.push({ k, i, j });
+    }
   }
   return out;
 }
@@ -111,34 +128,48 @@ export function tileField(hf, tiles, sx, sz = sx) {
   let ti1 = -Infinity;
   let tj0 = Infinity;
   let tj1 = -Infinity;
+  let x0 = Infinity;
+  let x1 = -Infinity;
+  let u0 = Infinity;
+  let u1 = -Infinity;
   for (const p of tiles) {
     if (p.i < ti0) ti0 = p.i;
     if (p.i > ti1) ti1 = p.i;
     if (p.j < tj0) tj0 = p.j;
     if (p.j > tj1) tj1 = p.j;
+    const [x, u] = hexCenter(p.i, p.j);
+    if (x < x0) x0 = x;
+    if (x > x1) x1 = x;
+    if (u < u0) u0 = u;
+    if (u > u1) u1 = u;
   }
   const { cell, halfZ, startZ } = hf;
-  const mx = 3 * sx + cell;
-  const mz = 3 * sz + cell;
-  const i0 = Math.max(0, Math.floor((ti0 * TILE - mx) / cell));
-  const i1 = Math.min(hf.nx - 1, Math.ceil(((ti1 + 1) * TILE + mx) / cell));
-  const j0 = Math.max(0, Math.floor((startZ + halfZ + tj0 * TILE - mz) / cell));
-  const j1 = Math.min(hf.nz - 1, Math.ceil((startZ + halfZ + (tj1 + 1) * TILE + mz) / cell));
+  const mx = 3 * sx + cell + HEX_R;
+  const mz = 3 * sz + cell + HEX_R;
+  const i0 = Math.max(0, Math.floor((x0 - mx) / cell));
+  const i1 = Math.min(hf.nx - 1, Math.ceil((x1 + mx) / cell));
+  const j0 = Math.max(0, Math.floor((startZ + halfZ + u0 - mz) / cell));
+  const j1 = Math.min(hf.nz - 1, Math.ceil((startZ + halfZ + u1 + mz) / cell));
   const w = i1 - i0 + 1;
   const h = j1 - j0 + 1;
   if (w < 1 || h < 1) return null;
-  // the mask, tile by tile, on the cells
+  // the mask, tile by tile, on the cells (only near the tiles: a margin of one tile)
   const cols = ti1 - ti0 + 1;
-  const on = new Uint8Array(cols * (tj1 - tj0 + 1));
+  const rows = tj1 - tj0 + 1;
+  const on = new Uint8Array(cols * rows);
   for (const p of tiles) on[(p.j - tj0) * cols + (p.i - ti0)] = 1;
   const f = new Float32Array(w * h);
-  for (let jj = 0; jj < h; jj++) {
+  const ci0 = Math.max(0, Math.floor((x0 - HEX_R) / cell) - i0);
+  const ci1 = Math.min(w - 1, Math.ceil((x1 + HEX_R) / cell) - i0);
+  const cj0 = Math.max(0, Math.floor((startZ + halfZ + u0 - HEX_R) / cell) - j0);
+  const cj1 = Math.min(h - 1, Math.ceil((startZ + halfZ + u1 + HEX_R) / cell) - j0);
+  for (let jj = cj0; jj <= cj1; jj++) {
     const u = (j0 + jj) * cell - halfZ - startZ;
-    const tj = Math.floor(u / TILE) - tj0;
-    if (tj < 0 || tj > tj1 - tj0) continue;
-    for (let ii = 0; ii < w; ii++) {
-      const ti = Math.floor(((i0 + ii) * cell) / TILE) - ti0;
-      if (ti >= 0 && ti < cols && on[tj * cols + ti]) f[jj * w + ii] = 1;
+    for (let ii = ci0; ii <= ci1; ii++) {
+      const t = hexAt((i0 + ii) * cell, u);
+      const ti = t.i - ti0;
+      const tj = t.j - tj0;
+      if (ti >= 0 && tj >= 0 && ti < cols && tj < rows && on[tj * cols + ti]) f[jj * w + ii] = 1;
     }
   }
   // three box blurs make a near-gaussian falloff
@@ -233,7 +264,7 @@ export function applyTerrain(hf, pieces) {
         const fw = fieldAt(Fw, i, j);
         const fr = fieldAt(Fr, i, j);
         const g = h[(j + 1) * nx + i] - h[j * nx + i]; // how the snow drops over this cell
-        const inc = (-0.8 * ff + 0.9 * fw) * g - 0.85 * fr * cell;
+        const inc = (-0.8 * ff + 0.9 * fw) * g - 0.95 * fr * cell; // a hexagon row is a little shallower than a 10 m square
         const cover = Math.min(1, ff + fw + fr);
         delta += inc - delta * (1 - cover) * (cell / Math.max(20, 3 * Math.abs(delta)));
         D[(jj + 1) * w + ii] = delta;

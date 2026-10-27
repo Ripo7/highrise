@@ -83,6 +83,23 @@ export class Heightfield {
     return (a * (1 - fx) + b * fx) * (1 - fz) + (c * (1 - fx) + d * fx) * fz;
   }
 
+  // Height of the drawn surface (the mesh's two triangles per cell, split from (i+1, j) to
+  // (i, j+1)), for things laid on the snow such as ski tracks, so they never dip under it
+  heightAtMesh(x, z) {
+    const gx = (x + this.halfX) / this.cell;
+    const gz = (z + this.halfZ) / this.cell;
+    const i = Math.floor(gx);
+    const j = Math.floor(gz);
+    const fx = gx - i;
+    const fz = gz - j;
+    const a = this.heightAtCell(i, j);
+    const b = this.heightAtCell(i + 1, j);
+    const c = this.heightAtCell(i, j + 1);
+    const d = this.heightAtCell(i + 1, j + 1);
+    if (fx + fz <= 1) return a + (b - a) * fx + (c - a) * fz;
+    return d + (c - d) * (1 - fx) + (b - d) * (1 - fz);
+  }
+
   // Surface normal at world position (central differences), written into out[3]
   normalAt(x, z, out = [0, 1, 0]) {
     const e = this.cell;

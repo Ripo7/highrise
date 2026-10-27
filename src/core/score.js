@@ -204,7 +204,7 @@ const WIPEOUT_HINT = {
   impact: 'Landed too hard: aim for a downslope',
   sideways: 'Skis sideways: straighten before landing',
   flip: 'Not upright: finish the flip or let go sooner',
-  edge: 'Off the side of the piste',
+  edge: 'Off the side of the mountain',
   tree: 'Straight into a tree: steer around them',
   rock: 'Hit a rock: jump it or go around',
   wall: 'Hit a building: ride around it',

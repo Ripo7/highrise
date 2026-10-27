@@ -2305,3 +2305,44 @@ body.menu-open .extras {
 .bb-piece:disabled:active {
   transform: none;
 }
+
+/* a paused run: "From the start" beside "Ride on" */
+.restart-btn {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  min-width: 66px;
+  padding: 6px 8px;
+  border: var(--edge);
+  border-radius: 14px;
+  background: var(--panel-solid);
+  box-shadow: 0 4px 0 var(--ink);
+  font: 600 11px/1.05 var(--display);
+  color: var(--ink);
+  text-align: center;
+  cursor: pointer;
+}
+.restart-btn[hidden] {
+  display: none;
+}
+.restart-btn svg {
+  width: 22px;
+  height: 22px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+body.paused .status {
+  background: #fff1df;
+  color: var(--signal);
+}
+@media (max-width: 720px) {
+  .restart-btn {
+    min-width: 58px;
+    font-size: 10px;
+  }
+}

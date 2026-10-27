@@ -86,10 +86,19 @@ export class Sound {
       set(L.wind.g.gain, 0.05 + 0.5 * k * k + (air ? 0.12 : 0));
       set(L.wind.f.frequency, 250 + sp * 22 + (air ? 500 : 0));
       const ground = skier.grounded && skier.wipeout <= 0 ? 1 : 0;
-      set(L.hiss.g.gain, ground * 0.1 * k);
+      // powder is a soft, low whoosh; the groomed piste a bright hiss
+      const pw = skier.powder || 0;
+      set(L.hiss.g.gain, ground * (0.1 + 0.08 * pw) * k);
+      set(L.hiss.f.frequency, 3500 - 2700 * pw);
       const carve = Math.abs(skier.input.steer) + Math.max(0, -skier.input.pitch) * 1.3;
-      set(L.carve.g.gain, ground * Math.min(1, sp / 15) * 0.32 * Math.min(1.3, carve), 0.04);
-      set(L.carve.f.frequency, 1500 + sp * 30);
+      if (skier.grind) {
+        // metal (or plastic) scraping under the skis
+        set(L.carve.g.gain, 0.22 * Math.min(1, sp / 8), 0.03);
+        set(L.carve.f.frequency, skier.grind.rail.box ? 1200 : 4200);
+      } else {
+        set(L.carve.g.gain, ground * Math.min(1, sp / 15) * 0.32 * Math.min(1.3, carve) * (1 - 0.6 * pw), 0.04);
+        set(L.carve.f.frequency, 1500 + sp * 30);
+      }
     } else {
       set(L.wind.g.gain, 0.03, 0.3);
       set(L.wind.f.frequency, 300, 0.3);

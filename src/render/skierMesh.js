@@ -203,7 +203,8 @@ export class SkierMesh {
   sync(skier, hf, dt) {
     // between the last two physics steps, so motion is smooth at any refresh rate
     const [x, y, z] = skier.drawPos ? skier.drawPos(this._dp || (this._dp = [0, 0, 0])) : skier.pos;
-    this.group.position.set(x, y, z);
+    // in deep powder the skis ride under the surface
+    this.group.position.set(x, y - (skier.sink || 0), z);
     const n = skier.n;
     const up = this._up;
     if (skier.grounded) up.set(n[0], n[1], n[2]);

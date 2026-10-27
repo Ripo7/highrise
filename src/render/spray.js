@@ -4,7 +4,7 @@ import * as THREE from 'three';
 // More spray the faster you go, a big rooster tail when carving or braking,
 // and a burst on landing.
 
-const MAX = 900;
+const MAX = 1600;
 
 // Point size is in device pixels: scale it with the drawing-buffer height (a third of it,
 // which keeps the look tuned on a 900 px screen) so spray looks the same at any resolution, cap it so a flake right
@@ -44,6 +44,7 @@ export class Spray {
     this.life = new Float32Array(MAX); // 1 -> 0
     this.decay = new Float32Array(MAX);
     this.size = new Float32Array(MAX);
+    this.grav = new Float32Array(MAX).fill(6); // powder dust hangs in the air
     this.next = 0;
     this.carry = 0;
     const geo = new THREE.BufferGeometry();
@@ -70,7 +71,7 @@ export class Spray {
     this.points.material.uniforms.uScale.value = px;
   }
 
-  emitOne(p, v, size, life) {
+  emitOne(p, v, size, life, grav = 6) {
     const i = this.next;
     this.next = (this.next + 1) % MAX;
     this.pos.set(p, i * 3);
@@ -78,6 +79,7 @@ export class Spray {
     this.life[i] = 1;
     this.decay[i] = 1 / life;
     this.size[i] = size;
+    this.grav[i] = grav;
   }
 
   // Spray from a moving skier. `carve` 0..1 (steering/skid), `brake` boolean.
@@ -95,7 +97,9 @@ export class Spray {
     const steer = skier.input.steer;
     const brake = skier.input.brake || skier.input.pitch < -0.4;
     const carve = Math.abs(steer) + (brake ? 1.5 : 0);
-    const rate = sp * 3 + carve * sp * 7;
+    // deep powder: much more of it, bigger, and it hangs in the air as a cloud
+    const pw = skier.powder || 0;
+    const rate = (sp * 3 + carve * sp * 7) * (1 + 1.6 * pw);
     this.carry += rate * dt;
     // spray goes to the outside of the turn
     const side = steer !== 0 ? steer : brake ? (Math.random() < 0.5 ? -1 : 1) : 0;
@@ -109,25 +113,31 @@ export class Spray {
         skier.pos[1] + 0.2,
         skier.pos[2] + (Math.random() - 0.5) * 0.8,
       ];
+      const puff = pw > 0.3 && Math.random() < 0.35 * pw;
       this.emitOne(
         p,
-        [v[0] * back + rx * lat + n[0] * up, v[1] * back + ry * lat + n[1] * up, v[2] * back + rz * lat + n[2] * up],
-        0.8 + Math.random() * 1.0 + carve * 0.6,
-        0.45 + Math.random() * 0.45
+        [v[0] * back + rx * lat + n[0] * up * (1 + pw * 0.4), v[1] * back + ry * lat + n[1] * up * (1 + pw * 0.4), v[2] * back + rz * lat + n[2] * up * (1 + pw * 0.4)],
+        (0.8 + Math.random() * 1.0 + carve * 0.6) * (puff ? 2.6 + Math.random() * 1.8 : 1 + 0.4 * pw),
+        (0.45 + Math.random() * 0.45) * (puff ? 2.8 : 1 + 0.7 * pw),
+        puff ? 0.9 : 6 - 3 * pw
       );
     }
   }
 
   burst(skier, strength = 1) {
     const v = skier.vel;
-    for (let k = 0; k < 60 * strength; k++) {
+    const pw = skier.powder || 0;
+    const n = 60 * strength * (1 + pw);
+    for (let k = 0; k < n; k++) {
       const a = Math.random() * Math.PI * 2;
       const r = 3 + Math.random() * 6;
+      const puff = pw > 0.3 && k % 3 === 0;
       this.emitOne(
         [skier.pos[0], skier.pos[1] + 0.2, skier.pos[2]],
-        [v[0] * 0.3 + Math.cos(a) * r, 2 + Math.random() * 4, v[2] * 0.3 + Math.sin(a) * r],
-        0.7 + Math.random() * 0.8,
-        0.6 + Math.random() * 0.5
+        [v[0] * 0.3 + Math.cos(a) * r, 2 + Math.random() * (4 + 3 * pw), v[2] * 0.3 + Math.sin(a) * r],
+        (0.7 + Math.random() * 0.8) * (puff ? 3.5 : 1),
+        (0.6 + Math.random() * 0.5) * (puff ? 3 : 1 + pw),
+        puff ? 0.8 : 6 - 3 * pw
       );
     }
   }
@@ -140,7 +150,7 @@ export class Spray {
       life[i] = Math.max(0, life[i] - decay[i] * dt);
       const k = i * 3;
       vel[k] *= drag;
-      vel[k + 1] = vel[k + 1] * drag - 6 * dt;
+      vel[k + 1] = vel[k + 1] * drag - this.grav[i] * dt;
       vel[k + 2] *= drag;
       pos[k] += vel[k] * dt;
       pos[k + 1] += vel[k + 1] * dt;

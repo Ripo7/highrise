@@ -14,9 +14,15 @@ import { History } from './core/history.js';
 import { Skier, PHYS } from './core/skier.js';
 import { ScoreKeeper, SPEED_BONUS_KMH, speedRate } from './core/score.js';
 import { STAMPS, applyStamp, restoreRect } from './core/stamps.js';
-import { buildFromProfile, addDelta, defaultProfile, profileStats, profileLength } from './core/profile.js';
-import { PropSet, PROP_TOOLS, TREE, ROCK, scatterProps, packProps, unpackProps, rng } from './core/props.js';
+import { addDelta, profileStats } from './core/profile.js';
+import { PropSet, PROP_TOOLS, TREE, ROCK, packProps, unpackProps, rng } from './core/props.js';
+import { buildRun } from './core/build.js';
+import { SurfaceMap } from './core/surface.js';
+import { StructureSet } from './core/structures.js';
+import { templateRun, packRun, unpackRun, profileToRun, runProfile, runGeometry, sampleAt, sectionAt, CELL_M, GRID_COLS, GRID_HALF } from './core/run.js';
 import { PropMeshes } from './render/propMeshes.js';
+import { StructureMeshes } from './render/structureMeshes.js';
+import { Tracks } from './render/tracks.js';
 import { Decor } from './render/decor.js';
 import { TerrainMesh } from './render/terrainMesh.js';
 import { SkierMesh, Trail } from './render/skierMesh.js';
@@ -26,21 +32,24 @@ import { Sound } from './audio.js';
 import { RideControls } from './rideControls.js';
 import { createUI } from './ui.js';
 import { THEME, SUN_DIR } from './render/theme.js';
-import { ProfileEditor } from './profileEditor.js';
+import { RunEditor } from './runEditor.js';
 import { createDebugOverlay } from './debugOverlay.js';
 
 // ---------- state ----------
 const isBrush = (t) => t in TOOLS;
 const COARSE = window.matchMedia('(pointer: coarse)').matches;
 let altHeld = false; // Alt/Option held: left button orbits
-const SAVE_KEY = 'highrise.ski.v3'; // v3: drawn run profile + sculpting stored as a delta
-const INTRO_KEY = 'highrise.intro.v3';
+const SAVE_KEY = 'highrise.ski.v3'; // v3+: the run (v5: sections) + sculpting stored as a delta
+const INTRO_KEY = 'highrise.intro.v4';
+const TRACKS_KEY = 'highrise.tracks.v1';
 const BACKUP_KEY = 'highrise.ski.backup';
 let loadNote = null; // told to the player once the UI is up
 let saveFailed = false;
 
 const hf = new Heightfield();
 const props = new PropSet(hf); // trees and rocks
+const surf = new SurfaceMap(hf); // groomed / powder / ice
+const structs = new StructureSet(hf); // rails, chalets, pylons, nets...
 const history = new History(25);
 const BUILD_KINDS = { ...STAMPS, ...PROP_TOOLS };
 const isPropTool = (k) => k in PROP_TOOLS;
@@ -51,7 +60,9 @@ const state = {
   radius: COARSE ? 28 : 22, // a 480 m wide mountain; fingers are less precise on phones
   strength: 0.5,
   start: null,
-  profile: null, // the drawn run: elevations every 4 m
+  run: null, // the designed run: sections (see core/run.js)
+  geo: null, // its shape: piste centre and width every 4 m
+  advanced: false, // hand sculpting tools shown
   rideCam: 'chase', // chase | helmet
   contours: true,
   relief: false,
@@ -62,12 +73,25 @@ const state = {
 let baseH = null; // the generated piste before any sculpting
 const hadSave = loadSave();
 if (!hadSave) {
-  // nothing drawn yet: a plain slope sits behind the run designer
-  state.profile = defaultProfile();
-  state.start = buildFromProfile(hf, state.profile);
-  baseH = hf.copy();
-  props.set(scatterProps(hf, 0, profileLength(state.profile), 1));
+  // nothing designed yet: the starter run sits behind the editor
+  state.run = templateRun('starter');
+  const built = generate(state.run);
+  state.start = built.start;
+  props.set(built.props);
+  structs.set(built.structs);
 }
+
+// Build the mountain for a run: snow, surface, trees and structures (not yet in the scene)
+function generate(run) {
+  const built = buildRun(hf, surf, run);
+  baseH = hf.copy();
+  state.geo = built.geo;
+  state.finishX = built.finishX;
+  return built;
+}
+
+// piste centre at u metres down the run
+const laneX = (u) => (state.geo ? sampleAt(state.geo.xc, Math.max(0, Math.min(state.geo.L, u))) : 0);
 
 // ---------- renderer / scene ----------
 const canvas = document.getElementById('scene');
@@ -173,11 +197,24 @@ function updateSun() {
 
 const propMeshes = new PropMeshes(props);
 scene.add(propMeshes.group);
+// rails, chalets, lifts, nets, cannons...
+const structMeshes = new StructureMeshes(structs);
+scene.add(structMeshes.group);
+// ski tracks, kept from run to run
+const tracks = new Tracks(hf);
+scene.add(tracks.mesh);
+try {
+  const saved = localStorage.getItem(TRACKS_KEY);
+  if (saved) tracks.unpack(saved);
+} catch {
+  /* no tracks yet */
+}
 // start gate and finish arch
 const decor = new Decor(hf, props);
 scene.add(decor.group);
 let decorSeen = -1;
 let decorAt = 0;
+let seatSeen = -1;
 
 let terrain = null;
 function rebuildTerrain() {
@@ -185,7 +222,7 @@ function rebuildTerrain() {
     scene.remove(terrain.group);
     terrain.dispose();
   }
-  terrain = new TerrainMesh(hf, { finishZ: hf.finishZ, start: state.start });
+  terrain = new TerrainMesh(hf, { finishZ: hf.finishZ, start: state.start, surface: surf });
   terrain.setRelief(state.relief);
   // the terrain shading its own hollows is costly on phones: there only props and the rider cast
   terrain.top.castShadow = !COARSE;
@@ -195,11 +232,16 @@ function rebuildTerrain() {
   scene.fog = new THREE.Fog(THEME.haze, terrain.uniforms.uFogNear.value, terrain.uniforms.uFogFar.value);
   propMeshes.setFog(terrain.uniforms.uFogNear.value, terrain.uniforms.uFogFar.value);
   decor.setFog(terrain.uniforms.uFogNear.value, terrain.uniforms.uFogFar.value);
+  structMeshes.setFog(terrain.uniforms.uFogNear.value, terrain.uniforms.uFogFar.value);
+  tracks.setFog(terrain.uniforms.uFogNear.value, terrain.uniforms.uFogFar.value);
+  decor.setFinishX(state.finishX || 0);
   decorSeen = -1;
+  seatSeen = terrain.version;
 }
 rebuildTerrain();
 
 propMeshes.rebuild();
+structMeshes.rebuild();
 
 const skierMesh = new SkierMesh();
 skierMesh.addTo(scene);
@@ -253,6 +295,17 @@ const ui = createUI({
   onRideCam: () => toggleRideCam(),
   onEditRun: () => openDesigner('edit'),
   onNewRun: () => openDesigner('new'),
+  onAdvanced: (on) => setAdvanced(on),
+  onFreshSnow: () => {
+    if (tracks.freshSnow()) {
+      ui.toast('Fresh snow: your tracks are covered.');
+      try {
+        localStorage.removeItem(TRACKS_KEY);
+      } catch {
+        /* ignore */
+      }
+    } else ui.toast('No tracks yet: ride the run first.');
+  },
   onRelief: (on) => {
     state.relief = on;
     terrain.setRelief(on);
@@ -273,7 +326,7 @@ const ui = createUI({
     } catch {
       /* ignore */
     }
-    // first visit: go straight on to drawing a run
+    // first visit: go straight on to designing a run
     if (!hadSave && !pickedOnce) {
       pickedOnce = true;
       openDesigner('first');
@@ -288,12 +341,14 @@ try {
 } catch {
   /* ignore */
 }
-if (!hadSave) document.getElementById('intro-go').textContent = 'Draw my run';
+if (!hadSave) document.getElementById('intro-go').textContent = 'Design my run';
 if (!seenIntro) ui.openIntro();
 else if (!hadSave) setTimeout(() => openDesigner('first'), 0);
 ui.setBest(state.best);
 if (loadNote) ui.toast(loadNote, 'bad');
 ui.setKind(state.buildKind);
+if (!state.advanced) state.tool = 'view';
+setAdvanced(state.advanced, true);
 setTool(state.tool);
 refreshHistoryButtons();
 
@@ -309,6 +364,15 @@ function restore(snap) {
   placeGate();
 }
 
+// Advanced: the hand sculpting brushes and the Build tool, for fine touches
+function setAdvanced(on, quiet = false) {
+  state.advanced = on;
+  ui.setAdvanced(on);
+  if (!on && state.tool !== 'view' && state.tool !== 'start') setTool('view');
+  if (on && !quiet) ui.toast('Advanced: sculpt the snow by hand. Your sculpting stays when you edit the run.');
+  if (!quiet) scheduleSave();
+}
+
 // ---------- sculpting input ----------
 const pointers = new Map();
 const hover = { valid: false, x: 0, y: 0, z: 0 };
@@ -317,6 +381,7 @@ let build = null; // Build drag in progress: { pointerId, ax, az, base, rect }
 let propStroke = null; // planting / clearing trees and rocks
 const baseField = new Heightfield(); // shares nothing: its .h points at the build snapshot
 let saveTimer = 0;
+let tapCand = null; // a possible tap on the snow: { id, x, y, t }
 
 canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 // browsers only start audio from a gesture
@@ -334,6 +399,8 @@ canvas.addEventListener('pointerdown', (e) => {
   if (riding) return;
   pointers.set(e.pointerId, e);
   updateHover(e);
+  // Orbit tool: a tap (no drag) on the snow opens the editor at that spot
+  tapCand = pointers.size === 1 && state.tool === 'view' && e.button === 0 ? { id: e.pointerId, x: e.clientX, y: e.clientY, t: performance.now() } : null;
 
   // a second finger turns the gesture into camera control: cancel the edit
   if (pointers.size > 1) {
@@ -387,6 +454,7 @@ canvas.addEventListener('pointerdown', (e) => {
 
 canvas.addEventListener('pointermove', (e) => {
   if (pointers.has(e.pointerId)) pointers.set(e.pointerId, e);
+  if (tapCand && (tapCand.id !== e.pointerId || Math.hypot(e.clientX - tapCand.x, e.clientY - tapCand.y) > 9)) tapCand = null;
   if (e.pointerType === 'mouse' || pointers.size === 1) {
     // while building, aim at the ground as it was, not at the feature being drawn
     updateHover(e, build ? baseField : hf);
@@ -402,6 +470,15 @@ canvas.addEventListener('pointermove', (e) => {
 
 const endPointer = (e) => {
   pointers.delete(e.pointerId);
+  if (tapCand && tapCand.id === e.pointerId) {
+    const quick = performance.now() - tapCand.t < 450 && e.type === 'pointerup';
+    tapCand = null;
+    if (quick && !riding && !pointers.size) {
+      updateHover(e);
+      const at = hover.valid ? cellAtWorld(hover.x, hover.z) : null;
+      if (at) openDesigner('edit', at);
+    }
+  }
   if (stroke && stroke.pointerId === e.pointerId) {
     stroke = null;
     scheduleSave();
@@ -462,7 +539,7 @@ function applyPropStroke() {
     if (moved < gap) return;
     if (props.near(x, z, kind === 'tree' ? 2.5 : 2).length) return;
     const s = kind === 'tree' ? 0.8 + random() * 0.5 : 0.6 + state.strength * 2.6;
-    props.add({ k: kind === 'tree' ? TREE : ROCK, u, x, s, r: random() * 6.283 });
+    props.add({ k: kind === 'tree' ? TREE : ROCK, u, x, s, r: random() * 6.283, m: 1 });
   } else if (kind === 'forest') {
     const R = Math.max(4, state.radius);
     if (moved < R * 0.4) return;
@@ -474,7 +551,7 @@ function applyPropStroke() {
       const tz = z + Math.sin(a) * d;
       if (!hf.inside(tx, tz) || Math.abs(tx) > hf.halfX - 5) continue;
       if (props.near(tx, tz, 5).length) continue;
-      props.add({ k: TREE, u: tz - hf.startZ, x: tx, s: 0.7 + random() * 0.7, r: random() * 6.283 });
+      props.add({ k: TREE, u: tz - hf.startZ, x: tx, s: 0.7 + random() * 0.7, r: random() * 6.283, m: 1 });
     }
   } else if (kind === 'clear') {
     if (moved < 2) return;
@@ -575,50 +652,52 @@ function redo() {
   scheduleSave();
 }
 
-// ---------- run designer ----------
+// ---------- run editor ----------
 let designerMode = null;
-function openDesigner(mode) {
+// mode: 'first' (no run yet), 'new' (start over) or 'edit'. focus: { si, r, c } to open a cell.
+function openDesigner(mode, focus = null) {
   if (riding) exitRide(true);
   if (stroke || build || propStroke) return;
   designerMode = mode;
   hover.valid = false;
-  // the 3D loop pauses while the designer is open: settle the sound layers first
+  // the 3D loop pauses while the editor is open: settle the sound layers first
   sound.update({ skier: null, sculpt: 0 });
-  editor.open(mode === 'edit' ? state.profile : null, { canCancel: mode !== 'first' });
+  editor.open(mode === 'edit' ? state.run : null, { canCancel: mode !== 'first', focus });
 }
 
 /**
- * Generate the piste for a drawn profile. keepSculpt carries the player's sculpting over
- * (it moves with the run: same distance from the start, same offset across).
+ * Generate the mountain for a designed run. keepSculpt carries the player's hand sculpting
+ * and hand-placed trees over (they move with the run: same distance from the start, same
+ * offset across).
  */
-function applyProfile(e, keepSculpt) {
+function applyRun(run, keepSculpt) {
   if (riding) exitRide(true);
   const delta = keepSculpt && baseH ? hf.h.map((v, i) => v - baseH[i]) : null;
   const oldDims = { sizeX: hf.sizeX, sizeZ: hf.sizeZ, cell: hf.cell };
-  // keep a moved start gate at the same distance down the run
+  // a moved start gate stays at the same distance down the run, the same offset from the piste
   const startU = state.start ? state.start.z - hf.startZ : 0;
-  const startX = state.start ? state.start.x : 0;
-  const oldLength = state.profile ? profileLength(state.profile) : 0;
-  state.profile = e;
-  buildFromProfile(hf, e);
-  baseH = hf.copy();
+  const startOff = state.start ? state.start.x - laneX(startU) : 0;
+  const manual = keepSculpt ? props.list.filter((p) => p.m) : [];
+  state.run = run;
+  const built = generate(run);
   if (delta) addDelta(hf, delta, oldDims);
-  const st = profileStats(e);
-  // trees and rocks: keep yours (they live in run coordinates) and grow new forest on any
-  // added length; a brand new run gets a fresh scatter
-  if (keepSculpt) {
-    props.trim(st.length);
-    const extra = st.length > oldLength + 20 ? scatterProps(hf, oldLength, st.length, Math.round(st.length)) : [];
-    props.set(props.list.concat(extra));
-  } else {
-    props.set(scatterProps(hf, 0, st.length, Math.round(st.length) + 1));
-  }
-  state.start = keepSculpt && startU < st.length - 60 ? { x: startX, z: hf.startZ + startU } : { x: 0, z: hf.startZ };
+  const st = profileStats(runProfile(run, state.geo));
+  props.set(built.props.concat(manual));
+  props.trim(st.length);
+  structs.set(built.structs);
+  state.start = keepSculpt && startU < st.length - 60 ? { x: laneX(startU) + startOff, z: hf.startZ + startU } : built.start;
   state.best = null;
   state.bestPath = null;
   history.clear();
   rebuildTerrain();
   propMeshes.rebuild();
+  structMeshes.rebuild();
+  // a brand new run starts on fresh snow; an edited one keeps its tracks
+  if (keepSculpt) tracks.redrape();
+  else {
+    tracks.clear();
+    saveTracks();
+  }
   placeGate();
   skier = null;
   skierMesh.visible = false;
@@ -633,13 +712,13 @@ function applyProfile(e, keepSculpt) {
   controls.target.copy(HOME_TARGET);
   viewAnim = null;
   const km = st.length >= 1000 ? `${(st.length / 1000).toFixed(2)} km` : `${Math.round(st.length)} m`;
-  ui.toast(`${km} run built, ${Math.round(st.drop)} m of drop.${delta ? ' Your sculpting moved with it.' : ''}`);
+  ui.toast(`${km} run built, ${Math.round(st.drop)} m of drop.${delta && delta.some((v) => Math.abs(v) > 0.05) ? ' Your hand sculpting moved with it.' : ''}`);
 }
 
-const editor = new ProfileEditor({
-  onBuild: (e) => {
+const editor = new RunEditor({
+  onBuild: (run) => {
     editor.close();
-    applyProfile(e, designerMode === 'edit');
+    applyRun(run, designerMode === 'edit');
     designerMode = null;
   },
   onCancel: () => {
@@ -647,6 +726,19 @@ const editor = new ProfileEditor({
     designerMode = null;
   },
 });
+
+// Which section and grid cell is under this point of the snow (for tap-to-edit)
+function cellAtWorld(x, z) {
+  if (!state.run || !state.geo) return null;
+  const u = z - hf.startZ;
+  if (u < 0 || u > state.geo.L) return null;
+  const si = sectionAt(state.run, u);
+  const r = Math.floor((u - state.geo.starts[si]) / CELL_M);
+  const off = x - laneX(u);
+  if (Math.abs(off) > GRID_HALF) return { si };
+  const c = Math.max(0, Math.min(GRID_COLS - 1, Math.round(off / CELL_M + (GRID_COLS - 1) / 2)));
+  return { si, r, c };
+}
 
 function refreshHistoryButtons() {
   ui.setHistory(history.canUndo, history.canRedo);
@@ -659,11 +751,12 @@ function scheduleSave() {
       localStorage.setItem(
         SAVE_KEY,
         JSON.stringify({
-          v: 4,
+          v: 5,
           dims: { nx: hf.nx, nz: hf.nz, cell: hf.cell, sizeX: hf.sizeX, sizeZ: hf.sizeZ },
-          profile: state.profile.map((v) => Math.round(v * 10) / 10),
+          run: packRun(state.run),
           sculpt: encodeHeights(hf.h.map((v, i) => v - baseH[i])),
-          props: packProps(props.list),
+          // hand-placed trees and rocks are stored as kinds 2 and 3
+          props: packProps(props.list.map((p) => (p.m ? { ...p, k: p.k + 2 } : p))),
           start: state.start,
           best: state.best,
           bestPath: state.bestPath,
@@ -671,6 +764,7 @@ function scheduleSave() {
           relief: state.relief,
           muted: state.muted,
           buildKind: state.buildKind,
+          advanced: state.advanced,
         })
       );
       saveFailed = false;
@@ -685,16 +779,23 @@ function scheduleSave() {
 // Saves record the grid they were made on, so a save survives any later change to the
 // grid sizing: the sculpting is resampled onto the new grid (same distance down the run,
 // same offset across). A save that still can't be read is kept under BACKUP_KEY, never
-// silently overwritten.
+// silently overwritten. Older saves hold a drawn profile instead of sections: it is
+// turned into sections that follow the same descent.
 function loadSave() {
   let raw = null;
   try {
     raw = localStorage.getItem(SAVE_KEY);
     if (!raw) return false;
     const data = JSON.parse(raw);
-    if (!Array.isArray(data.profile) || data.profile.length < 2 || !data.start) throw new Error('no run in save');
-    buildFromProfile(hf, data.profile);
-    baseH = hf.copy();
+    let run = data.v >= 5 ? unpackRun(data.run) : null;
+    const legacy = !run;
+    if (legacy) {
+      if (!Array.isArray(data.profile) || data.profile.length < 2) throw new Error('no run in save');
+      run = profileToRun(data.profile);
+    }
+    if (!data.start) throw new Error('no start in save');
+    state.run = run;
+    const built = generate(run);
     const d = data.dims;
     const sameGrid = !d || (d.nx === hf.nx && d.nz === hf.nz && d.cell === hf.cell);
     const delta = data.sculpt && decodeHeights(data.sculpt, d ? d.nx * d.nz : hf.nx * hf.nz);
@@ -702,21 +803,28 @@ function loadSave() {
       for (let i = 0; i < delta.length; i++) hf.h[i] += delta[i];
     } else if (delta) {
       addDelta(hf, delta, d);
-      loadNote = 'Your run was moved onto the new terrain grid.';
-    } else {
+    } else if (data.sculpt) {
       // sculpting from a grid we can't place any more: keep the run, back up the old save
       backupSave(raw);
       loadNote = 'Your sculpting could not be restored (a copy of the old save was kept).';
     }
-    state.profile = data.profile;
-    state.start = data.start;
-    // older saves have no trees or rocks yet: grow some
-    props.set(Array.isArray(data.props) ? unpackProps(data.props) : scatterProps(hf, 0, profileLength(data.profile), 1));
+    if (legacy) {
+      // drawn runs had trees everywhere, the new piste is groomed: grow the forest afresh
+      props.set(built.props);
+      backupSave(raw);
+      loadNote = 'Your drawn run is now made of sections: open Edit run to change it.';
+    } else {
+      const saved = Array.isArray(data.props) ? unpackProps(data.props) : null;
+      props.set(saved ? saved.map((p) => (p.k >= 2 ? { ...p, k: p.k - 2, m: 1 } : p)) : built.props);
+    }
+    structs.set(built.structs);
+    state.start = legacy ? built.start : data.start;
     state.relief = !!data.relief;
     state.muted = !!data.muted;
+    state.advanced = !!data.advanced;
     if (data.buildKind in STAMPS || data.buildKind in PROP_TOOLS) state.buildKind = data.buildKind;
     // best runs are scored on style now (older saves stored a time)
-    if (data.best && typeof data.best.score === 'number') {
+    if (!legacy && data.best && typeof data.best.score === 'number') {
       state.best = data.best;
       state.bestPath = Array.isArray(data.bestPath) ? data.bestPath : null;
     }
@@ -794,6 +902,9 @@ function sendSkier() {
   }
   skier = new Skier(hf, state.start);
   skier.props = props;
+  skier.structures = structs;
+  skier.surface = surf;
+  tracks.startRun();
   score = new ScoreKeeper();
   lastEventCount = 0;
   lastFeedCount = 0;
@@ -831,6 +942,8 @@ function enterRide() {
 
 function exitRide(abort) {
   if (!riding) return;
+  tracks.lift();
+  saveTracks();
   if (abort && skier && skier.status === 'running') {
     skier.status = 'aborted';
     lastStatus = 'aborted';
@@ -952,7 +1065,12 @@ function updateRideCamera(dt) {
   }
   const ground = hf.heightAt(_want.x, _want.z);
   if (_want.y < ground + 1.5) _want.y = ground + 1.5;
-  if (state.rideCam === 'chase') {
+  // in (or just before) a snow tunnel: stay low enough to see through it
+  const tun = structs.tunnels.length ? structs.tunnelAt(x, z, 14) : null;
+  if (tun) {
+    _want.y = Math.min(_want.y, ground + tun.ht * 0.62);
+    _look.y = Math.min(_look.y, hf.heightAt(_look.x, _look.z) + tun.ht * 0.45);
+  } else if (state.rideCam === 'chase') {
     for (let tries = 0; tries < 8 && !lineOfSight(_want, _p); tries++) _want.y += 2;
   }
   if (rig.snap) {
@@ -991,6 +1109,11 @@ function onSkierEvent(ev) {
     sound.land(Math.min(16, 6 + (ev.value || 3)), 'sketchy');
     spray.burst(skier, 0.5);
     rig.shake = Math.max(rig.shake, 0.35);
+  } else if (ev.type === 'grindStart') {
+    sound.land(6, 'clean');
+    spray.burst(skier, 0.25);
+  } else if (ev.type === 'gate') {
+    sound.trick(150);
   } else if (ev.type === 'wipeout') {
     sound.wipeout();
     spray.burst(skier, 2);
@@ -1001,6 +1124,8 @@ function onSkierEvent(ev) {
 function onRunEnd(s) {
   score.finish(s);
   drainFeed();
+  tracks.lift();
+  saveTracks();
   const finished = s.status === 'finished';
   const isBest = finished && (!state.best || score.total > state.best.score);
   if (isBest) {
@@ -1046,6 +1171,34 @@ function resetView() {
 }
 let viewAnim = null;
 
+// The skis write into the snow: carves on the piste, trenches in powder, smears when
+// skidding. Nothing while flying, grinding or tumbling.
+function recordTrack(sk) {
+  if (sk.status !== 'running' || !sk.grounded || sk.grind || sk.wipeout > 0) {
+    tracks.lift();
+    return;
+  }
+  if (sk.speed < 1) return;
+  let kind = 0;
+  if (sk.powder > 0.5) kind = 1;
+  else {
+    // skidding: the skis are well off the direction of travel, or braking
+    const v = sk.vel;
+    const h = sk.heading;
+    const c = Math.abs((v[0] * h[0] + v[2] * h[2]) / (Math.hypot(v[0], v[2]) * Math.hypot(h[0], h[2]) || 1));
+    if (c < 0.94 || sk.input.pitch < -0.35) kind = 2;
+  }
+  tracks.add(sk.pos[0], sk.pos[2], kind);
+}
+
+function saveTracks() {
+  try {
+    localStorage.setItem(TRACKS_KEY, tracks.pack());
+  } catch {
+    /* no room: tracks just won't survive a reload */
+  }
+}
+
 // ---------- loop ----------
 const clock = new THREE.Clock();
 const debug = createDebugOverlay(renderer);
@@ -1072,6 +1225,7 @@ function frame() {
   }
   resize();
   spray.setScale(renderer.domElement.height / 3);
+  structMeshes.setScale(renderer.domElement.height / 3);
 
   // sculpt continuously while held, so holding still keeps building
   if (!riding && stroke && hover.valid && isBrush(state.tool)) {
@@ -1127,6 +1281,7 @@ function frame() {
       if (skier.status !== 'running' && skier.status !== 'aborted') onRunEnd(skier);
     }
     spray.fromSkier(skier, dt);
+    recordTrack(skier);
     ui.setRush(riding && skier.status === 'running' ? (skier.speed - 16) / 22 : 0);
     ghostRider.update(skier.time, dt, riding && skier.status === 'running');
     if (riding) {
@@ -1137,6 +1292,8 @@ function frame() {
   }
 
   spray.update(dt);
+  structMeshes.update(dt, camera);
+  tracks.update(dt);
   const sculpting = !riding && (stroke || (build && build.moved)) ? 0.6 + 0.4 * state.strength : 0;
   sound.update({ skier: riding ? skier : null, sculpt: sculpting });
 
@@ -1161,6 +1318,15 @@ function frame() {
     decorSeen = terrain.version;
     decorAt = performance.now();
     decor.refresh();
+  }
+  // after hand sculpting, sit the structures and tracks back on the snow
+  if (terrain.version !== seatSeen && !stroke && !build && !riding && performance.now() - decorAt > 300) {
+    seatSeen = terrain.version;
+    if (structs.count) {
+      structs.seat();
+      structMeshes.rebuild();
+    }
+    tracks.redrape();
   }
   updateSun();
   renderer.render(scene, camera);
@@ -1235,6 +1401,7 @@ window.addEventListener('keydown', (e) => {
     return;
   }
   const byKey = Object.entries(TOOLS).find(([, v]) => v.key === e.key);
+  if ((byKey || key === 'b') && !state.advanced) setAdvanced(true);
   if (byKey) setTool(byKey[0]);
   else if (key === 'b') {
     // B again cycles what to build
@@ -1251,6 +1418,7 @@ window.addEventListener('keydown', (e) => {
   else if (key === 'c') ui.toggleContours();
   else if (key === 't') ui.toggleRelief();
   else if (key === 'p') openDesigner('edit');
+  else if (key === 'a') ui.toggleAdvanced();
   else if (key === 'm') ui.toggleMute();
   else if (key === 'r') resetView();
 });
@@ -1273,8 +1441,8 @@ document.addEventListener('dblclick', (e) => e.preventDefault());
 document.addEventListener(
   'touchmove',
   (e) => {
-    const card = e.target.closest?.('.intro-card, .results-card');
-    if (card && card.scrollHeight > card.clientHeight && e.touches.length === 1) return;
+    const card = e.target.closest?.('.intro-card, .results-card, .runed-scroll, .runed-templates, .sheet-card');
+    if (card && (card.scrollHeight > card.clientHeight || card.scrollWidth > card.clientWidth) && e.touches.length === 1) return;
     e.preventDefault();
   },
   { passive: false }
@@ -1298,5 +1466,16 @@ window.__highrise = {
   camera,
   hf,
   props,
+  structs,
+  surf,
+  tracks,
+  editor,
+  controls,
+  get run() {
+    return state.run;
+  },
+  get riding() {
+    return riding;
+  },
   snapCamera: () => (rig.snap = true),
 };

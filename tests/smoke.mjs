@@ -54,9 +54,10 @@ try {
   const at = (u, off = 0) =>
     page.evaluate(
       ([u, off]) => {
+        // aim at the middle of a 10 m tile (the grid starts at x = -240), never on a seam
         const h = window.__highrise;
-        const z = h.hf.startZ + u;
-        const x = h.base.start.x + off;
+        const z = h.hf.startZ + (Math.floor(u / 10) + 0.5) * 10;
+        const x = -240 + (Math.floor((h.base.start.x + off + 240) / 10) + 0.5) * 10;
         const v = h.camera.position.clone().set(x, h.hf.heightAt(x, z), z).project(h.camera);
         const r = document.getElementById('scene').getBoundingClientRect();
         return [r.left + ((v.x + 1) / 2) * r.width, r.top + ((1 - v.y) / 2) * r.height];

@@ -70,7 +70,7 @@ Hold to load a jump (the ring fills) and release at a kicker's lip to fly higher
 
 **Speed bonus:** above 100 km/h a speed streak builds (40 points a second at 100 km/h, +3 per extra km/h: about 170/s at 145 km/h). It's banked once you've been back under 100 for 0.8 s, or at the finish, and lost on a wipeout. Tricks landed within 2.6 s of each other chain into a combo (×1.5, ×2, … up to ×5). A see-through ghost replays your best run.
 
-Your mountain, pieces, hand sculpting, start gate, best score, ghost and ski tracks autosave in the browser. Runs drawn in older versions are kept as a mountain of their own.
+Your mountain, pieces, hand sculpting, start gate, best score, ghost and ski tracks autosave in the browser. Runs from older versions load as a mountain of their own: a section-editor run keeps its descent and its elements become pieces.
 
 ## How the mountain is built
 

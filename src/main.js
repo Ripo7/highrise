@@ -19,6 +19,7 @@ import { SurfaceMap } from './core/surface.js';
 import { StructureSet } from './core/structures.js';
 import { newMountain, buildBase, SLOPES, LENGTHS, TILE, GRID_COLS, GRID_X0 } from './core/mountain.js';
 import { buildWorld, starterPieces } from './core/world.js';
+import { v5Profile, v5Pieces } from './core/legacy.js';
 import {
   PIECES,
   placePieces,
@@ -839,12 +840,18 @@ function loadSave() {
     if (!legacy) {
       m = data.mountain;
       if (!m || !(m.profile || m.slope)) throw new Error('no mountain in save');
+    } else if (data.v === 5) {
+      // the section editor: its sections become the descent, its elements pieces
+      const profile = v5Profile(data.run);
+      if (!profile) throw new Error('no sections in save');
+      m = { profile, seed: 1 };
     } else {
       if (!Array.isArray(data.profile) || data.profile.length < 2) throw new Error('no drawn run in save');
       m = { profile: data.profile, seed: 1 };
     }
     makeMountain(m);
     if (!legacy) pieces = trimPieces(unpackPieces(data.pieces), rows());
+    else if (data.v === 5) pieces = v5Pieces(data.run, base, rows());
     state.pieces = pieces;
     generate(pieces);
     const d = data.dims;
@@ -858,7 +865,10 @@ function loadSave() {
     if (delta) structs.seat();
     if (legacy) {
       backupSave(raw);
-      loadNote = 'Your drawn run is now your mountain: build on it with the pieces below.';
+      loadNote =
+        data.v === 5
+          ? 'Your run is now a mountain, its elements are pieces: build on it with the bar below.'
+          : 'Your drawn run is now your mountain: build on it with the pieces below.';
     }
     state.start = data.start && data.start.z < hf.finishZ - 40 ? data.start : base.start;
     state.relief = !!data.relief;

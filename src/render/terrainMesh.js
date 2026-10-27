@@ -58,7 +58,9 @@ const frag = /* glsl */ `
   uniform float uBrushRadius;
   uniform float uBrushOn;
   uniform vec3 uBrushColor;
-  uniform float uFinishZ;
+  uniform vec4 uFin[4]; // finish lines: x, z, direction of travel
+  uniform float uFinW[4]; // ... and their width
+  uniform float uFinN;
   uniform vec2 uStart;
   uniform float uContours;
   uniform float uRelief;
@@ -152,15 +154,15 @@ const frag = /* glsl */ `
     level = clamp(level, 0.0, 2.0) * smoothstep(0.35, 0.65, sunShadow());
     vec3 snow = level < 1.0 ? mix(uSnowShadow, uSnowMid, level) : mix(uSnowMid, uSnowLit, level - 1.0);
     vec3 rock = level < 1.0 ? mix(uRockShadow, uRockMid, level) : mix(uRockMid, uRockLit, level - 1.0);
-    // rock only on faces steeper than any drawn run (over about 71 degrees: sculpted walls): every
-    // drawn face is skiable, so it reads as snow; the edge is a clean cut with a thin ink line
-    float aas = fwidth(slope) + 0.002;
-    float rockAmt = smoothstep(0.68 - aas, 0.68 + aas, slope);
-    // what the snow is like: groomed piste, untouched powder, or ice
+    // what the snow is like: groomed piste, untouched powder, ice, or bare rock
     vec2 suv = ((vWorld.xz + uHalf) / uCell + 0.5) / uSurfSize;
-    vec2 sf = texture2D(uSurf, suv).rg;
+    vec3 sf = texture2D(uSurf, suv).rgb;
     float groomed = sf.r;
     float ice = sf.g;
+    // rock: cliffs and rock bands (where the snow can't hold: their flat tops stay white),
+    // and any face steeper than about 71 degrees; a clean cut with a thin ink line
+    float aas = fwidth(slope) + 0.002;
+    float rockAmt = max(smoothstep(0.68 - aas, 0.68 + aas, slope), smoothstep(0.45, 0.6, sf.b * smoothstep(0.05, 0.16, slope)));
     float powder = max(0.0, 1.0 - groomed - ice);
     float camDist = length(cameraPosition - vWorld);
     if (uRelief < 0.5) {
@@ -181,8 +183,17 @@ const frag = /* glsl */ `
       float glint = pow(max(0.0, dot(reflect(-L, n), vd)), 60.0) * smoothstep(0.35, 0.65, sunShadow());
       snow = mix(snow, iceCol + glint * 0.5, ice * 0.9);
     }
+    // rock faces: layered strata, a little broken up, darker in the cracks
+    float strata = vWorld.y / 2.4 + 0.6 * vnoise(vWorld.xz * 0.12) + 0.25 * vnoise(vWorld.xz * 0.5);
+    float sb = fract(strata);
+    float sw = fwidth(strata) + 0.02;
+    rock *= mix(0.86, 1.0, smoothstep(0.45 - sw, 0.45 + sw, sb));
+    rock = mix(rock, uInk, (1.0 - smoothstep(0.0, sw * 1.5, min(sb, 1.0 - sb))) * 0.35 * (1.0 - smoothstep(60.0, 220.0, camDist)));
     vec3 col = mix(snow, rock, rockAmt);
     col = mix(col, uInk, (1.0 - smoothstep(0.0, aas * 1.6, abs(slope - 0.68))) * 0.55);
+    float rb = sf.b * smoothstep(0.05, 0.16, slope);
+    float rbw = fwidth(rb) * 1.4 + 0.002;
+    col = mix(col, uInk, (1.0 - smoothstep(0.0, rbw, abs(rb - 0.52))) * 0.45 * (1.0 - uRelief));
     // the edge of the piste, where the groomer stopped
     float ge = fwidth(groomed) * 1.5 + 0.002;
     col = mix(col, uSnowShadow, (1.0 - smoothstep(0.0, ge, abs(groomed - 0.5))) * 0.35 * (1.0 - uRelief));
@@ -224,10 +235,17 @@ const frag = /* glsl */ `
     col = mix(col, uInk, c1 * 0.12 * cw);
     col = mix(col, uInk, c2 * 0.24 * cw);
 
-    // finish line: dashed band across the slope
-    float fz = abs(vWorld.z - uFinishZ);
-    float dash = step(0.5, fract(vWorld.x / 6.0));
-    col = mix(col, mix(vec3(0.95, 0.3, 0.12), vec3(0.12, 0.14, 0.18), dash), (1.0 - smoothstep(0.8, 1.2, fz)) * 0.9);
+    // finish lines: a chequered band across the end of each piste
+    for (int f = 0; f < 4; f++) {
+      if (float(f) >= uFinN) break;
+      vec2 rel = vWorld.xz - uFin[f].xy;
+      vec2 dir = uFin[f].zw;
+      float along = dot(rel, dir);
+      float across = dot(rel, vec2(-dir.y, dir.x));
+      float band = (1.0 - smoothstep(1.2, 1.6, abs(along))) * (1.0 - smoothstep(uFinW[f] * 0.5 - 0.4, uFinW[f] * 0.5, abs(across)));
+      float chk = mod(floor(across / 1.6) + floor((along + 1.6) / 1.6), 2.0);
+      col = mix(col, mix(vec3(0.98, 0.97, 0.95), vec3(0.17, 0.16, 0.25), chk), band * 0.92);
+    }
 
     // start marker ring
     float sd = length(vWorld.xz - uStart);
@@ -341,7 +359,7 @@ const sideFrag = /* glsl */ `
 `;
 
 export class TerrainMesh {
-  constructor(hf, { finishZ, start, surface = null }) {
+  constructor(hf, { start, surface = null }) {
     this.hf = hf;
     this.surface = surface;
     const { nx, nz } = hf;
@@ -409,7 +427,9 @@ export class TerrainMesh {
       uBrushRadius: { value: 12 },
       uBrushOn: { value: 0 },
       uBrushColor: { value: new THREE.Color('#ff5a1f') },
-      uFinishZ: { value: finishZ },
+      uFin: { value: [0, 1, 2, 3].map(() => new THREE.Vector4(0, 0, 0, 1)) },
+      uFinW: { value: [0, 0, 0, 0] },
+      uFinN: { value: 0 },
       uStart: { value: new THREE.Vector2(start.x, start.z) },
       uContours: { value: 1 },
       uRelief: { value: 0 },
@@ -429,10 +449,10 @@ export class TerrainMesh {
       uCatCol: { value: ['#4f7be8', '#ff7a45', '#2f9e86', '#8a6fd8', '#b9855d', '#8a7aa3'].map(c) },
     };
     this.setTileGrid(1, 1, -240, 10);
-    // the surface map (groomed in red, ice in green) as a texture
+    // the surface map (groomed in red, ice in green, rock in blue) as a texture
     const n = hf.nx * hf.nz;
-    this.surfData = new Uint8Array(n * 2);
-    this.surfTex = new THREE.DataTexture(this.surfData, hf.nx, hf.nz, THREE.RGFormat, THREE.UnsignedByteType);
+    this.surfData = new Uint8Array(n * 4);
+    this.surfTex = new THREE.DataTexture(this.surfData, hf.nx, hf.nz, THREE.RGBAFormat, THREE.UnsignedByteType);
     this.surfTex.magFilter = THREE.LinearFilter;
     this.surfTex.minFilter = THREE.LinearFilter;
     this.surfTex.generateMipmaps = false;
@@ -535,13 +555,14 @@ export class TerrainMesh {
   refreshSurface() {
     const sf = this.surface;
     const d = this.surfData;
-    if (sf && sf.g.length * 2 === d.length) {
+    if (sf && sf.g.length * 4 === d.length) {
       for (let i = 0, n = sf.g.length; i < n; i++) {
-        d[i * 2] = sf.g[i];
-        d[i * 2 + 1] = sf.ice[i];
+        d[i * 4] = sf.g[i];
+        d[i * 4 + 1] = sf.ice[i];
+        d[i * 4 + 2] = sf.rock ? sf.rock[i] : 0;
       }
     } else {
-      for (let i = 0; i < d.length; i += 2) d[i] = 255; // no map: groomed everywhere
+      for (let i = 0; i < d.length; i += 4) d[i] = 255; // no map: groomed everywhere
     }
     this.surfTex.needsUpdate = true;
   }
@@ -599,6 +620,17 @@ export class TerrainMesh {
 
   setStart(x, z) {
     this.uniforms.uStart.value.set(x, z);
+  }
+
+  // finish lines: [{ x, z, dir: [dx, dz], w }] (up to four are drawn)
+  setFinishes(list) {
+    const u = this.uniforms;
+    const n = Math.min(4, list.length);
+    for (let i = 0; i < n; i++) {
+      u.uFin.value[i].set(list[i].x, list[i].z, list[i].dir[0], list[i].dir[1]);
+      u.uFinW.value[i] = list[i].w;
+    }
+    u.uFinN.value = n;
   }
 
   setBrush(on, x = 0, y = 0, z = 0, radius = 10) {

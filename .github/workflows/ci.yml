@@ -15,13 +15,13 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - name: Physics, scoring, pieces and brush tests
+      - name: Physics, scoring, mountains, pistes and pieces
         run: npm test
       - name: Production build
         run: npm run build
       - name: Install Chromium for the smoke test
         run: npx playwright install --with-deps chromium
-      - name: Browser smoke test (choose a mountain, build pieces, erase, undo, ride)
+      - name: Browser smoke test (pick a mountain, trace a piste, branch and join, paint bumps, undo, ride)
         run: npm run smoke
       - name: Keep the smoke-test screenshots
         if: always()

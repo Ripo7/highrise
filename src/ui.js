@@ -1,6 +1,7 @@
-// DOM overlay: brush settings, run HUD, trick pop-ups, results, dialogs, toasts, menu.
-import { makeSlider } from './slider.js';
-import { SLOPES, LENGTHS } from './core/mountain.js';
+// DOM overlay: run HUD, trick pop-ups, results, dialogs, toasts, menu, mountain chooser.
+import { SIZES, STEEPNESS, newWild } from './core/wild.js';
+import { drawPreview } from './mountainPreview.js';
+import { THEME } from './render/theme.js';
 
 const STATUS_LABEL = {
   idle: 'Ready',
@@ -15,24 +16,6 @@ const fmt = (n) => Math.round(n).toLocaleString('en-US');
 
 export function createUI(opts) {
   const $ = (s) => document.querySelector(s);
-  const radius = makeSlider($('#radius'));
-  const strength = makeSlider($('#strength'));
-  const radiusOut = $('#radius-out');
-  const strengthOut = $('#strength-out');
-  radius.value = opts.initial.radius;
-  strength.value = Math.round(opts.initial.strength * 100);
-  const showRadius = () => (radiusOut.textContent = `${radius.value} m`);
-  const showStrength = () => (strengthOut.textContent = `${strength.value}%`);
-  showRadius();
-  showStrength();
-  radius.addEventListener('input', () => {
-    showRadius();
-    opts.onRadius(+radius.value);
-  });
-  strength.addEventListener('input', () => {
-    showStrength();
-    opts.onStrength(+strength.value / 100);
-  });
 
   $('#send').addEventListener('click', opts.onSend);
   $('#undo').addEventListener('click', opts.onUndo);
@@ -48,33 +31,33 @@ export function createUI(opts) {
     setMenu(false);
     opts.onFreshSnow();
   });
-  $('#move-start').addEventListener('click', () => {
+  $('#suggest').addEventListener('click', () => {
     setMenu(false);
-    opts.onMoveStart();
-  });
-  const advBtn = $('#advanced');
-  advBtn.addEventListener('click', () => {
-    setMenu(false);
-    opts.onAdvanced(advBtn.getAttribute('aria-pressed') !== 'true');
+    opts.onSuggest();
   });
 
-  // the new-mountain card: how steep, how long
+  // the new-mountain card: how steep, how big, and which one (a preview from above)
   const mt = $('#mountain');
-  let mtPick = { slope: 'medium', length: 'medium' };
+  let mtPick = newWild('medium', 'medium');
   const profileSvg = (deg) => {
     const t = Math.tan((deg * Math.PI) / 180);
     const y = Math.min(36, 6 + 38 * t);
     const path = `M4 6 C 20 ${(6 + (y - 6) * 0.3).toFixed(1)}, 36 ${(6 + (y - 6) * 0.8).toFixed(1)}, 56 ${y.toFixed(1)}`;
     return `<svg viewBox="0 0 60 40" aria-hidden="true"><path class="fill" d="${path} L56 40 L4 40 Z"/><path d="${path}"/></svg>`;
   };
+  const km = (m) => (m >= 1000 ? `${(m / 1000).toFixed(1).replace('.0', '')} km` : `${m} m`);
+  let previewTimer = 0;
   const renderMt = () => {
-    $('#mt-slopes').innerHTML = SLOPES.map(
-      (sl) => `<button type="button" role="radio" class="mt-slope" data-slope="${sl.id}" aria-checked="${sl.id === mtPick.slope}" data-d="${sl.deg < 18 ? 'blue' : sl.deg < 25 ? 'red' : 'black'}">
+    $('#mt-slopes').innerHTML = STEEPNESS.map(
+      (sl) => `<button type="button" role="radio" class="mt-slope" data-slope="${sl.id}" aria-checked="${sl.id === mtPick.steep}" data-d="${sl.deg < 18 ? 'blue' : sl.deg < 25 ? 'red' : 'black'}">
         ${profileSvg(sl.deg)}<b>${sl.label}</b><small>about ${sl.deg}°</small><em>${sl.blurb}</em></button>`
     ).join('');
-    $('#mt-length').innerHTML = LENGTHS.map(
-      (l) => `<button type="button" data-len="${l.id}" aria-pressed="${l.id === mtPick.length}">${l.label}<small>${l.m >= 1000 ? `${l.m / 1000} km` : `${l.m} m`}</small></button>`
+    $('#mt-length').innerHTML = SIZES.map(
+      (l) => `<button type="button" data-len="${l.id}" aria-pressed="${l.id === mtPick.size}">${l.label}<small>${km(l.L)}</small></button>`
     ).join('');
+    // draw the preview just after the card shows, so opening it stays instant
+    clearTimeout(previewTimer);
+    previewTimer = setTimeout(() => drawPreview($('#mt-canvas'), mtPick, THEME), 0);
   };
   const closeMt = () => {
     mt.hidden = true;
@@ -82,15 +65,19 @@ export function createUI(opts) {
   mt.addEventListener('click', (e) => {
     const sl = e.target.closest('[data-slope]');
     const ln = e.target.closest('[data-len]');
-    if (sl) mtPick.slope = sl.dataset.slope;
-    if (ln) mtPick.length = ln.dataset.len;
+    if (sl) mtPick = { ...mtPick, steep: sl.dataset.slope };
+    if (ln) mtPick = { ...mtPick, size: ln.dataset.len };
     if (sl || ln) renderMt();
     if (e.target === mt && !$('#mt-cancel').hidden) closeMt();
+  });
+  $('#mt-another').addEventListener('click', () => {
+    mtPick = newWild(mtPick.size, mtPick.steep);
+    renderMt();
   });
   $('#mt-cancel').addEventListener('click', closeMt);
   $('#mt-go').addEventListener('click', () => {
     closeMt();
-    opts.onMountain({ ...mtPick, starter: $('#mt-starter').checked });
+    opts.onMountain({ ...mtPick }, $('#mt-starter').checked);
   });
 
   const toggle = (sel, initial, cb) => {
@@ -201,7 +188,8 @@ export function createUI(opts) {
     },
     openMountain(current, canCancel = true) {
       setMenu(false);
-      if (current && current.slope) mtPick = { slope: current.slope, length: current.length || 'medium' };
+      // the same settings as now, a different mountain
+      if (current && current.size) mtPick = newWild(current.size, current.steep);
       $('#mt-cancel').hidden = !canCancel;
       renderMt();
       mt.hidden = false;
@@ -213,13 +201,9 @@ export function createUI(opts) {
     setTool(id) {
       document.body.dataset.tool = id;
     },
-    setAdvanced(on) {
-      advBtn.setAttribute('aria-pressed', String(on));
-      advBtn.textContent = on ? 'Sculpt by hand: on' : 'Sculpt by hand: off';
-      document.body.classList.toggle('advanced', on);
-    },
-    toggleAdvanced() {
-      advBtn.click();
+    // the line under the title (desktop)
+    setHint(text) {
+      $('#hint-text').textContent = text;
     },
     setHistory(canUndo, canRedo) {
       $('#undo').disabled = !canUndo;
@@ -312,14 +296,6 @@ export function createUI(opts) {
       toastEl.classList.add('show');
       clearTimeout(toastTimer);
       toastTimer = setTimeout(() => toastEl.classList.remove('show'), 3600);
-    },
-    nudgeRadius(d) {
-      // [ and ] scale the brush by ~15 % per press (at least 1 m)
-      const cur = +radius.value;
-      let next = Math.round(cur * (d > 0 ? 1.15 : 1 / 1.15));
-      if (next === cur) next = cur + Math.sign(d);
-      radius.value = Math.max(+radius.min, Math.min(+radius.max, next));
-      radius.dispatchEvent(new Event('input'));
     },
     // speed vignette: 0 = none, 1 = full rush
     setRush(k) {

@@ -119,12 +119,15 @@ try {
   await page.click('#buildbar [data-action="rotate"]');
   assert.equal(await get(() => window.__highrise.state.tiles.find((t) => t.feat === 'jump').dir), (dir0 + 330) % 360, 'turned');
   await page.screenshot({ path: `${OUT}/1-tiles.png` });
-  // copy them and paste them further down: the pasted tiles become the selection
+  // copy them and paste them further down, well to the side of the run from the gate (the
+  // copy spans 80 m to the right of where it's put): the pasted tiles become the selection
   await page.click('#buildbar [data-action="copy"]');
   await page.click('#buildbar [data-action="paste"]');
   assert.equal(await get(() => window.__highrise.state.tool), 'paste', 'pasting');
   {
-    const [px, py] = await at(-10, 210);
+    const [px, py] = await at(-150, 230);
+    const box = await page.locator('#scene').boundingBox();
+    assert.ok(px > box.x && px < box.x + box.width && py > box.y && py < box.y + box.height * 0.7, 'the paste spot is on screen');
     await page.mouse.click(px, py);
   }
   const tileCount = await get(() => window.__highrise.state.tiles.length);
@@ -214,6 +217,12 @@ try {
   console.log(
     `smoke test passed: wild mountain, start gate moved, ${picked} tiles selected and raised, undo/redo, a jump turned, copied and pasted (${tileCount} tiles), ride at ${(ride.speed * 3.6).toFixed(0)} km/h, pause and build, ride on at ${resumed.time.toFixed(1)} s, from the start`
   );
+} catch (err) {
+  // on CI, say what failed where it shows on the run's page too (an annotation), with a
+  // screenshot of the moment in the artifacts
+  console.log(`::error title=Smoke test::${String(err.message || err).split('\n')[0]}`);
+  for (const p of browser.contexts().flatMap((c) => c.pages())) await p.screenshot({ path: `${OUT}/failed.png` }).catch(() => {});
+  throw err;
 } finally {
   await browser.close();
   await new Promise((r) => server.httpServer.close(r));

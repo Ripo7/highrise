@@ -1,9 +1,8 @@
 // The editing tools: picking a piece of what you built, the slope's joints dragged in 3D,
-// projects saved under a name, the view gizmo's axes
+// projects saved under a name
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import * as THREE from 'three';
 import { Heightfield, MIN_H, MAX_H } from '../src/core/heightfield.js';
 import { SurfaceMap } from '../src/core/surface.js';
 import { buildSlope, moveJoint, sectionAt, sectionStarts, profile, elevationAt, templateDesign, normalizeDesign, LIMITS, MAX_LENGTH, TOP } from '../src/core/slopes.js';
@@ -11,7 +10,6 @@ import { brushTiles } from '../src/core/terrain.js';
 import { applyAction, tileKey } from '../src/core/tiles.js';
 import { pieceLayers, allBuilt } from '../src/core/pieces.js';
 import { listProjects, saveProject, loadProject, deleteProject, findByName, cleanName } from '../src/projects.js';
-import { gizmoPoints, viewDirection } from '../src/viewGizmo.js';
 
 const keys = (list) => list.map(([i, j]) => tileKey(i, j)).sort();
 
@@ -127,31 +125,4 @@ test('projects: saved under a name, the latest first, replaced by name, opened, 
   // a broken list doesn't break anything
   store.setItem('highrise.projects.v1', '{nope');
   assert.deepEqual(listProjects(store), []);
-});
-
-test('the gizmo: each axis bubble looks along its axis, Z from above with the slope going up the screen', () => {
-  const cam = new THREE.PerspectiveCamera();
-  const look = (id) => {
-    const d = viewDirection(id);
-    cam.position.copy(d).multiplyScalar(100);
-    cam.lookAt(0, 0, 0);
-    cam.updateMatrixWorld();
-    return gizmoPoints(cam.quaternion);
-  };
-  // from above (+Z): Z points at you, Y (up the slope) up the disc, X to the right
-  const top = look('+z');
-  const byId = (pts, id) => pts.find((p) => p.id === id);
-  assert.ok(byId(top, '+z').depth > 0.99, 'Z towards the camera');
-  assert.ok(byId(top, '+y').y < -25, 'Y up the disc');
-  assert.ok(byId(top, '+x').x > 25, 'X to the right');
-  assert.equal(top[top.length - 1].id, '+z', 'the nearest drawn last');
-  // from the bottom of the slope (-Y), looking up it: Z up the disc, X to the right
-  const front = look('-y');
-  assert.ok(byId(front, '-y').depth > 0.99);
-  assert.ok(byId(front, '+z').y < -25);
-  assert.ok(byId(front, '+x').x > 25);
-  // from the side (-X): up the slope (+Y) to the left
-  const side = look('-x');
-  assert.ok(byId(side, '+y').x < -25);
-  assert.deepEqual(viewDirection('-y').toArray().map((v) => v + 0), [0, 0, 1], 'front: from downhill');
 });

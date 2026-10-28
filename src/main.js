@@ -36,7 +36,7 @@ import { createUI } from './ui.js';
 import { createBuildBar } from './buildBar.js';
 import { createSlopeMode, fmtLen } from './slopeMode.js';
 import { SlopeGuides, sectionTexture } from './render/slopeGuides.js';
-import { createGizmo, viewDirection } from './viewGizmo.js';
+import { createViewButtons } from './viewButtons.js';
 import { createProjectsDialog } from './projectsDialog.js';
 import { listProjects, saveProject, loadProject, deleteProject, findByName } from './projects.js';
 import { pieceLayers, allBuilt } from './core/pieces.js';
@@ -98,7 +98,8 @@ let lastStatus = null;
 let lastEventCount = 0;
 let lastFeedCount = 0;
 let viewAnim = null; // the edit camera gliding to a new view
-let orbitAnim = null; // ... or swinging round its target to look along an axis (the gizmo)
+let orbitAnim = null; // ... or swinging round its target to look from above or the side
+let viewMode = null; // a drag on the snow turns ('rotate') or slides ('pan') the view instead of selecting
 let slope = null; // the slope editor, while it's open: { orig, origCols, built (the design on the snow), first, timer, dragging }
 
 function makeSlope(design) {
@@ -444,7 +445,9 @@ booted = true;
 
 const bar = createBuildBar({
   onTool: (t) => {
-    setTool(t);
+    // Start again: back to selecting
+    setTool(t === state.tool ? 'select' : t);
+    t = state.tool;
     if (t === 'start') ui.toast(tx('toast.startTool'));
     if (t === 'select' && !selection.size) ui.toast(tx(COARSE ? 'toast.selectTool.touch' : 'toast.selectTool.desktop'));
   },
@@ -556,7 +559,6 @@ const slopeUI = createSlopeMode({
   pick: () => showSlopeGuides(),
   done: (d, o) => leaveSlope(true, d, o),
   cancel: () => leaveSlope(false),
-  side: () => sideView(),
   projects: () => projectsDlg.open('open'),
 });
 
@@ -592,6 +594,7 @@ function editSlope({ first = false } = {}) {
   document.body.classList.add('slope-mode');
   slopeUI.open(first ? null : state.design, { cancel: !first, tiles: state.tiles.length });
   applyViewOffset();
+  setViewMode(null);
   ui.setHint(tx(COARSE ? 'hint.slope.touch' : 'hint.slope'));
   applyControlScheme();
   refreshBar();
@@ -682,9 +685,9 @@ function leaveSlope(commit, design, { keep = true, changed = false } = {}) {
     refreshScene();
     computeHome();
     ui.setBest(state.best, state.bestTime);
-    setTool(state.tool === 'view' ? 'view' : 'select');
+    setTool('select');
   }
-  applyControlScheme();
+  setViewMode(null);
   refreshBar();
 }
 
@@ -1137,7 +1140,7 @@ function endSlopeDrag() {
 
 // desktop: show where the brush (or the paste) will go before you click
 function showHoverPreview() {
-  if (riding || !hover.valid) return setGhost();
+  if (riding || !hover.valid || viewMode || slope) return setGhost();
   const t = hoverTile();
   if (state.tool === 'select') setGhost(brushTiles(t.i, t.j, state.brush));
   else if (state.tool === 'paste' && clip) setGhost(pasteCells(clip, t.i, t.j));
@@ -1194,6 +1197,8 @@ window.addEventListener(
       slopeTap = { pointerId: e.pointerId, x: e.clientX, y: e.clientY };
       return;
     }
+    // Rotate or Move is on: the drag is the view's
+    if (viewMode) return;
     updateHover(e);
     if (!hover.valid) return;
 
@@ -1632,15 +1637,15 @@ function backupSave(raw) {
 // Look: one finger or the left button turns the view. Select, Paste and Start: one finger or
 // the left button uses the tool, the right button orbits. Two fingers always move and zoom.
 function applyControlScheme() {
-  const t = slope ? 'view' : state.tool;
-  const camOnly = t === 'view' || altHeld;
+  // the slope editor turns the view by default (there's nothing to select)
+  const m = viewMode || (slope ? 'rotate' : null);
   controls.mouseButtons = {
-    LEFT: camOnly ? THREE.MOUSE.ROTATE : null,
+    LEFT: m === 'pan' ? THREE.MOUSE.PAN : m === 'rotate' || altHeld ? THREE.MOUSE.ROTATE : null,
     MIDDLE: THREE.MOUSE.PAN,
     RIGHT: THREE.MOUSE.ROTATE,
   };
   controls.touches = {
-    ONE: t === 'view' ? THREE.TOUCH.ROTATE : null,
+    ONE: m === 'pan' ? THREE.TOUCH.PAN : m === 'rotate' ? THREE.TOUCH.ROTATE : null,
     TWO: THREE.TOUCH.DOLLY_PAN,
   };
   document.body.classList.toggle('alt-orbit', altHeld);
@@ -1651,6 +1656,7 @@ function setTool(t) {
   if (paint) cancelPaint();
   if (moving) endMove(false);
   if (t === 'paste' && !clip) t = 'select';
+  if (viewMode) setViewMode(null); // a tool: back to working on the snow
   state.tool = t;
   ui.setTool(t);
   bar.set(t);
@@ -2105,7 +2111,7 @@ function resetView() {
   };
 }
 
-// ---------- views along the axes (the gizmo, the numpad) ----------
+// ---------- the view: from above, from the side, turned and slid by the view buttons ----------
 // Swing round to look from dir (towards the target): the same distance unless one's given,
 // the same target unless one's given
 const _q = new THREE.Quaternion();
@@ -2133,7 +2139,7 @@ function stepOrbitAnim(dt) {
     .add(a.target);
   if (a.t >= 1) orbitAnim = null;
 }
-// turn the view by a drag on the gizmo (pixels)
+// turn the view by a drag on the Rotate button (pixels)
 const _sph = new THREE.Spherical();
 function orbitBy(dx, dy) {
   if (riding) return;
@@ -2145,32 +2151,49 @@ function orbitBy(dx, dy) {
   _sph.phi = THREE.MathUtils.clamp(_sph.phi - dy * 0.012, 0.0015, controls.maxPolarAngle);
   camera.position.setFromSpherical(_sph).add(controls.target);
 }
-// the selection in the middle of the view, close enough to work on it (Blender: View Selected)
-function frameSelection() {
-  const sel = selList();
-  if (!sel.length) return;
-  let x = 0;
-  let z = 0;
-  let r = 0;
-  for (const [i, j] of sel) {
-    const c = tileCenter(hf, i, j);
-    x += c.x;
-    z += c.z;
-  }
-  x /= sel.length;
-  z /= sel.length;
-  for (const [i, j] of sel) {
-    const c = tileCenter(hf, i, j);
-    r = Math.max(r, Math.hypot(c.x - x, c.z - z));
-  }
-  const target = new THREE.Vector3(x, hf.heightAt(x, z), z);
-  const dir = camera.position.clone().sub(controls.target).normalize();
-  viewFrom(dir, Math.max(40, (r + 12) * 3.2), target);
+// slide the view along the snow by a drag on the Move button (pixels: the snow follows the
+// finger, as if dragged)
+const _pr = new THREE.Vector3();
+const _pf = new THREE.Vector3();
+function panBy(dx, dy) {
+  if (riding) return;
+  orbitAnim = null;
+  viewAnim = null;
+  const dist = camera.position.distanceTo(controls.target);
+  const k = (2 * dist * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2))) / Math.max(1, canvas.clientHeight);
+  _pr.setFromMatrixColumn(camera.matrixWorld, 0).setY(0).normalize();
+  _pf.set(0, 1, 0).cross(_pr).normalize(); // along the ground, away from the camera
+  const move = _pr.multiplyScalar(-dx * k).add(_pf.multiplyScalar(-dy * k));
+  camera.position.add(move);
+  controls.target.add(move);
 }
-const gizmo = createGizmo({
-  onView: (id) => viewFrom(viewDirection(id)),
-  onOrbit: (dx, dy) => orbitBy(dx, dy),
-  onHome: () => resetView(),
+// straight down on what you're looking at, the slope going up the screen
+function topView() {
+  viewFrom(new THREE.Vector3(0, 1, 0.002));
+}
+// from the side of the slope: the slope editor shows all of it, building shows what you're
+// looking at
+function sideNow() {
+  if (slope) return sideView();
+  const d = camera.position.distanceTo(controls.target);
+  viewFrom(new THREE.Vector3(-1, 0.12, 0).normalize(), Math.max(d, 60));
+}
+// a drag on the snow turns or slides the view (or, null, selects again)
+function setViewMode(m) {
+  viewMode = m;
+  if (m && paint) cancelPaint();
+  if (m && moving) endMove(false);
+  document.body.dataset.view = m || (slope ? 'rotate' : '');
+  viewButtons.set(m, m || (slope ? 'rotate' : null));
+  applyControlScheme();
+  setGhost();
+  if (!slope) ui.setHint(tx(m ? `hint.${m}` : `hint.${state.tool}`));
+}
+const viewButtons = createViewButtons({
+  mode: (m) => setViewMode(m),
+  drag: (kind, dx, dy) => (kind === 'rotate' ? orbitBy(dx, dy) : panBy(dx, dy)),
+  top: () => topView(),
+  side: () => sideNow(),
 });
 
 // The skis write into the snow: two carved grooves on packed snow, a trench in powder, a
@@ -2250,7 +2273,6 @@ function frame() {
 
   if (!riding) {
     controls.update();
-    gizmo.update(camera);
     // never let the orbit camera sink into a steep slope
     if (!viewAnim && !orbitAnim) {
       const g = hf.inside(camera.position.x, camera.position.z) ? hf.heightAt(camera.position.x, camera.position.z) : -Infinity;
@@ -2330,21 +2352,6 @@ window.addEventListener('keydown', (e) => {
   if (ui.blocking) return;
   const key = e.key.toLowerCase();
   const mod = e.ctrlKey || e.metaKey;
-  // views along the axes, Blender's numpad: 7 above, 1 front (from the bottom), 3 the side;
-  // with Ctrl the other way; . the selection
-  if (!riding && e.code.startsWith('Numpad')) {
-    const VIEWS = { Numpad7: ['+z', '-z'], Numpad1: ['-y', '+y'], Numpad3: ['+x', '-x'] };
-    if (VIEWS[e.code]) {
-      e.preventDefault();
-      viewFrom(viewDirection(VIEWS[e.code][mod ? 1 : 0]));
-      return;
-    }
-    if (e.code === 'NumpadDecimal') {
-      e.preventDefault();
-      frameSelection();
-      return;
-    }
-  }
   if (slope) {
     if (slopeUI.key(e)) e.preventDefault();
     else if (key === 'r' && !mod) resetView();
@@ -2403,8 +2410,9 @@ window.addEventListener('keydown', (e) => {
     return;
   }
   if (e.key === 'Escape') {
-    // one step back at a time: the stroke, the paste, the selection
-    if (paint) cancelPaint();
+    // one step back at a time: the stroke, the paste, the view buttons, the selection
+    if (viewMode && !paint && !moving) setViewMode(null);
+    else if (paint) cancelPaint();
     else if (moving) endMove(false);
     else if (state.tool === 'paste') setTool('select');
     else if (selection.size) clearSelection();
@@ -2416,7 +2424,7 @@ window.addEventListener('keydown', (e) => {
   else if (key === 'q') act('rotate');
   else if (key === 's') setTool('select');
   else if (key === 'g') setTool('start');
-  else if (key === 'v') setTool('view');
+  else if (key === 'v') setViewMode(viewMode === 'rotate' ? null : 'rotate');
   else if (key === 'c') ui.toggleContours();
   else if (key === 't') ui.toggleRelief();
   else if (key === 'n') editSlope();

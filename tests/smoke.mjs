@@ -192,6 +192,11 @@ try {
     status: document.getElementById('status').textContent,
   }));
   assert.deepEqual(paused, { paused: true, label: 'Ride on', restart: true, status: 'Paused' }, 'paused');
+  // where he waits (the run went on for a few frames since the last look: compare with this)
+  const waiting = await get(() => {
+    const s = window.__highrise.skier;
+    return { time: s.time, speed: s.speed, pos: [...s.pos] };
+  });
   // build something just ahead of him while he waits: select 7 tiles there, lower them
   await page.evaluate(() => {
     const h = window.__highrise;
@@ -222,9 +227,12 @@ try {
     return { status: s.status, time: s.time, speed: s.speed, pos: [...s.pos] };
   });
   assert.equal(resumed.status, 'running');
-  assert.ok(resumed.time >= ride.time - 1e-6, `the run carries on (${resumed.time.toFixed(2)} s)`);
-  assert.ok(Math.hypot(resumed.pos[0] - ride.pos[0], resumed.pos[2] - ride.pos[2]) < 4, 'from the same place');
-  assert.ok(Math.abs(resumed.speed - ride.speed) < ride.speed * 0.3, `at the same speed (${resumed.speed.toFixed(1)} m/s)`);
+  assert.ok(resumed.time >= waiting.time - 1e-6 && waiting.time >= ride.time - 1e-6, `the run carries on (${resumed.time.toFixed(2)} s)`);
+  const moved = Math.hypot(resumed.pos[0] - waiting.pos[0], resumed.pos[2] - waiting.pos[2]);
+  // a few frames may have run since Ride on: no further than that time at that speed
+  const since = resumed.time - waiting.time;
+  assert.ok(moved < waiting.speed * since * 1.5 + 2, `from where he waited (${moved.toFixed(1)} m in ${since.toFixed(2)} s)`);
+  assert.ok(since > 0.5 || Math.abs(resumed.speed - waiting.speed) < Math.max(1.5, waiting.speed * 0.3), `at the same speed (${resumed.speed.toFixed(1)} vs ${waiting.speed.toFixed(1)} m/s)`);
   await page.evaluate(() => window.__highrise.advance(1, {}));
   assert.equal(await get(() => window.__highrise.skier.status), 'running');
 

@@ -14,11 +14,11 @@ import { Skier, PHYS } from './core/skier.js';
 import { ScoreKeeper, SPEED_BONUS_KMH, speedRate } from './core/score.js';
 import { PropSet, TREE, propHeight } from './core/props.js';
 import { SurfaceMap } from './core/surface.js';
-import { buildSlope, templateDesign, normalizeDesign, designFromWild, designStats, widthOf } from './core/slopes.js';
+import { buildSlope, templateDesign, normalizeDesign, designFromWild, designStats, widthOf, cloneDesign } from './core/slopes.js';
 import { hexCols } from './core/hex.js';
 import { buildWorld, fallLine, defaultStart } from './core/world.js';
 import { HEX_R, gridCols, gridRows, tileOf, tileCenter, brushTiles, lineTiles, squaresToHexes } from './core/terrain.js';
-import { ACTIONS, applyAction, describe, copyTiles, rotateCopy, pasteCells, pasteTiles, trimTiles, packTiles, unpackTiles, unpackPieces, fromPieces, tileKey } from './core/tiles.js';
+import { applyAction, describe, copyTiles, rotateCopy, pasteCells, pasteTiles, trimTiles, packTiles, unpackTiles, unpackPieces, fromPieces, tileKey } from './core/tiles.js';
 import { PropMeshes } from './render/propMeshes.js';
 import { Tracks } from './render/tracks.js';
 import { Decor } from './render/decor.js';
@@ -27,10 +27,12 @@ import { SkierMesh, Trail } from './render/skierMesh.js';
 import { Spray } from './render/spray.js';
 import { GhostRider, packPath } from './render/ghost.js';
 import { Sound } from './audio.js';
+import { t as tx, num, applyDom, onLang } from './i18n.js';
+import { createTutorial } from './tutorial.js';
 import { RideControls } from './rideControls.js';
 import { createUI } from './ui.js';
 import { createBuildBar } from './buildBar.js';
-import { createSlopeEditor } from './slopeEditor.js';
+import { createSlopeEditor, fmtLen } from './slopeEditor.js';
 import { CATEGORY_COLORS } from './pieceIcons.js';
 import { THEME, SUN_DIR } from './render/theme.js';
 import { createDebugOverlay } from './debugOverlay.js';
@@ -43,6 +45,10 @@ const INTRO_KEY = 'highrise.intro.v7';
 const TRACKS_KEY = 'highrise.tracks.v1';
 const BACKUP_KEY = 'highrise.ski.backup';
 let loadNote = null; // told to the player once the UI is up
+// the tutorial: its levels replace your slope for a while, nothing is saved meanwhile
+let tutOn = false;
+let tutSaved = null; // your slope, put back when you leave it
+let goalTiles = []; // the tutorial step's goal tiles, marked on the snow
 const WILD_WIDTH = { small: 600, medium: 720, large: 840 }; // how wide the old wild mountains were
 let saveFailed = false;
 
@@ -115,13 +121,13 @@ try {
   renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
 } catch (err) {
   // three.js needs WebGL 2: say so instead of leaving the UI over a blank canvas
-  showFatal('Highrise needs WebGL 2, which this browser or device doesn’t provide. Try an up-to-date Chrome, Edge, Firefox or Safari, and check that hardware acceleration is on.');
+  showFatal(tx('toast.noWebgl'));
   throw err;
 }
 // the GPU can drop the context (driver reset, phone under memory pressure); three.js
 // restores it by itself, the player just needs to know why the screen flickered
-canvas.addEventListener('webglcontextlost', () => window.__highriseToast?.('Graphics were reset by the browser, restoring…', 'bad'));
-canvas.addEventListener('webglcontextrestored', () => window.__highriseToast?.('Graphics restored.'));
+canvas.addEventListener('webglcontextlost', () => window.__highriseToast?.(tx('toast.gfxLost'), 'bad'));
+canvas.addEventListener('webglcontextrestored', () => window.__highriseToast?.(tx('toast.gfxBack')));
 
 function showFatal(msg) {
   const el = document.createElement('div');
@@ -222,7 +228,7 @@ let ghost = []; // tiles under the brush, or where a paste would land
 
 // One texel per tile. G: changed; A: what changed most (1 shape, 2 nature, 3 a feature)
 // plus, for a jump or drop, the way it faces (in 7.5° steps, +1, times 4); B: selected;
-// R: the ghost (255 on the grid, 128 off it)
+// R: the ghost (255) and the tutorial's goal tiles (96; 224 with the ghost on them)
 function writeTiles() {
   const d = terrain?.tileData;
   if (!d) return;
@@ -242,7 +248,8 @@ function writeTiles() {
     const [i, j] = k.split(',').map(Number);
     if (inside(i, j)) d[(j * nc + i) * 4 + 2] = 255;
   }
-  for (const [i, j] of ghost) if (inside(i, j)) d[(j * nc + i) * 4] = 255;
+  for (const [i, j] of goalTiles) if (inside(i, j)) d[(j * nc + i) * 4] = 96;
+  for (const [i, j] of ghost) if (inside(i, j)) d[(j * nc + i) * 4] = d[(j * nc + i) * 4] === 96 ? 224 : 255;
   terrain.updateTiles();
 }
 
@@ -348,15 +355,17 @@ const ui = createUI({
   onRideExit: () => pauseRide(),
   onRideCam: () => toggleRideCam(),
   onEditSlope: () => editSlope(),
+  onTutorial: () => startTutorial(),
   onFreshSnow: () => {
     if (tracks.freshSnow()) {
-      ui.toast('Fresh snow: your tracks are covered.');
-      try {
+      ui.toast(tx('toast.freshSnow'));
+      // (the tutorial's tracks are on its own slopes: yours stay saved)
+      if (!tutOn) try {
         localStorage.removeItem(TRACKS_KEY);
       } catch {
         /* ignore */
       }
-    } else ui.toast('No tracks yet: ride the mountain first.');
+    } else ui.toast(tx('toast.noTracks'));
   },
   onRelief: (on) => {
     state.relief = on;
@@ -380,7 +389,7 @@ const ui = createUI({
       /* ignore */
     }
     // first visit: design your slope
-    if (!hadSave && !pickedOnce) {
+    if (!hadSave && !pickedOnce && !tutOn) {
       pickedOnce = true;
       slopeEd.open(null, { cancel: false });
     }
@@ -391,8 +400,8 @@ window.__highriseToast = (msg, kind) => ui.toast(msg, kind);
 const bar = createBuildBar({
   onTool: (t) => {
     setTool(t);
-    if (t === 'start') ui.toast('Start: tap the snow (or drag the gate) where the run should start.');
-    if (t === 'select' && !selection.size) ui.toast(COARSE ? 'Select: tap or drag on the snow to pick tiles, then choose what to do with them.' : 'Select: click or drag on the snow to pick tiles, then choose what to do with them.');
+    if (t === 'start') ui.toast(tx('toast.startTool'));
+    if (t === 'select' && !selection.size) ui.toast(tx(COARSE ? 'toast.selectTool.touch' : 'toast.selectTool.desktop'));
   },
   onAction: (a) => act(a),
   onDeselect: () => clearSelection(),
@@ -476,6 +485,7 @@ function rebuild() {
 // ---------- the slope ----------
 const slopeEd = createSlopeEditor({ onBuild: (d, o) => newWorld(d, o) });
 function editSlope() {
+  if (tutOn) return ui.toast(tx('tut.noEdit'));
   if (riding) pauseRide();
   ui.closeMenu();
   slopeEd.open(state.design, { cancel: true, tiles: state.tiles.length });
@@ -483,7 +493,7 @@ function editSlope() {
 
 // Build a (new) slope. keep: what you built stays where it was (tiles are counted from the
 // top line, and stay centred if the width changes), and so does the start gate.
-function newWorld(design, { keep = false, changed = true } = {}) {
+function newWorld(design, { keep = false, changed = true, quiet = false } = {}) {
   if (keep && !changed) return;
   if (riding) exitRide();
   endRun();
@@ -524,8 +534,131 @@ function newWorld(design, { keep = false, changed = true } = {}) {
   viewAnim = null;
   setTool('select');
   const st = designStats(state.design);
-  const len = st.length >= 1000 ? `${(st.length / 1000).toFixed(2).replace(/\.?0+$/, '')} km` : `${st.length} m`;
-  ui.toast(`${len} long, ${Math.round(st.drop)} m down, ${widthOf(state.design)} m wide. ${keep ? 'Your tiles are where they were.' : 'Select tiles and shape them, pick Start to put the gate anywhere, then Ride.'}`);
+  if (!quiet) ui.toast(`${tx('toast.built', { len: fmtLen(st.length), drop: Math.round(st.drop), w: widthOf(state.design) })} ${tx(keep ? 'toast.builtKeep' : 'toast.builtNew')}`);
+}
+
+// Put a whole world in place at once: a slope, its tiles and the start gate (the tutorial,
+// tests). start: { x, u } (u metres below the top line) or null for the default; tiles can
+// be a function of the new slope's grid, tiles(hf).
+function applyWorld({ design, tiles = [], start = null }) {
+  newWorld(design, { quiet: true });
+  state.tiles = trimTiles(typeof tiles === 'function' ? tiles(hf) : tiles, cols(), rows());
+  if (start) state.start = clampStart({ x: start.x, z: hf.startZ + start.u });
+  generate();
+  refreshScene();
+  scheduleSave();
+}
+
+// ---------- the tutorial ----------
+// Its levels take the place of your slope (and your tiles, start, best run and tracks) until
+// you leave it; nothing is saved meanwhile, so a reload is back on your own slope too.
+const tutorial = createTutorial({
+  hf,
+  bar,
+  game: () => ({ tiles: state.tiles, sel: selection, clip, start: state.start }),
+  enter() {
+    if (riding) exitRide();
+    endRun();
+    ui.hideResults();
+    tutSaved = {
+      design: cloneDesign(state.design),
+      tiles: state.tiles,
+      start: { x: state.start.x, u: state.start.z - hf.startZ },
+      best: state.best,
+      bestPath: state.bestPath,
+      brush: state.brush,
+    };
+    tutOn = true;
+    document.body.classList.add('tutorial');
+  },
+  leave() {
+    const s = tutSaved;
+    tutSaved = null;
+    goalTiles = [];
+    clip = null;
+    if (s) {
+      applyWorld(s);
+      state.best = s.best;
+      state.bestPath = s.bestPath;
+      ui.setBest(state.best);
+      state.brush = s.brush;
+      bar.setSize(s.brush);
+      tracks.clear();
+      try {
+        const saved = localStorage.getItem(TRACKS_KEY);
+        if (saved) tracks.unpack(saved);
+      } catch {
+        /* no tracks */
+      }
+    }
+    tutOn = false;
+    document.body.classList.remove('tutorial');
+    writeTiles();
+    // first visit, straight into the tutorial: now design your own slope
+    if (!hadSave && !pickedOnce) {
+      pickedOnce = true;
+      slopeEd.open(null, { cancel: false });
+    }
+  },
+  load(level) {
+    clip = null;
+    goalTiles = [];
+    applyWorld({ design: level.design, tiles: level.tiles || [], start: level.start });
+    refreshBar();
+  },
+  frame: (x, u) => frameAt(x, u),
+  focus: (x, u) => focusAt(x, u),
+  setGoal(g) {
+    goalTiles = g;
+    writeTiles();
+  },
+  setRidePulse: (on) => document.getElementById('send').classList.toggle('tut-pulse', on),
+  toast: (m) => ui.toast(m),
+  cheer: () => sound.finish(),
+  ownSlope: () => hadSave || pickedOnce,
+});
+
+function startTutorial() {
+  try {
+    localStorage.setItem(INTRO_KEY, '1');
+  } catch {
+    /* ignore */
+  }
+  ui.closeMenu();
+  tutorial.start();
+}
+
+// A close look at (x, u) from up the slope: a level's goal tiles, big enough to tap (on a
+// phone a little low on the screen, below the tutorial's card)
+function viewOf(x, u) {
+  const portrait = camera.aspect < 1;
+  const z = hf.startZ + u + (portrait ? 22 : 0);
+  // on a wide screen, a little to the side so the card (top left) doesn't hide the goals
+  const tx0 = x + (camera.aspect > 1.3 ? 28 : 0);
+  const target = new THREE.Vector3(tx0, hf.heightAt(tx0, z), z);
+  const pos = target.clone().add(portrait ? new THREE.Vector3(0, 120, -100) : new THREE.Vector3(-55, 85, -115));
+  const g = hf.inside(pos.x, pos.z) ? hf.heightAt(pos.x, pos.z) : hf.heightAt(pos.x, hf.startZ);
+  pos.y = Math.max(pos.y, g + 50);
+  return { pos, target };
+}
+function frameAt(x, u) {
+  const v = viewOf(x, u);
+  camera.position.copy(v.pos);
+  controls.target.copy(v.target);
+  controls.update();
+  viewAnim = null;
+}
+// glide there, unless (x, u) is already well in view (clear of the card on top)
+const _fp = new THREE.Vector3();
+function focusAt(x, u) {
+  if (riding) return;
+  const z = hf.startZ + u;
+  _fp.set(x, hf.heightAt(x, z), z).project(camera);
+  const top = camera.aspect < 1 ? 0.25 : 0.55;
+  const left = camera.aspect > 1.3 ? -0.3 : -0.65;
+  if (_fp.z < 1 && _fp.x > left && _fp.x < 0.65 && _fp.y > -0.6 && _fp.y < top) return;
+  const v = viewOf(x, u);
+  viewAnim = { t: 0, fromPos: camera.position.clone(), fromTarget: controls.target.clone(), toPos: v.pos, toTarget: v.target };
 }
 
 // ---------- the start gate ----------
@@ -583,22 +716,24 @@ function fallDir(sel) {
   return Math.round((Math.atan2(dx, dz) * 180) / Math.PI);
 }
 
+const signed = (v) => `${v > 0 ? '+' : ''}${num(v)}`;
+const pitchDone = (p) => (p > 0 ? tx('done.steeper', { n: p }) : p < 0 ? tx('done.gentler', { n: -p }) : tx('done.natural'));
 const ACT_DONE = {
-  raise: (d) => `Raised: ${d.lift > 0 ? '+' : ''}${d.lift} m`,
-  lower: (d) => `Lowered: ${d.lift > 0 ? '+' : ''}${d.lift} m`,
-  flatten: () => 'Flattened to one level',
-  smooth: (d) => `Smoothed (${d.smooth}/3)`,
-  steepen: (d) => (d.pitch > 0 ? `Steeper (${d.pitch}/3)` : d.pitch < 0 ? `Gentler (${-d.pitch}/3)` : 'Back to the natural pitch'),
-  ease: (d) => (d.pitch < 0 ? `Gentler (${-d.pitch}/3)` : d.pitch > 0 ? `Steeper (${d.pitch}/3)` : 'Back to the natural pitch'),
-  jump: (d) => (d.jump ? 'Jump: facing down the fall line (Rotate turns it)' : 'Jump removed'),
-  drop: (d) => (d.drop ? 'Drop: facing down the fall line (Rotate turns it)' : 'Drop removed'),
-  rocks: (d) => (d.rocks ? 'Rock band' : 'Rocks removed'),
-  trees: (d) => `Trees: ${['none', 'sparse', 'a wood', 'dense'][d.trees]}`,
-  clear: (d) => (d.clear ? 'Cleared: no trees here' : 'Trees can grow here again'),
-  powder: (d) => (d.powder ? 'Powder: deep, slow, soft' : 'Packed snow again'),
-  ice: (d) => (d.ice ? 'Ice: fast, the edges barely hold' : 'Packed snow again'),
-  rotate: () => 'Turned a twelfth of a turn',
-  erase: () => 'Back to the bare slope',
+  raise: (d) => tx('done.raise', { v: signed(d.lift) }),
+  lower: (d) => tx('done.lower', { v: signed(d.lift) }),
+  flatten: () => tx('done.flatten'),
+  smooth: (d) => tx('done.smooth', { n: d.smooth }),
+  steepen: (d) => pitchDone(d.pitch),
+  ease: (d) => pitchDone(d.pitch),
+  jump: (d) => tx(d.jump ? 'done.jump' : 'done.jumpOff'),
+  drop: (d) => tx(d.drop ? 'done.drop' : 'done.dropOff'),
+  rocks: (d) => tx(d.rocks ? 'done.rocks' : 'done.rocksOff'),
+  trees: (d) => tx(`done.trees${d.trees}`),
+  clear: (d) => tx(d.clear ? 'done.clear' : 'done.clearOff'),
+  powder: (d) => tx(d.powder ? 'done.powder' : 'done.packed'),
+  ice: (d) => tx(d.ice ? 'done.ice' : 'done.packed'),
+  rotate: () => tx('done.rotate'),
+  erase: () => tx('done.erase'),
 };
 
 // Do an action to the selected tiles (the buttons, the keys)
@@ -606,27 +741,27 @@ function act(name) {
   if (riding || ui.blocking) return;
   if (paint) return;
   if (name === 'copy') {
-    if (!selection.size) return ui.toast('Select tiles first, then Copy.');
+    if (!selection.size) return ui.toast(tx('toast.copyFirst'));
     clip = copyTiles(state.tiles, selList());
     refreshBar();
-    return ui.toast(`Copied ${selection.size} tile${selection.size > 1 ? 's' : ''}: Paste puts them down where you ${COARSE ? 'tap' : 'click'}.`);
+    return ui.toast(tx(COARSE ? 'toast.copied.touch' : 'toast.copied.desktop', { n: selection.size }));
   }
   if (name === 'paste') {
-    if (!clip) return ui.toast('Copy some tiles first.');
+    if (!clip) return ui.toast(tx('toast.nothingCopied'));
     return setTool(state.tool === 'paste' ? 'select' : 'paste');
   }
   if (name === 'rotate' && state.tool === 'paste') {
     clip = rotateCopy(clip);
     showHoverPreview();
-    return ui.toast('Turned the copy a sixth of a turn');
+    return ui.toast(tx('toast.turnedCopy'));
   }
   const sel = selList();
-  if (!sel.length) return ui.toast(`Select tiles first: ${COARSE ? 'tap or drag' : 'click or drag'} on the snow.`);
+  if (!sel.length) return ui.toast(tx(COARSE ? 'toast.selectFirst.touch' : 'toast.selectFirst.desktop'));
   const next = applyAction(state.tiles, sel, name, { dir: name === 'jump' || name === 'drop' ? fallDir(sel) : 0 });
   if (next === state.tiles) {
-    if (name === 'rotate') ui.toast('Nothing to turn: select a jump or a drop.');
-    else if (name === 'erase') ui.toast('Nothing to erase here.');
-    else ui.toast(`${ACTIONS[name].label}: as far as it goes.`);
+    if (name === 'rotate') ui.toast(tx('toast.nothingToTurn'));
+    else if (name === 'erase') ui.toast(tx('toast.nothingToErase'));
+    else ui.toast(tx('toast.asFar', { what: tx(`act.${name}`) }));
     return;
   }
   history.push(snapshot());
@@ -647,7 +782,7 @@ function placePaste(t) {
   sound.stamp();
   rebuild();
   setTool('select');
-  ui.toast(`Pasted ${r.placed.length} tile${r.placed.length > 1 ? 's' : ''} (selected: act on them, or Paste again)`);
+  ui.toast(tx('toast.pasted', { n: r.placed.length }));
 }
 
 // a stroke cut short (a second finger: it was a pinch): the selection goes back to how it was
@@ -742,7 +877,7 @@ function endMove(commit) {
   if (commit) {
     history.push(m.snap);
     sound.stamp();
-    ui.toast(paused ? 'Start moved: From the start rides from here, Ride on carries on where you were.' : 'Start moved: Ride goes from here.');
+    ui.toast(tx(paused ? 'toast.startMovedPaused' : 'toast.startMoved'));
     rebuild();
   } else restore(m.snap);
 }
@@ -868,6 +1003,7 @@ function refreshHistoryButtons() {
 
 const r1 = (v) => Math.round(v * 10) / 10;
 function scheduleSave() {
+  if (tutOn) return;
   clearTimeout(saveTimer);
   saveTimer = setTimeout(() => {
     try {
@@ -890,7 +1026,7 @@ function scheduleSave() {
       saveFailed = false;
     } catch {
       // storage full or blocked: the session still works, but say so once
-      if (!saveFailed) ui.toast('Could not save your mountain: browser storage is full or blocked.', 'bad');
+      if (!saveFailed) ui.toast(tx('toast.saveFailed'), 'bad');
       saveFailed = true;
     }
   }, 400);
@@ -907,7 +1043,7 @@ function loadSave() {
     const data = JSON.parse(raw);
     if (![7, 8, 9, 10].includes(data.v)) {
       backupSave(raw);
-      loadNote = 'Highrise starts from a slope you design now: design one and shape it. Your old run was kept aside.';
+      loadNote = 'toast.oldRun';
       return false;
     }
     // v10 saves the slope you designed; before, a wild mountain (size, steepness, seed): it
@@ -938,12 +1074,12 @@ function loadSave() {
       state.bestPath = Array.isArray(data.bestPath) ? data.bestPath : null;
     }
     if (data.rideCam === 'helmet' || data.rideCam === 'chase') state.rideCam = data.rideCam;
-    if (wild) loadNote = 'Highrise starts from a slope you design now: your mountain became sections (Edit the slope, in the ••• menu). Your tiles are kept.';
+    if (wild) loadNote = 'toast.fromWild';
     return true;
   } catch {
     if (raw) {
       backupSave(raw);
-      loadNote = 'Your saved mountain could not be read (a copy was kept).';
+      loadNote = 'toast.unreadable';
     }
     return false;
   }
@@ -975,12 +1111,6 @@ function applyControlScheme() {
   document.body.classList.toggle('alt-orbit', altHeld);
 }
 
-const HINTS = {
-  view: 'Drag to orbit · Middle-drag to pan · Scroll to zoom',
-  select: 'Click or drag to select tiles · Drag from a selected one to unselect · Right-drag to orbit · Esc deselects',
-  paste: 'Click where the copy goes · Q turns it · Esc cancels · Right-drag to orbit',
-  start: 'Click or drag on the snow to put the start gate there · Right-drag to orbit',
-};
 
 function setTool(t) {
   if (paint) cancelPaint();
@@ -989,7 +1119,7 @@ function setTool(t) {
   state.tool = t;
   ui.setTool(t);
   bar.set(t);
-  ui.setHint(HINTS[t]);
+  ui.setHint(tx(`hint.${t}`));
   setGhost();
   refreshBar();
   applyControlScheme();
@@ -1025,6 +1155,7 @@ function startRun() {
   skierMesh.visible = true;
   trail.clear();
   ghostRider.setPath(state.bestPath);
+  tutorial.runStarted();
   lastStatus = 'running';
   ui.setStatus('running');
   ui.hideResults();
@@ -1365,7 +1496,7 @@ function onRunEnd(s) {
   }
   if (finished) sound.finish();
   ui.showResults({
-    eyebrow: finished ? 'Run complete' : s.status === 'stuck' ? 'Stopped: not enough slope' : 'Out of time',
+    eyebrow: finished ? 'res.complete' : s.status === 'stuck' ? 'res.stuck' : 'res.timeout',
     score: score.total,
     isBest,
     time: s.time,
@@ -1429,6 +1560,7 @@ function recordTrack(sk) {
 }
 
 function saveTracks() {
+  if (tutOn) return;
   try {
     localStorage.setItem(TRACKS_KEY, tracks.pack());
   } catch {
@@ -1472,6 +1604,8 @@ function frame() {
   } else terrain.setBrush(false);
 
   if (skier && riding) rideStep(dt);
+  else tutorial.tick(dt);
+  if (goalTiles.length) terrain.uniforms.uTime.value = clock.elapsedTime;
 
   spray.update(dt);
   tracks.update(dt);
@@ -1520,6 +1654,7 @@ function rideStep(dt) {
     if (score) score.update(skier, skier.status === 'running' ? dt : 0);
     for (; lastEventCount < skier.events.length; lastEventCount++) onSkierEvent(skier.events[lastEventCount]);
     if (score) drainFeed();
+    tutorial.rideFrame(skier);
     skierMesh.sync(skier, hf, dt);
     trail.setPath(skier.path);
     if (score) ui.setStats(skier, progressOf(skier), score);
@@ -1659,11 +1794,13 @@ document.addEventListener(
 );
 
 // ---------- start ----------
-if (!hadSave) document.getElementById('intro-go').textContent = 'Design my slope';
+if (!hadSave) document.getElementById('intro-go').dataset.i18n = 'intro.goFirst';
+applyDom();
+onLang(() => setTool(state.tool));
 if (!seenIntro) ui.openIntro();
 else if (!hadSave) setTimeout(() => slopeEd.open(null, { cancel: false }), 0);
 ui.setBest(state.best);
-if (loadNote) ui.toast(loadNote, 'bad');
+if (loadNote) ui.toast(tx(loadNote), 'bad');
 setTool(state.tool);
 refreshScene();
 refreshHistoryButtons();
@@ -1717,6 +1854,22 @@ window.__highrise = {
     return selection.size;
   },
   clearSelection: () => clearSelection(),
+  applyWorld: (w) => applyWorld(w),
+  tutorial,
+  // select these tiles ([[i, j], ...]), put the start gate at (x, u), paste with the copy's
+  // anchor on tile (i, j) (tests)
+  selectTiles(list) {
+    for (const [i, j] of list) if (onGrid([i, j])) selection.add(tileKey(i, j));
+    writeTiles();
+    refreshBar();
+  },
+  startAt(x, u) {
+    moveStart(x, hf.startZ + u);
+    rebuild();
+  },
+  pasteTile(i, j) {
+    if (clip) placePaste({ i, j });
+  },
   get selection() {
     return selList();
   },

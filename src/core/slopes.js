@@ -146,10 +146,18 @@ export function designStats(d) {
   }
   const avgDeg = L > 0 ? (Math.atan2(drop, L) * 180) / Math.PI : 0;
   let reason = '';
-  if (L < MIN_LENGTH) reason = `Too short: make it at least ${MIN_LENGTH} m long.`;
-  else if (L > MAX_LENGTH) reason = `Too long: ${MAX_LENGTH / 1000} km at most.`;
-  else if (drop < MIN_DROP) reason = `Not enough drop: it has to go down at least ${MIN_DROP} m.`;
-  return { length: L, drop, avgDeg, maxDeg, minDeg, ok: !reason, reason };
+  let why = null; // [i18n key, vars] for the reason
+  if (L < MIN_LENGTH) {
+    reason = `Too short: make it at least ${MIN_LENGTH} m long.`;
+    why = ['sl.tooShort', { n: MIN_LENGTH }];
+  } else if (L > MAX_LENGTH) {
+    reason = `Too long: ${MAX_LENGTH / 1000} km at most.`;
+    why = ['sl.tooLong', { n: MAX_LENGTH / 1000 }];
+  } else if (drop < MIN_DROP) {
+    reason = `Not enough drop: it has to go down at least ${MIN_DROP} m.`;
+    why = ['sl.noDrop', { n: MIN_DROP }];
+  }
+  return { length: L, drop, avgDeg, maxDeg, minDeg, ok: !reason, reason, why };
 }
 
 // Grid size for a design: 1.5 m cells, a little coarser on the big ones

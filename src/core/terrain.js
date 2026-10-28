@@ -168,6 +168,181 @@ const fieldAt = (F, i, j) => {
   return ii < 0 || jj < 0 || ii >= F.w || jj >= F.h ? 0 : F.f[jj * F.w + ii];
 };
 
+// reusable work buffers (the mountain is rebuilt on every action)
+const scratchBufs = {};
+function scratch(name, n) {
+  const b = scratchBufs[name];
+  if (b && b.length === n) return b;
+  return (scratchBufs[name] = new Float32Array(n));
+}
+
+export const LIFT_SHARP = 3; // metres of a raise or a dig with tight edges; beyond, wide flanks
+const BANK = Math.tan((30 * Math.PI) / 180); // the steepest a flatten's banks get (snow sits at about that)
+
+/**
+ * Level a flatten group to its average height: cut where the snow was above it, fill where
+ * it was below. Around it the snow goes back to the slope with banks: never steeper than
+ * BANK (or a little steeper than the slope itself, on a slope steeper than that), rounded
+ * where they leave the terrace and where they meet the snow, and as long as they need to
+ * be: a terrace on a steep slope has tall, long banks, never a cliff or a step.
+ */
+function flattenGroup(hf, group) {
+  const { h, nx, nz, cell, halfZ, startZ } = hf;
+  // the terrace: the tiles with their outline rounded (half way up their blurred mask), so
+  // its edge and its banks are smooth curves, not the zigzag of the hexagons
+  const M = tileField(hf, group, 5.5);
+  if (!M) return;
+  const inside = (i, j) => fieldAt(M, i, j) >= 0.5;
+  let x0 = Infinity;
+  let x1 = -Infinity;
+  let u0 = Infinity;
+  let u1 = -Infinity;
+  for (const t of group) {
+    const [x, u] = hexCenter(t.i, t.j);
+    x0 = Math.min(x0, x);
+    x1 = Math.max(x1, x);
+    u0 = Math.min(u0, u);
+    u1 = Math.max(u1, u);
+  }
+  // the level, and how steep the slope is round about (banks must beat it to meet it)
+  let sum = 0;
+  let n = 0;
+  const ci0 = Math.max(0, Math.floor((x0 - HEX_R) / cell));
+  const ci1 = Math.min(nx - 1, Math.ceil((x1 + HEX_R) / cell));
+  const cj0 = Math.max(0, Math.floor((startZ + halfZ + u0 - HEX_R) / cell));
+  const cj1 = Math.min(nz - 1, Math.ceil((startZ + halfZ + u1 + HEX_R) / cell));
+  let grade = 0;
+  for (let j = cj0; j <= cj1; j++) {
+    for (let i = ci0; i <= ci1; i++) {
+      if (!inside(i, j)) continue;
+      const q = j * nx + i;
+      sum += h[q];
+      n++;
+      if (i > 0 && i < nx - 1 && j > 0 && j < nz - 1) grade = Math.max(grade, Math.hypot(h[q + 1] - h[q - 1], h[q + nx] - h[q - nx]) / (2 * cell));
+    }
+  }
+  if (!n) return;
+  const level = sum / n;
+  const m = Math.max(BANK, 1.35 * grade);
+  const knee = 5; // metres over which a bank rounds into the snow
+  // grow the area until its edge is untouched (the banks have met the snow everywhere)
+  for (let margin = 30; ; margin *= 2) {
+    const i0 = Math.max(0, Math.floor((x0 - HEX_R - margin) / cell));
+    const i1 = Math.min(nx - 1, Math.ceil((x1 + HEX_R + margin) / cell));
+    const j0 = Math.max(0, Math.floor((startZ + halfZ + u0 - HEX_R - margin) / cell));
+    const j1 = Math.min(nz - 1, Math.ceil((startZ + halfZ + u1 + HEX_R + margin) / cell));
+    const w = i1 - i0 + 1;
+    const hh = j1 - j0 + 1;
+    // distance from the terrace, in metres (two-pass chamfer)
+    const d = scratch('dist', w * hh);
+    for (let jj = 0; jj < hh; jj++) {
+      for (let ii = 0; ii < w; ii++) d[jj * w + ii] = inside(i0 + ii, j0 + jj) ? 0 : 1e9;
+    }
+    chamfer(d, w, hh, cell);
+    // the mask is cell by cell: smooth the distance a little, or the banks would start in
+    // stair steps along the terrace's edge (and the light would show every one of them)
+    const tmp = scratch('tmp', Math.max(w, hh));
+    const rb = Math.max(1, Math.round(2.5 / cell));
+    for (let pass = 0; pass < 2; pass++) {
+      for (let jj = 0; jj < hh; jj++) boxLineClamped(d, jj * w, 1, w, rb, tmp);
+      for (let ii = 0; ii < w; ii++) boxLineClamped(d, ii, w, hh, rb, tmp);
+    }
+    // the shape it makes: on the terrace, the level; off it, the snow, held within a bank
+    let edgeTouched = false;
+    const out = scratch('flat', w * hh);
+    for (let jj = 0; jj < hh; jj++) {
+      for (let ii = 0; ii < w; ii++) {
+        const q = (j0 + jj) * nx + i0 + ii;
+        const dd = d[jj * w + ii];
+        const x = h[q] - level;
+        // a bank that starts flat off the terrace, then holds its angle
+        const lim = (m * dd * dd) / (dd + 4);
+        const ax = Math.abs(x);
+        let v = ax;
+        if (ax > lim - knee) {
+          // smooth minimum of |x| and the bank: exactly |x| until within a knee of it
+          const k = Math.max(0, knee - Math.abs(ax - lim)) / knee;
+          v = Math.min(ax, lim) - (k * k * knee) / 4;
+          if (Math.max(0, v) !== ax) {
+            const onEdge = ii === 0 || jj === 0 || ii === w - 1 || jj === hh - 1;
+            const atBorder = (ii === 0 && i0 === 0) || (jj === 0 && j0 === 0) || (ii === w - 1 && i1 === nx - 1) || (jj === hh - 1 && j1 === nz - 1);
+            if (onEdge && !atBorder) edgeTouched = true;
+          }
+        }
+        out[jj * w + ii] = level + Math.sign(x) * Math.max(0, v);
+      }
+    }
+    if (edgeTouched && margin < 240) continue;
+    for (let jj = 0; jj < hh; jj++) h.set(out.subarray(jj * w, jj * w + w), (j0 + jj) * nx + i0);
+    return;
+  }
+}
+
+// distance transform in place: 0 on the set, else the distance to it (metres), 8 neighbours
+function chamfer(d, w, h, cell) {
+  const a = cell;
+  const b = cell * Math.SQRT2;
+  for (let j = 0; j < h; j++) {
+    for (let i = 0; i < w; i++) {
+      const q = j * w + i;
+      let v = d[q];
+      if (i > 0) v = Math.min(v, d[q - 1] + a);
+      if (j > 0) {
+        v = Math.min(v, d[q - w] + a);
+        if (i > 0) v = Math.min(v, d[q - w - 1] + b);
+        if (i < w - 1) v = Math.min(v, d[q - w + 1] + b);
+      }
+      d[q] = v;
+    }
+  }
+  for (let j = h - 1; j >= 0; j--) {
+    for (let i = w - 1; i >= 0; i--) {
+      const q = j * w + i;
+      let v = d[q];
+      if (i < w - 1) v = Math.min(v, d[q + 1] + a);
+      if (j < h - 1) {
+        v = Math.min(v, d[q + w] + a);
+        if (i < w - 1) v = Math.min(v, d[q + w + 1] + b);
+        if (i > 0) v = Math.min(v, d[q + w - 1] + b);
+      }
+      d[q] = v;
+    }
+  }
+}
+
+// The jumps and drops, as the ones to shape: a group is the tiles made together, and
+// groups that touch, of the same kind and facing the same way, are one (two jumps made one
+// after the other side by side are one wide jump, not two with a seam)
+function featureGroups(tiles) {
+  const at = new Map(tiles.map((t, k) => [key(t.i, t.j), k]));
+  const parent = tiles.map((_, k) => k);
+  const find = (k) => (parent[k] === k ? k : (parent[k] = find(parent[k])));
+  const join = (a, b) => {
+    const ra = find(a);
+    const rb = find(b);
+    if (ra !== rb) parent[Math.max(ra, rb)] = Math.min(ra, rb);
+  };
+  const byGroup = new Map();
+  tiles.forEach((t, k) => {
+    if (byGroup.has(t.g)) join(k, byGroup.get(t.g));
+    else byGroup.set(t.g, k);
+    for (const [i, j] of hexDisk(t.i, t.j, 1)) {
+      const o = at.get(key(i, j));
+      if (o === undefined || o === k) continue;
+      const u = tiles[o];
+      const dd = Math.abs(((u.dir - t.dir + 540) % 360) - 180);
+      if (u.feat === t.feat && dd < 1) join(k, o);
+    }
+  });
+  const out = new Map();
+  tiles.forEach((t, k) => {
+    const r = find(k);
+    if (!out.has(r)) out.set(r, []);
+    out.get(r).push(t);
+  });
+  return [...out.values()];
+}
+
 const groupBy = (list, f) => {
   const m = new Map();
   for (const t of list) {
@@ -239,43 +414,21 @@ export function applyTerrain(hf, tiles) {
     }
   }
 
-  // flatten: each group levelled to its own average height, with banks just outside it
-  for (const group of groupBy(pick((t) => t.flat), (t) => t.flat)) {
-    const W = tileField(hf, group, 4);
-    if (!W) continue;
-    const inGroup = new Set(group.map((t) => key(t.i, t.j)));
-    let sum = 0;
-    let n = 0;
-    for (let jj = 0; jj < W.h; jj++) {
-      const j = W.j0 + jj;
-      const u = j * cell - hf.halfZ - hf.startZ;
-      for (let ii = 0; ii < W.w; ii++) {
-        const i = W.i0 + ii;
-        const t = hexAt(i * cell, u);
-        if (inGroup.has(key(t.i, t.j))) {
-          sum += h[j * nx + i];
-          n++;
-        }
-      }
-    }
-    if (!n) continue;
-    const level = sum / n;
-    for (let jj = 0; jj < W.h; jj++) {
-      const row = (W.j0 + jj) * nx + W.i0;
-      for (let ii = 0; ii < W.w; ii++) {
-        const k = smoothstep(0.12, 0.55, W.f[jj * W.w + ii]);
-        if (k) h[row + ii] += (level - h[row + ii]) * k;
-      }
-    }
-  }
+  // flatten: each group levelled to its own average height, cut into the slope and built
+  // up from it, with banks back to the snow around (see flattenGroup)
+  for (const group of groupBy(pick((t) => t.flat), (t) => t.flat)) flattenGroup(hf, group);
 
-  // raise / lower: metre for metre in the middle of an area, rounded off at its edges
-  const Fl = tileField(hf, pick((t) => t.lift), 3.5, 3.5, (t) => t.lift);
-  if (Fl) {
-    for (let jj = 0; jj < Fl.h; jj++) {
-      const row = (Fl.j0 + jj) * nx + Fl.i0;
-      for (let ii = 0; ii < Fl.w; ii++) {
-        const v = Fl.f[jj * Fl.w + ii];
+  // raise / lower: metre for metre in the middle of an area, rounded off at its edges. The
+  // first 3 m have tight edges (a bump, a roller); anything more spreads its flanks wider,
+  // so a big hill or a deep bowl has slopes you can ride, not walls
+  const liftT = pick((t) => t.lift);
+  const sharp = (t) => Math.max(-LIFT_SHARP, Math.min(LIFT_SHARP, t.lift));
+  for (const F of [tileField(hf, liftT, 3.5, 3.5, sharp), tileField(hf, liftT.filter((t) => Math.abs(t.lift) > LIFT_SHARP), 9, 9, (t) => t.lift - sharp(t))]) {
+    if (!F) continue;
+    for (let jj = 0; jj < F.h; jj++) {
+      const row = (F.j0 + jj) * nx + F.i0;
+      for (let ii = 0; ii < F.w; ii++) {
+        const v = F.f[jj * F.w + ii];
         if (v) h[row + ii] = Math.max(MIN_H, Math.min(MAX_H, h[row + ii] + v));
       }
     }
@@ -302,11 +455,26 @@ export function applyTerrain(hf, tiles) {
     }
   }
 
-  // jumps and drops: one per group, facing its own way
+  // jumps and drops: one per group, facing its own way. Side by side they merge (the
+  // highest rise and the deepest dip win, so two kickers next to each other make one wide
+  // kicker, not a double-height seam between them)
   const kickers = [];
-  for (const group of groupBy(pick((t) => (t.feat === 'jump' || t.feat === 'drop') && t.g), (t) => t.g)) {
-    const k = shapeFeature(hf, group, group[0].feat, group[0].dir);
-    if (k && group[0].feat === 'jump') kickers.push(k);
+  const featGroups = featureGroups(pick((t) => (t.feat === 'jump' || t.feat === 'drop') && t.g));
+  if (featGroups.length) {
+    const acc = { up: scratch('up', nx * nz), down: scratch('down', nx * nz), i0: nx, i1: -1, j0: nz, j1: -1 };
+    for (const group of featGroups) {
+      const k = shapeFeature(hf, group, group[0].feat, group[0].dir, acc);
+      if (k && group[0].feat === 'jump') kickers.push(k);
+    }
+    for (let j = acc.j0; j <= acc.j1; j++) {
+      for (let i = acc.i0; i <= acc.i1; i++) {
+        const q = j * nx + i;
+        const v = acc.up[q] + acc.down[q];
+        if (v) h[q] = Math.max(MIN_H, Math.min(MAX_H, h[q] + v));
+        acc.up[q] = 0;
+        acc.down[q] = 0;
+      }
+    }
   }
 
   // powder: soft pillows in the snow
@@ -368,10 +536,11 @@ export function applyTerrain(hf, tiles) {
  * it): a longer one is bigger.
  *   jump: a concave ramp up to a lip near the far edge, then the snow falls away behind it
  *   drop: the snow shelves up to an edge, falls sharply, and a landing eases back below
- * Added to hf. Returns the footprint (a field of 0..1) for a jump, so world.js keeps snow
- * on its steep back instead of baring rock.
+ * Its rises and dips go into acc.up / acc.down (the highest and the deepest of all the
+ * features), which applyTerrain adds to the snow. Returns the footprint (a field of 0..1)
+ * for a jump, so world.js keeps snow on its steep back instead of baring rock.
  */
-function shapeFeature(hf, tiles, kind, dirDeg) {
+function shapeFeature(hf, tiles, kind, dirDeg, acc) {
   const th = (dirDeg * Math.PI) / 180;
   const dx = Math.sin(th);
   const dz = Math.cos(th);
@@ -407,14 +576,20 @@ function shapeFeature(hf, tiles, kind, dirDeg) {
   // it's the span of all of them, the same all along its length: a clean kicker)
   const px = dz;
   const pz = -dx;
-  const across = centres.map((c) => c.x * px + c.z * pz);
   const hw = 0.5 * (HEX_W / 2 + HEX_R); // a hexagon's half width, between flats and corners
+  // the tiles' spans across, merged where they touch: one plateau, no dip at the seams
+  const spans = [];
+  for (const ak of centres.map((c) => c.x * px + c.z * pz).sort((p, q) => p - q)) {
+    const last = spans[spans.length - 1];
+    if (last && ak - hw <= last[1]) last[1] = Math.max(last[1], ak + hw);
+    else spans.push([ak - hw, ak + hw]);
+  }
   const coverage = (a) => {
     let m = 0;
-    for (const ak of across) m = Math.max(m, 1 - smoothstep(hw - 1.2, hw + 1.2, Math.abs(a - ak)));
+    for (const [A, B] of spans) m = Math.max(m, smoothstep(A - 1.2, A + 1.2, a) * (1 - smoothstep(B - 1.2, B + 1.2, a)));
     return m;
   };
-  const { cell, nx, h } = hf;
+  const { cell, nx } = hf;
   let xa = Infinity;
   let xb = -Infinity;
   let za = Infinity;
@@ -432,6 +607,10 @@ function shapeFeature(hf, tiles, kind, dirDeg) {
   const j1 = Math.min(hf.nz - 1, Math.ceil((zb + pad + hf.halfZ) / cell));
   const w = i1 - i0 + 1;
   const foot = { i0, j0, w, h: j1 - j0 + 1, f: new Float32Array(w * (j1 - j0 + 1)) };
+  acc.i0 = Math.min(acc.i0, i0);
+  acc.i1 = Math.max(acc.i1, i1);
+  acc.j0 = Math.min(acc.j0, j0);
+  acc.j1 = Math.max(acc.j1, j1);
   for (let j = j0; j <= j1; j++) {
     const z = j * cell - hf.halfZ;
     for (let i = i0; i <= i1; i++) {
@@ -442,7 +621,9 @@ function shapeFeature(hf, tiles, kind, dirDeg) {
       if (m < 0.005) continue;
       const v = m * profile(t);
       if (!v) continue;
-      h[j * nx + i] = Math.max(MIN_H, Math.min(MAX_H, h[j * nx + i] + v));
+      const q = j * nx + i;
+      if (v > 0) acc.up[q] = Math.max(acc.up[q], v);
+      else acc.down[q] = Math.min(acc.down[q], v);
       if (kind === 'jump' && v > 0.05) foot.f[(j - j0) * w + (i - i0)] = Math.min(1, m * 1.5);
     }
   }

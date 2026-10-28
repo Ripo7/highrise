@@ -7,13 +7,14 @@
 import { ACTIONS, TABS } from './core/tiles.js';
 import { BRUSH_TILES } from './core/terrain.js';
 import { ACTION_ICONS, BAR_ICONS, CATEGORY_COLORS } from './pieceIcons.js';
+import { t, num, onLang } from './i18n.js';
 
 const svg = (paths) => `<svg viewBox="0 0 24 24" aria-hidden="true">${paths}</svg>`;
 
 // a small readout on a button for what the selection holds
 const BADGES = {
-  raise: (d) => (d.lift > 0 ? `+${d.lift}` : ''),
-  lower: (d) => (d.lift < 0 ? `${d.lift}` : ''),
+  raise: (d) => (d.lift > 0 ? `+${num(d.lift)}` : ''),
+  lower: (d) => (d.lift < 0 ? `${num(d.lift)}` : ''),
   smooth: (d) => (d.smooth ? `${d.smooth}/3` : ''),
   steepen: (d) => (d.pitch > 0 ? `${d.pitch}/3` : ''),
   ease: (d) => (d.pitch < 0 ? `${-d.pitch}/3` : ''),
@@ -34,17 +35,18 @@ export function createBuildBar({ onTool, onAction, onDeselect, onSize }) {
   let size = 2;
   let info = { n: 0 };
   let hasClip = false;
+  let hintAction = null; // the tutorial's: this button pulses
 
   const render = () => {
     tabs.innerHTML = TABS.map(
-      (t) => `<button type="button" role="tab" data-tab="${t.id}" aria-selected="${t.id === tab}" style="--c:${CATEGORY_COLORS[t.id]}">${t.label}</button>`
+      (x) => `<button type="button" role="tab" data-tab="${x.id}" aria-selected="${x.id === tab}" style="--c:${CATEGORY_COLORS[x.id]}">${t(`tab.${x.id}`)}</button>`
     ).join('');
     const c = CATEGORY_COLORS[tab];
     list.innerHTML = Object.entries(ACTIONS)
       .filter(([, a]) => a.tab === tab)
       .map(
-        ([id, a]) =>
-          `<button type="button" class="bb-piece" data-action="${id}" style="--c:${c}" title="${a.label}: ${a.hint}">${svg(ACTION_ICONS[id])}<span>${a.label}</span><em class="bb-badge" hidden></em></button>`
+        ([id]) =>
+          `<button type="button" class="bb-piece" data-action="${id}" style="--c:${c}" title="${t('bar.actTitle', { a: t(`act.${id}`), h: t(`act.${id}.hint`) })}">${svg(ACTION_ICONS[id])}<span>${t(`act.${id}`)}</span><em class="bb-badge" hidden></em></button>`
       )
       .join('');
     list.scrollLeft = 0;
@@ -52,8 +54,13 @@ export function createBuildBar({ onTool, onAction, onDeselect, onSize }) {
   };
 
   const sync = () => {
-    root.querySelectorAll('[data-tool]').forEach((b) => b.setAttribute('aria-pressed', String(tool === b.dataset.tool)));
+    root.querySelectorAll('[data-tool]').forEach((b) => {
+      b.setAttribute('aria-pressed', String(tool === b.dataset.tool));
+      b.classList.toggle('bb-pulse', hintAction === b.dataset.tool);
+    });
     sizes.querySelectorAll('[data-size]').forEach((b) => b.setAttribute('aria-pressed', String(+b.dataset.size === size)));
+    sizes.classList.toggle('bb-pulse', hintAction === 'size');
+    chip.classList.toggle('bb-pulse', hintAction === 'chip');
     sizes.hidden = tool !== 'select';
     const none = !info.n;
     list.querySelectorAll('[data-action]').forEach((b) => {
@@ -64,22 +71,28 @@ export function createBuildBar({ onTool, onAction, onDeselect, onSize }) {
       b.setAttribute('aria-disabled', String(off));
       const pressed = id === 'paste' ? tool === 'paste' : TOGGLES.includes(id) && !none && !!info[flagOf[id] || id];
       b.setAttribute('aria-pressed', String(pressed));
+      b.classList.toggle('bb-pulse', id === hintAction);
       const badge = b.querySelector('.bb-badge');
       const text = !none && BADGES[id] ? BADGES[id](info) : '';
       badge.textContent = text;
       badge.hidden = !text;
     });
     chip.hidden = none;
-    chip.innerHTML = `${info.n} tile${info.n === 1 ? '' : 's'}<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>`;
-    chip.title = 'Deselect (Esc)';
+    chip.innerHTML = `${t('bar.chip', { n: info.n || 0 })}<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>`;
+    chip.title = t('bar.deselect');
   };
 
-  root.querySelector('.bb-fixed-look').innerHTML = `${svg(BAR_ICONS.look)}<span>Look</span>`;
-  root.querySelector('.bb-fixed-select').innerHTML = `${svg(BAR_ICONS.select)}<span>Select</span>`;
-  root.querySelector('.bb-fixed-start').innerHTML = `${svg(BAR_ICONS.start)}<span>Start</span>`;
-  sizes.innerHTML = [1, 2, 3]
-    .map((n) => `<button type="button" data-size="${n}" title="Select ${BRUSH_TILES[n - 1]} tile${n > 1 ? 's' : ''} at a time">${['S', 'M', 'L'][n - 1]}</button>`)
-    .join('');
+  const renderFixed = () => {
+    root.querySelector('.bb-fixed-look').innerHTML = `${svg(BAR_ICONS.look)}<span>${t('tool.view')}</span>`;
+    root.querySelector('.bb-fixed-select').innerHTML = `${svg(BAR_ICONS.select)}<span>${t('tool.select')}</span>`;
+    root.querySelector('.bb-fixed-start').innerHTML = `${svg(BAR_ICONS.start)}<span>${t('tool.start')}</span>`;
+    sizes.innerHTML = [1, 2, 3].map((n) => `<button type="button" data-size="${n}" title="${t('bar.sizeTitle', { n: BRUSH_TILES[n - 1] })}">${['S', 'M', 'L'][n - 1]}</button>`).join('');
+  };
+  renderFixed();
+  onLang(() => {
+    renderFixed();
+    render();
+  });
 
   root.addEventListener('click', (e) => {
     // only this bar's own buttons (the page body carries a data-tool too)
@@ -125,6 +138,17 @@ export function createBuildBar({ onTool, onAction, onDeselect, onSize }) {
     },
     get tab() {
       return tab;
+    },
+    // show a tab (the tutorial points at an action), and mark what to press: an action, a
+    // tool ('select', 'start'), the brush sizes ('size') or the selection chip ('chip')
+    showTab(id) {
+      if (id === tab) return;
+      tab = id;
+      render();
+    },
+    setHint(action) {
+      hintAction = action;
+      sync();
     },
   };
 }

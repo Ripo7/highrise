@@ -65,14 +65,17 @@ export function judgeLanding(ev) {
   let name = parts.join(' ');
   if (!name) name = `Big Air ${ev.air.toFixed(1)} s`;
   let qualityNote = '';
+  let noteKey = '';
   if (ev.quality === 'clean') {
     points += hasSpin || hasFlip ? 200 : 50;
     qualityNote = 'Clean';
+    noteKey = 'note.clean';
   } else {
     points *= 0.5;
     qualityNote = SKETCHY_NOTE[ev.cause] ?? 'Sketchy';
+    noteKey = SKETCHY_NOTE[ev.cause] ? `note.${ev.cause}` : 'note.sketchy';
   }
-  return { name, points: Math.round(points / 10) * 10, quality: ev.quality, note: qualityNote, isTrick: hasSpin || hasFlip };
+  return { name, points: Math.round(points / 10) * 10, quality: ev.quality, note: qualityNote, noteKey, isTrick: hasSpin || hasFlip };
 }
 
 export class ScoreKeeper {
@@ -136,6 +139,7 @@ export class ScoreKeeper {
       text: 'Speed run',
       sub: `${st.time.toFixed(1)} s over ${SPEED_BONUS_KMH} km/h · top ${Math.round(st.top)} km/h`,
       points: pts,
+      i18n: { text: ['feed.speedRun'], sub: ['feed.speedSub', { t: Math.round(st.time * 10) / 10, v: SPEED_BONUS_KMH, top: Math.round(st.top) }] },
     });
   }
 
@@ -143,7 +147,7 @@ export class ScoreKeeper {
     if (ev.type === 'gate') {
       this.total += GATE_POINTS;
       this.gatePoints = (this.gatePoints || 0) + GATE_POINTS;
-      this.feed.push({ kind: 'gate', text: `Gate ${ev.count}/${ev.total}`, sub: '', points: GATE_POINTS });
+      this.feed.push({ kind: 'gate', text: `Gate ${ev.count}/${ev.total}`, sub: '', points: GATE_POINTS, i18n: { text: ['feed.gate', { n: ev.count, total: ev.total }] } });
       return;
     }
     if (ev.type === 'land' || ev.type === 'grind') {
@@ -161,6 +165,7 @@ export class ScoreKeeper {
         text: trick.name,
         sub: this.combo.tricks.length > 1 ? `${trick.note} · combo ×${this.multiplier}` : trick.note,
         points: trick.points,
+        i18n: { sub: trick.noteKey ? (this.combo.tricks.length > 1 ? ['feed.comboWith', { note: { key: trick.noteKey }, m: this.multiplier }] : [trick.noteKey]) : null },
       });
     } else if (ev.type === 'wipeout') {
       const lost = this.pending + (this.streak ? Math.round(this.streak.points / 10) * 10 : 0);
@@ -171,6 +176,7 @@ export class ScoreKeeper {
         text: 'Wipeout',
         sub: lost ? `Combo lost (${lost.toLocaleString('en-US')})` : WIPEOUT_HINT[ev.reason] ?? '',
         points: 0,
+        i18n: { text: ['feed.wipeout'], sub: lost ? ['feed.comboLost', { pts: lost }] : WIPEOUT_HINT[ev.reason] ? [`why.${ev.reason}`] : null },
       });
     }
   }
@@ -181,7 +187,7 @@ export class ScoreKeeper {
     this.total += pts;
     this.bestCombo = Math.max(this.bestCombo, pts);
     if (this.combo.tricks.length > 1) {
-      this.feed.push({ kind: 'combo', text: `${this.combo.tricks.length}-trick combo`, sub: `×${this.multiplier}`, points: pts });
+      this.feed.push({ kind: 'combo', text: `${this.combo.tricks.length}-trick combo`, sub: `×${this.multiplier}`, points: pts, i18n: { text: ['feed.combo', { n: this.combo.tricks.length }] } });
     }
     this.combo = null;
   }

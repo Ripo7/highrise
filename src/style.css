@@ -2075,208 +2075,7 @@ body.menu-open .extras {
   text-transform: uppercase;
   color: var(--muted);
 }
-.mountain-card {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-}
-.mountain-card h1 {
-  margin: 0;
-}
-.mt-slopes {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 8px;
-}
-.mt-slope {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 2px;
-  padding: 8px 10px 10px;
-  border: var(--edge);
-  border-radius: 14px;
-  background: #fff;
-  box-shadow: 0 3px 0 var(--ink);
-  color: var(--ink);
-  text-align: left;
-  cursor: pointer;
-}
-.mt-slope svg {
-  width: 100%;
-  height: 40px;
-  margin-bottom: 4px;
-}
-.mt-slope svg path {
-  fill: none;
-  stroke-width: 3;
-  stroke-linecap: round;
-}
-.mt-slope[data-d='blue'] svg path {
-  stroke: #2f6fd6;
-}
-.mt-slope[data-d='red'] svg path {
-  stroke: #e0412f;
-}
-.mt-slope[data-d='black'] svg path {
-  stroke: var(--ink);
-}
-.mt-slope svg path.fill {
-  stroke: none;
-  fill: #e6e9ff;
-}
-.mt-slope b {
-  font: 700 18px/1 var(--display);
-}
-.mt-slope small {
-  font: 600 12px/1.2 var(--display);
-  color: var(--muted);
-}
-.mt-slope em {
-  font: 500 12px/1.3 var(--body);
-  font-style: normal;
-  color: #5b4a78;
-}
-.mt-slope[aria-checked='true'] {
-  background: #fff1df;
-  outline: 3px solid var(--signal);
-  outline-offset: 1px;
-}
-.mt-row {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-.mt-starter {
-  font-size: 14px;
-}
-@media (max-width: 520px) {
-  .mt-slope em {
-    display: none;
-  }
-  .mt-slope b {
-    font-size: 16px;
-  }
-}
 
-/* the mountain card: a preview from above beside the choices */
-.mt-body {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  gap: 14px;
-  align-items: start;
-}
-.mt-preview {
-  margin: 0;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 8px;
-}
-.mt-preview canvas {
-  width: 150px;
-  height: auto;
-  max-height: 300px;
-  border: var(--edge);
-  border-radius: 12px;
-  background: #e6e9ff;
-  box-shadow: 0 3px 0 var(--ink);
-}
-.mt-another {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  min-height: 38px;
-  padding: 0 12px;
-  font-size: 13px;
-}
-.mt-another svg {
-  width: 18px;
-  height: 18px;
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 2;
-}
-.mt-another svg circle {
-  fill: currentColor;
-  stroke: none;
-}
-.mt-opts {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  min-width: 0;
-}
-.mt-opts .mt-slopes {
-  grid-template-columns: minmax(0, 1fr);
-  gap: 6px;
-}
-.mt-opts .mt-slope {
-  display: grid;
-  grid-template-columns: 54px minmax(0, 1fr) auto;
-  grid-template-areas: 'pic name deg' 'pic blurb blurb';
-  align-items: center;
-  column-gap: 10px;
-  row-gap: 0;
-  padding: 6px 10px;
-}
-.mt-opts .mt-slope svg {
-  grid-area: pic;
-  width: 54px;
-  height: 34px;
-  margin: 0;
-}
-.mt-opts .mt-slope b {
-  grid-area: name;
-}
-.mt-opts .mt-slope small {
-  grid-area: deg;
-}
-.mt-opts .mt-slope em {
-  grid-area: blurb;
-}
-@media (max-width: 520px) {
-  .mountain-card {
-    gap: 10px;
-  }
-  .mt-body {
-    grid-template-columns: 92px minmax(0, 1fr);
-    gap: 10px;
-  }
-  .mt-preview canvas {
-    width: 92px;
-    max-height: 150px;
-  }
-  .mt-another {
-    min-height: 34px;
-    padding: 0 8px;
-    font-size: 12px;
-    gap: 4px;
-  }
-  .mt-opts {
-    gap: 8px;
-  }
-  .mt-opts .mt-slope {
-    grid-template-columns: 36px minmax(0, 1fr);
-    grid-template-areas: 'pic name' 'pic deg';
-    padding: 5px 8px;
-    column-gap: 8px;
-  }
-  .mt-opts .mt-slope svg {
-    width: 36px;
-    height: 26px;
-  }
-  .mt-opts .mt-slope b {
-    font-size: 15px;
-  }
-  .mt-opts .mt-slope small {
-    font-size: 11px;
-  }
-  .mt-opts .seg button {
-    min-height: 40px;
-    font-size: 14px;
-  }
-}
 
 /* brush size: S / M / L at the end of the bar */
 .bb-size {
@@ -2433,5 +2232,296 @@ body.paused .status {
   .bb-chip {
     min-height: 28px;
     padding: 0 6px 0 8px;
+  }
+}
+
+/* ---------- the slope editor ---------- */
+.slope-card {
+  width: min(560px, 100%);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.slope-card > * {
+  flex: none;
+}
+.slope-card h1 {
+  margin: 0;
+}
+.slope-card .intro-eyebrow {
+  margin: 0;
+}
+.sl-side {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.sl-side canvas {
+  width: 100%;
+  height: 130px;
+  border: var(--edge);
+  border-radius: 14px;
+  background: linear-gradient(#f3f4ff, #fff);
+  box-shadow: 0 3px 0 var(--ink);
+  touch-action: manipulation;
+  cursor: pointer;
+}
+.sl-read {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+  margin: 0;
+}
+.sl-read div {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.sl-read dt {
+  font: 600 10px/1 var(--display);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.sl-read dd {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font: 700 17px/1 var(--display);
+  color: var(--ink);
+}
+.sl-templates {
+  display: flex;
+  align-items: stretch;
+  gap: 6px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  padding-bottom: 3px;
+}
+.sl-templates::-webkit-scrollbar {
+  display: none;
+}
+.sl-templates .ctl-l {
+  flex: none;
+  align-self: center;
+  margin-right: 2px;
+}
+.sl-tpl {
+  flex: none;
+  max-width: 150px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 6px 10px;
+  border: 2px solid var(--panel-line);
+  border-radius: 11px;
+  background: #fff;
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+}
+.sl-tpl b {
+  font: 700 14px/1.1 var(--display);
+}
+.sl-tpl small {
+  font: 500 11px/1.25 var(--body);
+  color: var(--muted);
+}
+.sl-tpl[aria-pressed='true'] {
+  border-color: var(--ink);
+  background: #fff1df;
+  box-shadow: 0 2px 0 var(--ink);
+}
+.sl-width-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+}
+.sl-width-row .seg button {
+  min-height: 38px;
+  font-size: 14px;
+}
+.sl-head,
+.sl-row {
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr) minmax(0, 1fr) 34px;
+  align-items: center;
+  column-gap: 16px;
+}
+.sl-head {
+  margin-bottom: -6px;
+  padding: 0 8px;
+}
+.sl-head .ctl-l {
+  text-align: center;
+}
+.sl-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  /* the part of the card that gives: it scrolls when the screen is short */
+  flex: 1 1 auto !important;
+  min-height: 100px;
+  max-height: 340px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  touch-action: pan-y;
+}
+.sl-row {
+  padding: 5px 8px;
+  border: 2px solid var(--panel-line);
+  border-radius: 12px;
+  background: #fff;
+}
+.sl-row.on {
+  border-color: var(--ink);
+  box-shadow: 0 2px 0 var(--ink);
+}
+.sl-num {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--d);
+  color: #fff;
+  font: 700 14px/1 var(--display);
+}
+.sl-ctl {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr) 40px;
+  align-items: center;
+  gap: 4px;
+}
+.sl-ctl output {
+  text-align: center;
+  font: 700 17px/1 var(--display);
+  color: var(--ink);
+  white-space: nowrap;
+}
+.step {
+  width: 40px;
+  height: 40px;
+  border: 2px solid var(--ink);
+  border-radius: 10px;
+  background: var(--panel);
+  color: var(--ink);
+  font: 700 22px/1 var(--display);
+  cursor: pointer;
+  touch-action: manipulation;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.step:active:not(:disabled) {
+  transform: translateY(2px);
+  background: #fff1df;
+}
+.step:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+.sl-del {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 9px;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+}
+.sl-del:hover:not(:disabled) {
+  background: #ffe3e6;
+  color: var(--bad);
+}
+.sl-del:disabled {
+  opacity: 0.25;
+  cursor: default;
+}
+.sl-del svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 3;
+  stroke-linecap: round;
+}
+.sl-add {
+  align-self: flex-start;
+  min-height: 40px;
+  padding: 0 14px;
+  font-size: 14px;
+}
+.sl-keep {
+  font-size: 14px;
+}
+.sl-msg {
+  margin: -4px 0 0;
+  min-height: 1.2em;
+  font: 600 13px/1.3 var(--body);
+  color: var(--muted);
+}
+.sl-msg[data-bad='1'] {
+  color: var(--bad);
+}
+@media (max-width: 520px) {
+  .slope-card {
+    gap: 10px;
+    padding: 18px 14px 14px;
+  }
+  .sl-side canvas {
+    height: 110px;
+  }
+  .sl-read dd {
+    font-size: 15px;
+  }
+  .sl-row {
+    grid-template-columns: 26px minmax(0, 1fr) minmax(0, 1fr) 28px;
+    column-gap: 8px;
+    padding: 4px 6px;
+  }
+  .sl-head {
+    grid-template-columns: 26px minmax(0, 1fr) minmax(0, 1fr) 28px;
+    column-gap: 8px;
+    padding: 0 6px;
+  }
+  .sl-num {
+    width: 24px;
+    height: 24px;
+    font-size: 12px;
+  }
+  .sl-ctl {
+    grid-template-columns: 34px minmax(0, 1fr) 34px;
+  }
+  .step {
+    width: 34px;
+    height: 36px;
+    font-size: 20px;
+  }
+  .sl-ctl output {
+    font-size: 15px;
+  }
+  .sl-del {
+    width: 28px;
+  }
+
+}
+@media (max-height: 820px) {
+  .sl-side canvas {
+    height: 96px;
+  }
+  .slope-card {
+    gap: 9px;
+  }
+  .slope-card h1 {
+    font-size: 26px;
   }
 }

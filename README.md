@@ -1,20 +1,22 @@
 # Highrise
 
-Select a wild mountain's hexagon tiles and shape them, start anywhere, ride it, build some more, ride on. A browser 3D game where making the mountain is the gameplay.
+Design a slope section by section, select its hexagon tiles and shape them, start anywhere, ride it, build some more, ride on. A browser 3D game where making the mountain is the gameplay.
 
 This is **Phase 0**: a grey-box prototype to prove the core loop is fun before any art investment.
 
-**Select → act → ride → pause → act again → ride on → repeat.**
+**Design → select → act → ride → pause → act again → ride on → repeat.**
 
 ## Play
 
-**Shape** a wild mountain, **ride** it from wherever you like, and score on **style**. No pistes: the whole mountain is yours, terrain and nature.
+**Design** a slope, **shape** it, **ride** it from wherever you like, and score on **style**. No pistes: the whole mountain is yours, terrain and nature.
 
-### A wild mountain
+### Design the slope
 
-Every mountain is generated (a seed): a summit shoulder at the top, steeper pitches and rolls on the way down, spurs and gullies running down the fall line, a couple of wide bowls, knolls, bands of rock across the slope on the steeper ones, and a run-out at the bottom. Forest grows below the treeline in woods with clearings, thicker on the spurs than in the gullies (avalanche paths stay open), never on the rock; boulders sit on the steep bits and below the cliffs.
+The first thing you do: stack **sections** down the mountain, top to bottom, each with its **slope** (−15° climbing to 50°, 1° at a time) and its **length** (20 to 400 m, 10 m at a time), up to 24 sections and 3 km. Press and hold − / + to run through the values. Pick the **width** (Narrow 360 m, Medium 540 m, Wide 720 m), or start from a template (**Classic**, **Cruiser**, **Park**, **Big mountain**).
 
-Pick how steep (**Gentle** about 15°, **Medium** 22°, **Steep** 29°) and how big (**Small** 600 × 700 m, **Medium** 720 m × 1.1 km, **Large** 840 m × 1.6 km). The chooser shows the mountain from above; **Another one** rolls a new one with the same settings. **New mountain** (`N`, ••• menu) brings the chooser back.
+A side view of the whole slope, true to scale, is coloured like piste markers (green under 12°, blue to 22°, red to 32°, black beyond, purple for a climb), with the length, the drop, the average and the steepest pitch. Tap it to pick a section. The joints between sections are eased over a few metres, so a change of pitch rolls over or scoops instead of kinking.
+
+The slope is bare snow, the same all the way across: no rolls, forest or rock but what you add with the tiles. **Edit the slope** (`N`, ••• menu) opens it again; **Keep what I built** leaves your tiles where they were (counted from the top, centred if the width changes) and the start gate too.
 
 ### Start anywhere, pause, ride on
 
@@ -43,7 +45,7 @@ Then act on the selection. Actions stay on the tiles, so they stack (tap again f
 | | **Powder** / **Ice** | Deep, slow, soft snow, or hard, fast ice where the edges barely hold. Tap again for packed snow. |
 | Tools | **Copy** / **Paste** (`Ctrl+C` / `Ctrl+V`) | Copies the selected tiles and everything on them; Paste puts them down where you tap (drag to place them), and selects them. Pasted jumps are jumps of their own. |
 | | **Rotate** (`Q`) | Turns the selected jumps and drops a twelfth of a turn; while pasting, turns the copy a sixth of a turn. |
-| | **Erase** (`X`, `Delete`) | Back to the wild mountain on these tiles. |
+| | **Erase** (`X`, `Delete`) | Back to the bare slope on these tiles. |
 
 **Everything merges.** Nothing is stamped tile by tile: the tiles of one action make one mask, blurred into a smooth field that shapes the snow, so neighbours are one shape with no seam, step or hexagon corner, and raised beside lowered rolls into one shape. On the snow, changed tiles are tinted by what changed (blue shape, green nature, orange features) and the selection is outlined in amber.
 
@@ -83,14 +85,14 @@ Hold to load a jump (the ring fills) and release at a lip (a kicker, a raised cr
 
 **Speed bonus:** above 100 km/h a speed streak builds (40 points a second at 100 km/h, +3 per extra km/h: about 170/s at 145 km/h). It's banked once you've been back under 100 for 0.8 s, or at the finish, and lost on a wipeout. Tricks landed within 2.6 s of each other chain into a combo (×1.5, ×2, … up to ×5). A see-through ghost replays your best run.
 
-Your mountain (its seed), tiles, start gate, best score, ghost and ski tracks autosave in the browser. Older saves keep their mountain and their painted pieces become tile actions (a bump raised 3 m, a flat eased all the way, a wall steepened, forest planted, powder kept); saves with pistes on the old squares move onto the hexagons and drop the pistes. Saves from before wild mountains are kept aside, untouched, and you start on a new mountain.
+Your slope, tiles, start gate, best score, ghost and ski tracks autosave in the browser. Saves from the wild mountains become sections of about the same length, width and steepness, with their tiles kept (and painted pieces from before the tile actions become the matching actions: a bump raised 3 m, a flat eased all the way, a wall steepened, forest planted, powder kept). Saves from before the wild mountains are kept aside, untouched, and you start on a new slope.
 
 ## How the mountain is built
 
-- `src/core/wild.js` generates the mountain from its seed as pure functions of position (height, rock bands, forest density), so it can be sampled at full resolution for the game or coarsely for the chooser's preview (`src/mountainPreview.js`). Its heights, rock and natural forest are computed once and kept as the base.
+- `src/core/slopes.js` is the slope you design: sections, width, templates, limits and stats, the side profile (pitches eased at the joints, integrated metre by metre) and the bare heightfield built from it, kept as the base. `src/slopeEditor.js` is its editor.
 - `src/core/hex.js` is the grid: pointy-top hexagons in rows across the slope (odd rows shifted half a tile), which tile a point is in, a tile's centre and corners, brushes (1, 7, 19 tiles) and lines of tiles (a fast drag leaves no gaps).
 - `src/core/tiles.js` is what's on the tiles: a record per changed tile (how far raised, how steepened, its flatten group, how smoothed, a jump or drop with its facing and group, trees, a clearing, powder or ice) and the actions as pure functions on them, with copy and paste in axial coordinates (so a shape keeps its form on any row) and rotation.
-- `src/core/terrain.js` turns the tiles into snow, in order on the wild mountain: steepen / ease and rock bands change the slope along the fall line, column by column, then ease back to the mountain below; each flatten group is levelled to its own average; raise / lower adds a blurred field of the lifts; smooth blends towards a blurred copy of the snow; each jump or drop group is shaped along its facing (its length sets its size, its width comes from the tiles); powder adds pillows. Every field is a mask of tiles and three box blurs (a near-gaussian).
+- `src/core/terrain.js` turns the tiles into snow, in order on the bare slope: steepen / ease and rock bands change the slope along the fall line, column by column, then ease back to the mountain below; each flatten group is levelled to its own average; raise / lower adds a blurred field of the lifts; smooth blends towards a blurred copy of the snow; each jump or drop group is shaped along its facing (its length sets its size, its width comes from the tiles); powder adds pillows. Every field is a mask of tiles and three box blurs (a near-gaussian).
 - `src/core/world.js` puts it together on every action: base, tiles, then the snow (packed / powder / ice / rock in `src/core/surface.js`, kickers kept snowy) and the trees and boulders, kept off the rock, the jumps and the drops, and clear of the start gate. A rebuild takes a few milliseconds.
 - The hexagon grid, the tinted tiles, the selection outline, the brush or paste preview, the jump chevrons, the start ring and the finish line are drawn by the terrain shader (`src/render/terrainMesh.js`); `src/buildBar.js` is the bar at the bottom.
 
@@ -118,9 +120,9 @@ Hand it to a few people. Do they say "one more tweak" and keep going? If not, fi
 ```bash
 npm install
 npm run dev      # local dev server
-npm test         # physics, scoring, mountains, the hexagon grid, tile actions and jumps (Node, no browser needed)
+npm test         # physics, scoring, slope design, the hexagon grid, tile actions and jumps (Node, no browser needed)
 npm run build    # production build into dist/
-npm run smoke    # browser smoke test on the build: pick a mountain, move the start, select tiles, raise, undo, a jump, rotate, copy and paste, ride, pause and act, ride on, start again (needs Chromium: npx playwright install chromium)
+npm run smoke    # browser smoke test on the build: design a slope, move the start, select tiles, raise, undo, a jump, rotate, copy and paste, edit the slope keeping the tiles, ride, pause and act, ride on, start again (needs Chromium: npx playwright install chromium)
 ```
 
 Add `?debug` to the URL for a frame-cost readout (fps, worst frame, draw calls, triangles). CI (`.github/workflows/ci.yml`) runs the tests, the build and the smoke test on every pull request.
@@ -131,7 +133,7 @@ Stack: [Vite](https://vite.dev) + [Three.js](https://threejs.org). The simulatio
 
 ```
 src/
-  core/        heightfield, wild mountains, hexagon grid, tiles and actions, terrain, skier physics, scoring (pure JS)
+  core/        heightfield, slope design, hexagon grid, tiles and actions, terrain, skier physics, scoring (pure JS)
   render/      terrain mesh + shader, trees and rocks, start gate, skier, spray, ski tracks
   buildBar.js  the build bar
   ui.js        overlay controls

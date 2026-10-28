@@ -1,8 +1,8 @@
-// Browser smoke test: serves the production build, plays the core loop in Chromium (pick a
-// wild mountain, put the start gate anywhere, select hexagon tiles and act on them: raise,
-// undo and redo, a jump, rotate, deselect; ride, pause to build, ride on from where the
-// skier was, start again from the gate) and fails on any page error. Run after
-// `npm run build`:
+// Browser smoke test: serves the production build, plays the core loop in Chromium (design
+// a slope section by section, put the start gate anywhere, select hexagon tiles and act on
+// them: raise, undo and redo, a jump, rotate, copy and paste, deselect; edit the slope and
+// keep the tiles; ride, pause to build, ride on from where the skier was, start again from
+// the gate) and fails on any page error. Run after `npm run build`:
 //   npm run smoke      (SMOKE_OUT=dir keeps screenshots; defaults to smoke-shots/)
 import { preview } from 'vite';
 import { chromium } from 'playwright';
@@ -31,18 +31,31 @@ try {
   await page.goto(url, { waitUntil: 'load' });
   await page.waitForFunction(() => window.__highrise?.hf);
 
-  // welcome card, then the mountain chooser: another small, gentle one
+  // welcome card, then design the slope: the Park template, wide, its first section two
+  // degrees steeper, and one more section at the bottom
   await page.click('#intro-go');
-  await page.waitForSelector('#mountain:not([hidden])');
-  await page.click('[data-slope="gentle"]');
-  await page.click('[data-len="small"]');
-  await page.click('#mt-another');
-  await page.click('#mt-go');
-  await page.waitForSelector('#mountain', { state: 'hidden' });
-  const mt = await page.evaluate(() => window.__highrise.state.mountain);
-  assert.equal(mt.steep, 'gentle');
-  assert.equal(mt.size, 'small');
-  assert.equal(await page.evaluate(() => window.__highrise.state.tiles.length), 0, 'a wild mountain, nothing built yet');
+  await page.waitForSelector('#slope:not([hidden])');
+  assert.ok(await page.isHidden('#sl-cancel'), 'a first slope: nothing to cancel back to');
+  await page.click('#slope [data-tpl="park"]');
+  await page.click('#slope [data-width="wide"]');
+  await page.click('#sl-list [data-i="0"] [data-key="slope"] [data-step="1"]');
+  await page.click('#sl-list [data-i="0"] [data-key="slope"] [data-step="1"]');
+  await page.click('#sl-add');
+  assert.equal(await page.locator('#sl-list .sl-row').count(), 4, 'four sections');
+  await page.screenshot({ path: `${OUT}/0-slope.png` });
+  await page.click('#sl-go');
+  await page.waitForSelector('#slope', { state: 'hidden' });
+  const design = await page.evaluate(() => window.__highrise.state.design);
+  assert.equal(design.width, 'wide');
+  assert.deepEqual(design.sections.map((x) => x.slope), [12, 16, 10, 10]);
+  assert.equal(await page.evaluate(() => window.__highrise.hf.sizeX), 720, '720 m wide');
+  const pitch = await page.evaluate(() => {
+    const h = window.__highrise.hf;
+    const z = h.startZ + 60 + 180;
+    return (Math.atan2(h.heightAt(0, z - 5) - h.heightAt(0, z + 5), 10) * 180) / Math.PI;
+  });
+  assert.ok(Math.abs(pitch - 16) < 0.6, `the second section is 16° (${pitch.toFixed(1)}°)`);
+  assert.equal(await page.evaluate(() => window.__highrise.state.tiles.length), 0, 'a bare slope, nothing built yet');
   await page.waitForFunction(() => window.__highrise.cameraSettled, null, { timeout: 120000 });
 
   // look down on the top of the mountain (a slow software renderer makes free flying
@@ -142,6 +155,17 @@ try {
   assert.equal(await get(() => window.__highrise.selection.length), 0, 'deselected');
   assert.ok(await page.isHidden('#buildbar .bb-chip'), 'the chip is gone');
 
+  // edit the slope (••• menu): a steeper top, keeping what's built
+  await page.click('#more');
+  await page.click('#reset');
+  await page.waitForSelector('#slope:not([hidden])');
+  assert.ok(await page.isVisible('#sl-keep-row'), 'it offers to keep the tiles');
+  await page.click('#sl-list [data-i="0"] [data-key="slope"] [data-step="1"]');
+  await page.click('#sl-go');
+  await page.waitForSelector('#slope', { state: 'hidden' });
+  assert.equal(await get(() => window.__highrise.state.design.sections[0].slope), 13, 'the new slope');
+  assert.equal(await get(() => window.__highrise.state.tiles.length), tileCount, 'the tiles are kept');
+
   // ride from the gate (a few real frames, then a couple of seconds in one go: the software
   // renderer is far too slow to ride in real time)
   await page.click('#send');
@@ -218,7 +242,7 @@ try {
 
   assert.deepEqual(errors, [], 'no page errors');
   console.log(
-    `smoke test passed: wild mountain, start gate moved, ${picked} tiles selected and raised, undo/redo, a jump turned, copied and pasted (${tileCount} tiles), ride at ${(ride.speed * 3.6).toFixed(0)} km/h, pause and build, ride on at ${resumed.time.toFixed(1)} s, from the start`
+    `smoke test passed: a slope of 4 sections designed (and edited, tiles kept), start gate moved, ${picked} tiles selected and raised, undo/redo, a jump turned, copied and pasted (${tileCount} tiles), ride at ${(ride.speed * 3.6).toFixed(0)} km/h, pause and build, ride on at ${resumed.time.toFixed(1)} s, from the start`
   );
 } catch (err) {
   // on CI, say what failed where it shows on the run's page too (an annotation), with a

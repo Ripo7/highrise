@@ -1,6 +1,6 @@
 // The tiles you've changed, and the actions that change them. You select hexagon tiles
 // (see hex.js), then act on the selection; every action is stored on the tiles, and the
-// snow is rebuilt from the wild mountain and the tiles every time (terrain.js), so actions
+// snow is rebuilt from the bare slope and the tiles every time (terrain.js), so actions
 // mix, undo and save cleanly.
 //
 // A tile record (only changed tiles are kept):
@@ -41,13 +41,13 @@ export const ACTIONS = {
   drop: { tab: 'features', label: 'Drop', hint: 'A sharp step to drop off, with a landing below.' },
   rocks: { tab: 'features', label: 'Rocks', hint: 'A band of bare rock: a cliff across the slope.' },
   trees: { tab: 'nature', label: 'Trees', hint: 'Plants pines, denser each tap.' },
-  clear: { tab: 'nature', label: 'Clear', hint: 'No trees here, not even the natural forest.' },
+  clear: { tab: 'nature', label: 'Clear', hint: 'No trees on these tiles.' },
   powder: { tab: 'nature', label: 'Powder', hint: 'Deep untouched snow: slow and soft.' },
   ice: { tab: 'nature', label: 'Ice', hint: 'Hard, fast and slippery: the edges barely hold.' },
   copy: { tab: 'tools', label: 'Copy', hint: 'Copies the selected tiles and what is on them.' },
   paste: { tab: 'tools', label: 'Paste', hint: 'Puts the copied tiles down where you tap.' },
   rotate: { tab: 'tools', label: 'Rotate', hint: 'Turns jumps and drops (and what you paste).' },
-  erase: { tab: 'tools', label: 'Erase', hint: 'Back to the wild mountain on these tiles.' },
+  erase: { tab: 'tools', label: 'Erase', hint: 'Back to the bare slope on these tiles.' },
 };
 export const TABS = [
   { id: 'shape', label: 'Shape' },

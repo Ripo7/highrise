@@ -2346,3 +2346,92 @@ body.paused .status {
     font-size: 10px;
   }
 }
+
+/* the bar's top row: the action tabs, and the selection (tap it to deselect) */
+.bb-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.bb-head .bb-tabs {
+  flex: 1;
+  min-width: 0;
+}
+.bb-chip {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 30px;
+  padding: 0 8px 0 10px;
+  border: 2px solid var(--ink);
+  border-radius: 999px;
+  background: #ffb020;
+  color: var(--ink);
+  font: 700 12px/1 var(--display);
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  cursor: pointer;
+  box-shadow: 0 2px 0 var(--ink);
+}
+.bb-chip[hidden] {
+  display: none;
+}
+.bb-chip svg {
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 3;
+  stroke-linecap: round;
+}
+/* a readout of what the selection holds (+3 m, 2/3) */
+.bb-piece {
+  position: relative;
+}
+.bb-badge {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  min-width: 18px;
+  padding: 2px 4px;
+  border-radius: 7px;
+  background: var(--c);
+  color: #fff;
+  font: 700 10px/1 var(--display);
+  font-style: normal;
+  pointer-events: none;
+}
+.bb-badge[hidden] {
+  display: none;
+}
+.bb-piece[aria-pressed='true'] .bb-badge {
+  background: #fff;
+  color: var(--ink);
+}
+/* nothing selected: the actions wait (a tap says what to do) */
+.bb-piece.is-off {
+  opacity: 0.42;
+}
+.bb-piece.is-off:active {
+  transform: none;
+}
+.bb-fixed-select[aria-pressed='true'] {
+  background: #ffb020;
+  border-color: var(--ink);
+  color: var(--ink);
+}
+@media (max-width: 720px) {
+  .bb-fixed {
+    width: 48px;
+  }
+  .bb-head .bb-tabs button {
+    padding: 0 9px;
+    font-size: 12px;
+  }
+  .bb-chip {
+    min-height: 28px;
+    padding: 0 6px 0 8px;
+  }
+}

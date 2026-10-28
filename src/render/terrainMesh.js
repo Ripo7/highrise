@@ -72,14 +72,15 @@ const frag = /* glsl */ `
   uniform float uCell;
   uniform vec3 uIceLit;
   uniform vec3 uIceShadow;
-  // the build grid of hexagons (see core/hex.js): per tile R = ghost (1 fits, ~0.5 doesn't),
-  // G = a piece is here, B = erase
+  // the build grid of hexagons (see core/hex.js), one texel per tile (see writeTiles in
+  // main.js): R = the ghost (where the brush or a paste would go), G = changed, B = selected,
+  // A = what changed (1 shape, 2 nature, 3 a feature) + 4 × (the way a jump faces + 1)
   uniform sampler2D uTiles;
   uniform vec4 uTileInfo; // x of the left edge, z of the start line, hexagon radius, rows
   uniform float uTileCols;
   uniform float uTileOn;
-  uniform vec3 uGhost;
-  uniform vec3 uCatCol[6]; // tint of placed pieces, by category (A channel)
+  uniform vec3 uGhost; // the selection's colour
+  uniform vec3 uCatCol[6]; // tint of changed tiles, by what changed (A channel)
 
   // Manual bilinear lookup: iPhones can't filter float textures in hardware (they read
   // back as zero with linear filtering), so the texture uses nearest and we blend here.
@@ -119,6 +120,31 @@ const frag = /* glsl */ `
     vec2 l = p - centre;
     float side = max(abs(l.x), max(abs(0.5 * l.x + 0.8660254 * l.y), abs(0.5 * l.x - 0.8660254 * l.y)));
     return vec3(col, rr, 0.5 * W - side);
+  }
+
+  vec2 hexCentre(vec2 cr, float R) {
+    float W = 1.7320508 * R;
+    return vec2(W * (cr.x + 0.5 + 0.5 * mod(cr.y, 2.0)), R + 1.5 * R * cr.y);
+  }
+
+  // the tile across the side of tile hx nearest to grid point p
+  vec2 hexNeighbour(vec2 p, vec3 hx, float R) {
+    vec2 c = hexCentre(hx.xy, R);
+    vec2 l = p - c;
+    vec2 n0 = vec2(1.0, 0.0);
+    vec2 n1 = vec2(0.5, 0.8660254);
+    vec2 n2 = vec2(0.5, -0.8660254);
+    float d0 = dot(l, n0);
+    float d1 = dot(l, n1);
+    float d2 = dot(l, n2);
+    vec2 n = n0 * sign(d0);
+    float m = abs(d0);
+    if (abs(d1) > m) {
+      n = n1 * sign(d1);
+      m = abs(d1);
+    }
+    if (abs(d2) > m) n = n2 * sign(d2);
+    return hexTile(c + n * 1.7320508 * R, R).xy;
   }
 
   // diverging ramp for local relief: hollows cool blue, flat pale, crests warm orange
@@ -304,19 +330,35 @@ const frag = /* glsl */ `
         col = mix(col, uInk, line * 0.22 * gridFade);
         // close to this tile's own sides, for outlines
         float edge = 1.0 - smoothstep(1.5, 3.5, px);
-        // placed pieces: tinted in their category's colour, so you can see what is where
-        int ci = int(tv.a * 255.0 + 0.5);
-        vec3 cc = uCatCol[0];
-        if (ci == 1) cc = uCatCol[1];
-        else if (ci == 2) cc = uCatCol[2];
-        else if (ci == 3) cc = uCatCol[3];
-        else if (ci == 4) cc = uCatCol[4];
-        else if (ci == 5) cc = uCatCol[5];
-        col = mix(col, cc, tv.g * (0.2 + 0.25 * edge) * gridFade);
-        float ghost = step(0.25, tv.r);
-        vec3 gc = tv.r > 0.75 ? uGhost : vec3(0.95, 0.3, 0.32);
-        col = mix(col, gc, ghost * (0.34 + 0.5 * edge));
-        col = mix(col, vec3(0.95, 0.3, 0.32), tv.b * (0.4 + 0.5 * edge));
+        vec2 gp = vec2(vWorld.x - uTileInfo.x, vWorld.z - uTileInfo.y);
+        // changed tiles: tinted by what changed, so you can see what is where
+        int a = int(tv.a * 255.0 + 0.5);
+        int cat = a - (a / 4) * 4;
+        int turn = a / 4;
+        vec3 cc = cat == 1 ? uCatCol[1] : cat == 2 ? uCatCol[2] : uCatCol[3];
+        col = mix(col, cc, tv.g * (0.16 + 0.24 * edge) * gridFade);
+        // a jump or a drop: a chevron the way it faces
+        if (turn > 0 && tv.g > 0.5) {
+          float ang = float(turn - 1) * 0.1308997;
+          vec2 dv = vec2(sin(ang), cos(ang));
+          vec2 l = gp - hexCentre(hx.xy, uTileInfo.z);
+          float along = dot(l, dv);
+          float across = dot(l, vec2(dv.y, -dv.x));
+          float chev = abs(along - (2.0 - 0.85 * abs(across)));
+          float cw = max(fwidth(along), 1e-3);
+          float mark = (1.0 - smoothstep(0.32, 0.32 + 1.5 * cw, chev)) * (1.0 - smoothstep(2.8, 3.1, abs(across)));
+          col = mix(col, uInk, mark * 0.75 * gridFade);
+        }
+        // the selection: filled, with an outline round its edge only
+        if (tv.b > 0.5) {
+          col = mix(col, uGhost, 0.3);
+          vec2 nb = hexNeighbour(gp, hx, uTileInfo.z);
+          bool nbIn = nb.x >= 0.0 && nb.y >= 0.0 && nb.x < uTileCols && nb.y < uTileInfo.w;
+          float nbSel = nbIn ? texture2D(uTiles, (nb + 0.5) / vec2(uTileCols, uTileInfo.w)).b : 0.0;
+          col = mix(col, uGhost * 0.82, edge * (nbSel > 0.5 ? 0.0 : 0.95));
+        }
+        // the ghost: where the brush (or a paste) would go
+        if (tv.r > 0.5) col = mix(col, uGhost, 0.12 + 0.55 * edge);
       }
     }
 
@@ -471,7 +513,7 @@ export class TerrainMesh {
       uTileInfo: { value: new THREE.Vector4(-240, hf.startZ, 6, 1) },
       uTileCols: { value: 1 },
       uTileOn: { value: 0 },
-      uGhost: { value: c('#4f7be8') },
+      uGhost: { value: c('#ffb020') },
       uCatCol: { value: ['#4f7be8', '#ff7a45', '#2f9e86', '#8a6fd8', '#b9855d', '#8a7aa3'].map(c) },
     };
     this.setTileGrid(1, 1, -240, 10);

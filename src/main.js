@@ -16,7 +16,8 @@ import { PropSet, TREE, propHeight } from './core/props.js';
 import { SurfaceMap } from './core/surface.js';
 import { newWild, buildWild, SIZES, STEEPNESS, sizeOf, steepOf } from './core/wild.js';
 import { buildWorld, fallLine, defaultStart } from './core/world.js';
-import { KINDS, HEX_R, gridCols, gridRows, tileOf, placeTiles, eraseTiles, brushTiles, lineTiles, trimTiles, packTiles, unpackTiles, squaresToHexes } from './core/terrain.js';
+import { HEX_R, gridCols, gridRows, tileOf, tileCenter, brushTiles, lineTiles, squaresToHexes } from './core/terrain.js';
+import { ACTIONS, applyAction, describe, copyTiles, rotateCopy, pasteCells, pasteTiles, trimTiles, packTiles, unpackTiles, unpackPieces, fromPieces, tileKey } from './core/tiles.js';
 import { PropMeshes } from './render/propMeshes.js';
 import { Tracks } from './render/tracks.js';
 import { Decor } from './render/decor.js';
@@ -35,7 +36,7 @@ import { createDebugOverlay } from './debugOverlay.js';
 // ---------- state ----------
 const COARSE = window.matchMedia('(pointer: coarse)').matches;
 let altHeld = false; // Alt/Option held: left button orbits
-const SAVE_KEY = 'highrise.ski.v3'; // v8: a wild mountain (seed), the terrain pieces, the start gate
+const SAVE_KEY = 'highrise.ski.v3'; // v9: a wild mountain (seed), the tiles and their actions, the start gate
 const INTRO_KEY = 'highrise.intro.v7';
 const TRACKS_KEY = 'highrise.tracks.v1';
 const BACKUP_KEY = 'highrise.ski.backup';
@@ -47,11 +48,10 @@ const props = new PropSet(hf); // trees and rocks
 const surf = new SurfaceMap(hf); // groomed / powder / ice / rock
 const history = new History(40);
 const state = {
-  tool: 'view', // view | paint | erase | start
-  piece: 'bump', // what Paint paints
-  brush: 2, // brush size: 1 tile, 7 (with its neighbours) or 19 (see brushTiles)
+  tool: 'select', // view | select | start | paste
+  brush: 2, // selection brush: 1 tile, 7 (with its neighbours) or 19 (see brushTiles)
   mountain: null, // { size, steep, seed } (see core/wild.js)
-  pieces: [], // { k, i, j } on the hexagon tiles (see core/hex.js, core/terrain.js)
+  tiles: [], // the tiles you changed, with what's on them (see core/tiles.js)
   start: null, // the start gate: { x, z }
   rideCam: 'chase', // chase | helmet
   contours: false,
@@ -60,7 +60,11 @@ const state = {
   best: null, // { score, time }
   bestPath: null, // packed path of the best run, for the ghost
 };
-let base = null; // the wild mountain before any piece
+let base = null; // the wild mountain before any tile
+// the selected tiles (keys "i,j"; not saved, not undone) and the copied ones
+const selection = new Set();
+let clip = null;
+const selList = () => [...selection].map((k) => k.split(',').map(Number));
 // the run: the skier, his score, whether he's waiting while you build, the ride camera on
 let skier = null;
 let score = null;
@@ -76,9 +80,9 @@ function makeMountain(m) {
   base = buildWild(hf, surf, m);
 }
 
-// Build the pieces on the base (the whole mountain, a few milliseconds)
-function generate(pieces = state.pieces) {
-  const w = buildWorld(hf, surf, base, { pieces, start: state.start });
+// Build the tiles on the base (the whole mountain, a few milliseconds)
+function generate(tiles = state.tiles) {
+  const w = buildWorld(hf, surf, base, { tiles, start: state.start });
   props.set(w.props);
 }
 
@@ -204,41 +208,43 @@ function updateSun() {
 // ---------- input state ----------
 const pointers = new Map();
 const hover = { valid: false, x: 0, y: 0, z: 0 };
-let paint = null; // painting or erasing pieces: { pointerId, path, tile, snap, dirty, last }
+let paint = null; // a selection stroke: { pointerId, mode: add | remove, tile }; or placing a paste: { pointerId, paste: true, tile }
 let moving = null; // dragging the start gate: { pointerId, snap }
 let aimField = null; // the snow as it was when a drag began (aim at it, not at the preview)
 let shownH = null; // the heights the terrain mesh shows (to upload only what changed)
 let saveTimer = 0;
 
 // ---------- the build grid on the snow ----------
-const CAT_INDEX = { terrain: 0, nature: 1 };
-let ghost = { add: [], erase: [] };
+let ghost = []; // tiles under the brush, or where a paste would land
 
-// G channel: where pieces are; A: their category; R: the ghost; B: tiles about to be erased
+// One texel per tile. G: changed; A: what changed most (1 shape, 2 nature, 3 a feature)
+// plus, for a jump or drop, the way it faces (in 7.5° steps, +1, times 4); B: selected;
+// R: the ghost (255 on the grid, 128 off it)
 function writeTiles() {
   const d = terrain?.tileData;
   if (!d) return;
   const nc = terrain.tileCols;
   const nr = terrain.tileRows;
   d.fill(0);
-  const put = (i, j, ch, v) => {
-    if (i >= 0 && j >= 0 && i < nc && j < nr) d[(j * nc + i) * 4 + ch] = v;
-  };
-  for (const p of state.pieces) {
-    const o = (p.j * nc + p.i) * 4;
-    if (p.i < 0 || p.j < 0 || p.i >= nc || p.j >= nr) continue;
-    // a shape shows over the forest or powder on the same tile
-    if (d[o + 1] && KINDS[p.k].layer !== 's') continue;
+  const inside = (i, j) => i >= 0 && j >= 0 && i < nc && j < nr;
+  for (const t of state.tiles) {
+    if (!inside(t.i, t.j)) continue;
+    const o = (t.j * nc + t.i) * 4;
+    const cat = t.feat ? 3 : t.lift || t.pitch || t.flat || t.smooth ? 1 : 2;
+    const turn = t.feat === 'jump' || t.feat === 'drop' ? (Math.round(t.dir / 7.5) % 48) + 1 : 0;
     d[o + 1] = 255;
-    d[o + 3] = CAT_INDEX[KINDS[p.k].cat] || 0;
+    d[o + 3] = cat + 4 * turn;
   }
-  for (const [i, j] of ghost.add) put(i, j, 0, 255);
-  for (const [i, j] of ghost.erase) put(i, j, 2, 255);
+  for (const k of selection) {
+    const [i, j] = k.split(',').map(Number);
+    if (inside(i, j)) d[(j * nc + i) * 4 + 2] = 255;
+  }
+  for (const [i, j] of ghost) if (inside(i, j)) d[(j * nc + i) * 4] = 255;
   terrain.updateTiles();
 }
 
-function setGhost(add = [], erase = []) {
-  ghost = { add, erase };
+function setGhost(tiles = []) {
+  ghost = tiles;
   writeTiles();
 }
 
@@ -271,8 +277,11 @@ function rebuildTerrain() {
   terrain.top.castShadow = !COARSE;
   terrain.uniforms.uContours.value = state.contours ? 1 : 0;
   terrain.setTileGrid(cols(), rows(), -hf.halfX, HEX_R);
-  terrain.uniforms.uCatCol.value[0].set(CATEGORY_COLORS.terrain);
-  terrain.uniforms.uCatCol.value[1].set(CATEGORY_COLORS.nature);
+  terrain.uniforms.uCatCol.value[1].set(CATEGORY_COLORS.shape);
+  terrain.uniforms.uCatCol.value[2].set(CATEGORY_COLORS.nature);
+  terrain.uniforms.uCatCol.value[3].set(CATEGORY_COLORS.features);
+  terrain.uniforms.uGhost.value.set(CATEGORY_COLORS.select);
+  terrain.uniforms.uTileOn.value = gridShown() ? 1 : 0;
   scene.add(terrain.group);
   // trees, rocks and the skier fade into the same haze as the snow
   scene.fog = new THREE.Fog(THEME.haze, terrain.uniforms.uFogNear.value, terrain.uniforms.uFogFar.value);
@@ -380,14 +389,11 @@ window.__highriseToast = (msg, kind) => ui.toast(msg, kind);
 const bar = createBuildBar({
   onTool: (t) => {
     setTool(t);
-    if (t === 'erase') ui.toast('Erase: drag over pieces to remove them.');
     if (t === 'start') ui.toast('Start: tap the snow (or drag the gate) where the run should start.');
+    if (t === 'select' && !selection.size) ui.toast(COARSE ? 'Select: tap or drag on the snow to pick tiles, then choose what to do with them.' : 'Select: click or drag on the snow to pick tiles, then choose what to do with them.');
   },
-  onPiece: (k) => {
-    state.piece = k;
-    setTool('paint');
-    ui.toast(`${KINDS[k].label}: ${KINDS[k].hint}`);
-  },
+  onAction: (a) => act(a),
+  onDeselect: () => clearSelection(),
   onSize: (n) => {
     state.brush = n;
     scheduleSave();
@@ -405,10 +411,10 @@ try {
 
 const rideControls = new RideControls({ onPress: () => sound.unlock() });
 
-// Undo snapshots: the pieces and the start gate (the snow is rebuilt from them)
-const snapshot = () => ({ pieces: state.pieces, start: { ...state.start } });
+// Undo snapshots: the tiles and the start gate (the snow is rebuilt from them)
+const snapshot = () => ({ tiles: state.tiles, start: { ...state.start } });
 function restore(snap) {
-  state.pieces = snap.pieces;
+  state.tiles = snap.tiles;
   state.start = { ...snap.start };
   generate();
   refreshScene();
@@ -424,6 +430,7 @@ function refreshScene({ redrape = true } = {}) {
   showEnds();
   if (redrape && rect) tracks.redrape();
   writeTiles();
+  refreshBar();
   // a paused run: the skier stays on the (new) snow
   if (paused && skier) {
     skier.resume();
@@ -469,7 +476,8 @@ function newWorld(m) {
   if (riding) exitRide();
   endRun();
   makeMountain(m);
-  state.pieces = [];
+  state.tiles = [];
+  selection.clear();
   state.start = defaultStart(hf, base);
   generate();
   state.best = null;
@@ -490,10 +498,10 @@ function newWorld(m) {
   camera.position.copy(HOME_CAM);
   controls.target.copy(HOME_TARGET);
   viewAnim = null;
-  setTool('view');
+  setTool('select');
   const s = sizeOf(m);
   const st = steepOf(m);
-  ui.toast(`${st.label} mountain, ${s.L >= 1000 ? `${s.L / 1000} km` : `${s.L} m`}. Shape it below, pick Start to put the gate anywhere, then Ride.`);
+  ui.toast(`${st.label} mountain, ${s.L >= 1000 ? `${s.L / 1000} km` : `${s.L} m`}. Select tiles and shape them, pick Start to put the gate anywhere, then Ride.`);
 }
 
 // ---------- the start gate ----------
@@ -503,75 +511,140 @@ function moveStart(x, z) {
   refreshScene({ redrape: false });
 }
 
-// ---------- painting pieces ----------
+// ---------- selecting tiles, acting on them ----------
 const hoverTile = () => tileOf(hf, hover.x, hover.z);
+const onGrid = ([i, j]) => i >= 0 && j >= 0 && i < cols() && j < rows();
 
-function paintTiles(path) {
-  const seen = new Set();
-  const out = [];
+// add (or take away) the brush's tiles around each tile of a stroke
+function strokeSelect(path, mode) {
   for (const [i, j] of path) {
     for (const t of brushTiles(i, j, state.brush)) {
-      const k = `${t[0]},${t[1]}`;
-      if (seen.has(k)) continue;
-      seen.add(k);
-      out.push(t);
+      if (!onGrid(t)) continue;
+      const k = tileKey(t[0], t[1]);
+      if (mode === 'add') selection.add(k);
+      else selection.delete(k);
     }
   }
-  return out;
+  writeTiles();
 }
 
-function paintResult() {
-  const tiles = paintTiles(paint.path);
-  if (state.tool === 'erase') return { erase: tiles, pieces: eraseTiles(state.pieces, tiles) };
-  return { add: tiles, pieces: placeTiles(state.pieces, tiles.map(([i, j]) => ({ k: state.piece, i, j })), cols(), rows()) };
+function clearSelection() {
+  if (!selection.size) return;
+  selection.clear();
+  writeTiles();
+  refreshBar();
 }
 
-function previewPaint() {
-  if (!paint || !paint.dirty) return;
-  const now = performance.now();
-  if (now - paint.last < 90) return;
-  paint.last = now;
-  paint.dirty = false;
-  const r = paintResult();
-  generate(r.pieces);
-  refreshScene({ redrape: false });
-  setGhost(r.add || [], r.erase || []);
+// the build bar shows what the selection holds (and greys out what needs one)
+function refreshBar() {
+  const info = describe(state.tiles, selList());
+  bar.setSelection(info, !!clip);
+  terrain && (terrain.uniforms.uTileOn.value = gridShown() ? 1 : 0);
+}
+// the grid shows while selecting or pasting, and whenever something is selected
+function gridShown() {
+  return !riding && (state.tool === 'select' || state.tool === 'paste' || selection.size > 0);
 }
 
-function commitPaint() {
-  const r = paintResult();
-  const changed = r.pieces !== state.pieces && JSON.stringify(r.pieces) !== JSON.stringify(state.pieces);
-  if (changed) {
-    history.push(paint.snap);
-    state.pieces = r.pieces;
-    sound.stamp();
+// the way a new jump or drop faces: down the fall line under the selection
+function fallDir(sel) {
+  let x = 0;
+  let z = 0;
+  for (const [i, j] of sel) {
+    const c = tileCenter(hf, i, j);
+    x += c.x;
+    z += c.z;
   }
-  paint = null;
-  aimField = null;
-  setGhost();
+  const [dx, dz] = fallLine(hf, x / sel.length, z / sel.length, 10);
+  return Math.round((Math.atan2(dx, dz) * 180) / Math.PI);
+}
+
+const ACT_DONE = {
+  raise: (d) => `Raised: ${d.lift > 0 ? '+' : ''}${d.lift} m`,
+  lower: (d) => `Lowered: ${d.lift > 0 ? '+' : ''}${d.lift} m`,
+  flatten: () => 'Flattened to one level',
+  smooth: (d) => `Smoothed (${d.smooth}/3)`,
+  steepen: (d) => (d.pitch > 0 ? `Steeper (${d.pitch}/3)` : d.pitch < 0 ? `Gentler (${-d.pitch}/3)` : 'Back to the natural pitch'),
+  ease: (d) => (d.pitch < 0 ? `Gentler (${-d.pitch}/3)` : d.pitch > 0 ? `Steeper (${d.pitch}/3)` : 'Back to the natural pitch'),
+  jump: (d) => (d.jump ? 'Jump: facing down the fall line (Rotate turns it)' : 'Jump removed'),
+  drop: (d) => (d.drop ? 'Drop: facing down the fall line (Rotate turns it)' : 'Drop removed'),
+  rocks: (d) => (d.rocks ? 'Rock band' : 'Rocks removed'),
+  trees: (d) => `Trees: ${['none', 'sparse', 'a wood', 'dense'][d.trees]}`,
+  clear: (d) => (d.clear ? 'Cleared: no trees here' : 'Trees can grow here again'),
+  powder: (d) => (d.powder ? 'Powder: deep, slow, soft' : 'Packed snow again'),
+  ice: (d) => (d.ice ? 'Ice: fast, the edges barely hold' : 'Packed snow again'),
+  rotate: () => 'Turned a twelfth of a turn',
+  erase: () => 'Back to the wild mountain',
+};
+
+// Do an action to the selected tiles (the buttons, the keys)
+function act(name) {
+  if (riding || ui.blocking) return;
+  if (paint) return;
+  if (name === 'copy') {
+    if (!selection.size) return ui.toast('Select tiles first, then Copy.');
+    clip = copyTiles(state.tiles, selList());
+    refreshBar();
+    return ui.toast(`Copied ${selection.size} tile${selection.size > 1 ? 's' : ''}: Paste puts them down where you ${COARSE ? 'tap' : 'click'}.`);
+  }
+  if (name === 'paste') {
+    if (!clip) return ui.toast('Copy some tiles first.');
+    return setTool(state.tool === 'paste' ? 'select' : 'paste');
+  }
+  if (name === 'rotate' && state.tool === 'paste') {
+    clip = rotateCopy(clip);
+    showHoverPreview();
+    return ui.toast('Turned the copy a sixth of a turn');
+  }
+  const sel = selList();
+  if (!sel.length) return ui.toast(`Select tiles first: ${COARSE ? 'tap or drag' : 'click or drag'} on the snow.`);
+  const next = applyAction(state.tiles, sel, name, { dir: name === 'jump' || name === 'drop' ? fallDir(sel) : 0 });
+  if (next === state.tiles) {
+    if (name === 'rotate') ui.toast('Nothing to turn: select a jump or a drop.');
+    else if (name === 'erase') ui.toast('Nothing to erase here.');
+    else ui.toast(`${ACTIONS[name].label}: as far as it goes.`);
+    return;
+  }
+  history.push(snapshot());
+  state.tiles = next;
+  sound.stamp();
   rebuild();
+  ui.toast(ACT_DONE[name](describe(state.tiles, sel)));
 }
 
+// Put the copy down with its anchor on tile t: the pasted tiles become the selection
+function placePaste(t) {
+  const r = pasteTiles(state.tiles, clip, t.i, t.j, cols(), rows());
+  if (!r.placed.length) return;
+  history.push(snapshot());
+  state.tiles = r.tiles;
+  selection.clear();
+  for (const [i, j] of r.placed) selection.add(tileKey(i, j));
+  sound.stamp();
+  rebuild();
+  setTool('select');
+  ui.toast(`Pasted ${r.placed.length} tile${r.placed.length > 1 ? 's' : ''} (selected: act on them, or Paste again)`);
+}
+
+// a stroke cut short (a second finger: it was a pinch): the selection goes back to how it was
 function cancelPaint() {
-  const was = paint;
+  const p = paint;
   paint = null;
-  aimField = null;
-  setGhost();
-  if (was) {
-    generate();
-    refreshScene();
+  if (p && p.before) {
+    selection.clear();
+    for (const k of p.before) selection.add(k);
+    refreshBar();
   }
+  setGhost();
 }
 
-// desktop: show where the brush will go before you click
+// desktop: show where the brush (or the paste) will go before you click
 function showHoverPreview() {
   if (riding || !hover.valid) return setGhost();
-  if (state.tool === 'paint' || state.tool === 'erase') {
-    const t = hoverTile();
-    const tiles = brushTiles(t.i, t.j, state.brush);
-    if (state.tool === 'erase') setGhost([], tiles);
-    else setGhost(tiles);
-  }
+  const t = hoverTile();
+  if (state.tool === 'select') setGhost(brushTiles(t.i, t.j, state.brush));
+  else if (state.tool === 'paste' && clip) setGhost(pasteCells(clip, t.i, t.j));
+  else setGhost();
 }
 
 // ---------- input ----------
@@ -585,7 +658,7 @@ document.addEventListener('visibilitychange', () => {
 });
 
 // on the window, capture phase: this runs before the camera controls (in every browser),
-// so painting or moving the gate doesn't also turn the view
+// so selecting tiles or moving the gate doesn't also turn the view
 window.addEventListener(
   'pointerdown',
   (e) => {
@@ -614,12 +687,22 @@ window.addEventListener(
       return;
     }
 
-    if (state.tool === 'paint' || state.tool === 'erase') {
+    if (state.tool === 'select') {
       const t = hoverTile();
-      paint = { pointerId: e.pointerId, path: [[t.i, t.j]], tile: t, snap: snapshot(), dirty: true, last: 0 };
-      aimField = new Heightfield(hf.sizeX, hf.sizeZ, hf.cell);
-      aimField.h.set(hf.h);
-      setGhost(state.tool === 'erase' ? [] : paintTiles(paint.path), state.tool === 'erase' ? paintTiles(paint.path) : []);
+      // starting on a selected tile, the stroke takes tiles away; anywhere else it adds
+      const mode = selection.has(tileKey(t.i, t.j)) ? 'remove' : 'add';
+      paint = { pointerId: e.pointerId, mode, tile: t, before: new Set(selection) };
+      strokeSelect([[t.i, t.j]], mode);
+      setGhost();
+      e.stopImmediatePropagation();
+      canvas.setPointerCapture(e.pointerId);
+      return;
+    }
+
+    if (state.tool === 'paste' && clip) {
+      const t = hoverTile();
+      paint = { pointerId: e.pointerId, paste: true, tile: t };
+      setGhost(pasteCells(clip, t.i, t.j));
       e.stopImmediatePropagation();
       canvas.setPointerCapture(e.pointerId);
     }
@@ -649,14 +732,13 @@ canvas.addEventListener('pointermove', (e) => {
     return;
   }
   if (paint && e.pointerId === paint.pointerId) {
-    updateHover(e, aimField || hf);
+    updateHover(e);
     if (!hover.valid) return;
     const t = hoverTile();
     if (t.i !== paint.tile.i || t.j !== paint.tile.j) {
-      for (const p of lineTiles(paint.tile, t).slice(1)) paint.path.push(p);
+      if (paint.paste) setGhost(pasteCells(clip, t.i, t.j));
+      else strokeSelect(lineTiles(paint.tile, t).slice(1), paint.mode);
       paint.tile = t;
-      paint.dirty = true;
-      setGhost(state.tool === 'erase' ? [] : paintTiles(paint.path), state.tool === 'erase' ? paintTiles(paint.path) : []);
     }
     return;
   }
@@ -671,7 +753,15 @@ const endPointer = (e) => {
   if (moving && moving.pointerId === e.pointerId) endMove(e.type !== 'pointercancel');
   if (paint && paint.pointerId === e.pointerId) {
     if (e.type === 'pointercancel') cancelPaint();
-    else commitPaint();
+    else {
+      const p = paint;
+      paint = null;
+      if (p.paste) placePaste(p.tile);
+      else {
+        setGhost();
+        refreshBar();
+      }
+    }
   }
   if (e.pointerType !== 'mouse') {
     hover.valid = false;
@@ -760,9 +850,9 @@ function scheduleSave() {
       localStorage.setItem(
         SAVE_KEY,
         JSON.stringify({
-          v: 8,
+          v: 9,
           mountain: state.mountain,
-          tiles: packTiles(state.pieces),
+          tiles: packTiles(state.tiles),
           start: { x: r1(state.start.x), u: r1(state.start.z - hf.startZ) },
           brush: state.brush,
           best: state.best,
@@ -783,15 +873,15 @@ function scheduleSave() {
 }
 
 // A save that can't be read (or comes from before wild mountains) is kept under BACKUP_KEY,
-// never silently overwritten. Saves with pistes and square tiles (v7) keep their mountain,
-// and their pieces move onto the hexagons.
+// never silently overwritten. Saves with painted pieces keep their mountain, and the pieces
+// become tile actions (v8: on the hexagons; v7: on squares, with pistes, moved onto them).
 function loadSave() {
   let raw = null;
   try {
     raw = localStorage.getItem(SAVE_KEY);
     if (!raw) return false;
     const data = JSON.parse(raw);
-    if (data.v !== 7 && data.v !== 8) {
+    if (data.v !== 7 && data.v !== 8 && data.v !== 9) {
       backupSave(raw);
       loadNote = 'Highrise has wild mountains now: pick one and shape it. Your old run was kept aside.';
       return false;
@@ -799,9 +889,14 @@ function loadSave() {
     const m = data.mountain;
     if (!m || !SIZES.some((s) => s.id === m.size) || !STEEPNESS.some((s) => s.id === m.steep) || !Number.isFinite(m.seed)) throw new Error('no mountain in save');
     makeMountain({ size: m.size, steep: m.steep, seed: m.seed });
-    // v7 painted 10 m squares, v8 paints hexagons
-    const tiles = unpackTiles(data.tiles);
-    state.pieces = trimTiles(data.v === 7 ? squaresToHexes(tiles, cols(), rows()) : tiles, cols(), rows());
+    // v9: tiles and their actions; v8 painted pieces on the hexagons; v7 on 10 m squares
+    let tiles;
+    if (data.v === 9) tiles = unpackTiles(data.tiles);
+    else {
+      const pieces = unpackPieces(data.tiles);
+      tiles = fromPieces(data.v === 7 ? squaresToHexes(pieces, cols(), rows()) : pieces);
+    }
+    state.tiles = trimTiles(tiles, cols(), rows());
     const st = data.start;
     state.start = st && Number.isFinite(st.x) && Number.isFinite(st.u) ? clampStart({ x: st.x, z: hf.startZ + st.u }) : defaultStart(hf, base);
     if ([1, 2, 3].includes(data.brush)) state.brush = data.brush;
@@ -809,12 +904,13 @@ function loadSave() {
     state.relief = !!data.relief;
     state.contours = !!data.contours;
     state.muted = !!data.muted;
-    if (data.v === 8 && data.best && typeof data.best.score === 'number') {
+    if (data.v >= 8 && data.best && typeof data.best.score === 'number') {
       state.best = data.best;
       state.bestPath = Array.isArray(data.bestPath) ? data.bestPath : null;
     }
     if (data.rideCam === 'helmet' || data.rideCam === 'chase') state.rideCam = data.rideCam;
     if (data.v === 7 && Array.isArray(data.pistes) && data.pistes.length) loadNote = 'No more pistes: the whole mountain is yours. Your terrain is kept; pick Start to put the gate anywhere.';
+    else if (data.v < 9 && state.tiles.length) loadNote = 'New: select tiles, then act on them. What you painted is kept, as tile actions.';
     return true;
   } catch {
     if (raw) {
@@ -834,7 +930,7 @@ function backupSave(raw) {
 }
 
 // ---------- tools ----------
-// Look: one finger or the left button turns the view. Paint, Erase and Start: one finger or
+// Look: one finger or the left button turns the view. Select, Paste and Start: one finger or
 // the left button uses the tool, the right button orbits. Two fingers always move and zoom.
 function applyControlScheme() {
   const t = state.tool;
@@ -853,22 +949,21 @@ function applyControlScheme() {
 
 const HINTS = {
   view: 'Drag to orbit · Middle-drag to pan · Scroll to zoom',
-  erase: 'Drag over pieces to erase them · Right-drag to orbit · Scroll to zoom',
+  select: 'Click or drag to select tiles · Drag from a selected one to unselect · Right-drag to orbit · Esc deselects',
+  paste: 'Click where the copy goes · Q turns it · Esc cancels · Right-drag to orbit',
   start: 'Click or drag on the snow to put the start gate there · Right-drag to orbit',
 };
 
 function setTool(t) {
   if (paint) cancelPaint();
   if (moving) endMove(false);
+  if (t === 'paste' && !clip) t = 'select';
   state.tool = t;
   ui.setTool(t);
-  bar.set(t, state.piece);
-  ui.setHint(t === 'paint' ? `Drag on the snow to paint ${KINDS[state.piece].label.toLowerCase()} · Right-drag to orbit · Scroll to zoom` : HINTS[t]);
-  if (terrain) {
-    terrain.uniforms.uTileOn.value = t === 'paint' || t === 'erase' ? 1 : 0;
-    if (t === 'paint') terrain.uniforms.uGhost.value.set(CATEGORY_COLORS[KINDS[state.piece].cat]);
-  }
+  bar.set(t);
+  ui.setHint(HINTS[t]);
   setGhost();
+  refreshBar();
   applyControlScheme();
 }
 
@@ -887,7 +982,7 @@ function ride() {
 function startRun() {
   if (ui.blocking) return;
   sound.unlock();
-  if (paint) commitPaint();
+  if (paint) cancelPaint();
   if (moving) endMove(true);
   setGhost();
   skier = new Skier(hf, startOf());
@@ -917,7 +1012,7 @@ function startRun() {
 
 function resumeRide() {
   sound.unlock();
-  if (paint) commitPaint();
+  if (paint) cancelPaint();
   if (moving) endMove(true);
   setGhost();
   skier.resume();
@@ -978,7 +1073,7 @@ function exitRide() {
   riding = false;
   rideControls.reset();
   terrain.uniforms.uContours.value = state.contours ? 1 : 0;
-  terrain.uniforms.uTileOn.value = state.tool === 'paint' || state.tool === 'erase' ? 1 : 0;
+  terrain.uniforms.uTileOn.value = gridShown() ? 1 : 0;
   setGateFade(1);
   ui.setRiding(false);
   ui.clearTricks();
@@ -1325,7 +1420,6 @@ function frame() {
   resize();
   spray.setScale(renderer.domElement.height / 3);
 
-  if (!riding) previewPaint();
   terrain.refreshLocalMean();
   // a paused run: a ring under the skier, so you see where Ride on picks up
   if (paused && skier && !riding) {
@@ -1462,6 +1556,11 @@ window.addEventListener('keydown', (e) => {
     redo();
     return;
   }
+  if (mod && (key === 'c' || key === 'v')) {
+    e.preventDefault();
+    act(key === 'c' ? 'copy' : 'paste');
+    return;
+  }
   if (mod) return;
   if (e.code === 'Space' || e.key === 'Tab') {
     e.preventDefault();
@@ -1469,10 +1568,18 @@ window.addEventListener('keydown', (e) => {
     return;
   }
   if (e.key === 'Escape') {
+    // one step back at a time: the stroke, the paste, the selection
     if (paint) cancelPaint();
-    if (moving) endMove(false);
-    setTool('view');
-  } else if (key === 'x' || e.key === 'Delete' || e.key === 'Backspace') setTool('erase');
+    else if (moving) endMove(false);
+    else if (state.tool === 'paste') setTool('select');
+    else if (selection.size) clearSelection();
+    else setTool('select');
+  } else if (key === 'x' || e.key === 'Delete' || e.key === 'Backspace') act('erase');
+  else if (e.key === '+' || e.key === '=') act('raise');
+  else if (e.key === '-' || e.key === '_') act('lower');
+  else if (key === 'f') act('flatten');
+  else if (key === 'q') act('rotate');
+  else if (key === 's') setTool('select');
   else if (key === 'g') setTool('start');
   else if (key === 'v') setTool('view');
   else if (key === 'c') ui.toggleContours();
@@ -1551,17 +1658,28 @@ window.__highrise = {
     return riding;
   },
   snapCamera: () => (rig.snap = true),
-  // rebuild the snow after changing state.pieces / state.start by hand (tests)
+  // rebuild the snow after changing state.tiles / state.start by hand (tests)
   rebuild: () => rebuild(),
   // is the camera inside a tree crown right now (tests)
   cameraInTree: () => !!treeAt(camera.position, 0),
-  // paint a piece with the brush centred on world (x, z), as one undoable step (tests)
-  paintAt(x, z, k, size = state.brush) {
+  // select the brush's tiles around world (x, z) (tests; add: false takes them away)
+  selectAt(x, z, size = state.brush, add = true) {
     const t = tileOf(hf, x, z);
-    history.push(snapshot());
-    state.pieces = placeTiles(state.pieces, brushTiles(t.i, t.j, size).map(([i, j]) => ({ k, i, j })), cols(), rows());
-    refreshHistoryButtons();
-    rebuild();
+    const was = state.brush;
+    state.brush = size;
+    strokeSelect([[t.i, t.j]], add ? 'add' : 'remove');
+    state.brush = was;
+    refreshBar();
+    return selection.size;
+  },
+  clearSelection: () => clearSelection(),
+  get selection() {
+    return selList();
+  },
+  act: (name) => act(name),
+  pasteAt(x, z) {
+    const t = tileOf(hf, x, z);
+    if (clip) placePaste(t);
   },
   // ride `seconds` of game time right now with a scripted input (tests: the software
   // renderer draws a frame every few seconds, far too slow to ride in real time)

@@ -15,13 +15,13 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - name: Physics, scoring, slope design, hexagon grid, tile actions and jumps, translation, tutorial levels
+      - name: Physics, scoring, slope design, hexagon grid, tile actions and jumps, gates and courses, translation, tutorial levels
         run: npm test
       - name: Production build
         run: npm run build
       - name: Install Chromium for the smoke test
         run: npx playwright install --with-deps chromium
-      - name: Browser smoke test (design a slope, select tiles and act, copy and paste, edit the slope, ride, pause and act, ride on, French, a tutorial level)
+      - name: Browser smoke test (design a slope, select tiles and act, copy and paste, edit the slope, ride, pause and act, ride on, French, a tutorial level, a course of gates)
         run: npm run smoke
       - name: Keep the smoke-test screenshots
         if: always()

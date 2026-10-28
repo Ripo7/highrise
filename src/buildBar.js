@@ -21,7 +21,7 @@ const BADGES = {
   trees: (d) => (d.trees ? `${d.trees}/3` : ''),
 };
 // actions that are on or off for the whole selection
-const TOGGLES = ['flatten', 'jump', 'drop', 'rocks', 'clear', 'powder', 'ice'];
+const TOGGLES = ['flatten', 'jump', 'drop', 'rocks', 'gate', 'clear', 'powder', 'ice'];
 const flagOf = { flatten: 'flat' };
 
 export function createBuildBar({ onTool, onAction, onDeselect, onSize }) {
@@ -149,6 +149,13 @@ export function createBuildBar({ onTool, onAction, onDeselect, onSize }) {
     setHint(action) {
       hintAction = action;
       sync();
+      // bring it into view if the strip is scrolled (a phone shows a few actions at a time)
+      const b = action && list.querySelector(`[data-action="${action}"]`);
+      if (b) {
+        const l = b.offsetLeft - list.offsetLeft;
+        if (l < list.scrollLeft) list.scrollLeft = l - 8;
+        else if (l + b.offsetWidth > list.scrollLeft + list.clientWidth) list.scrollLeft = l + b.offsetWidth - list.clientWidth + 8;
+      }
     },
   };
 }

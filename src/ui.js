@@ -146,11 +146,12 @@ export function createUI(opts) {
   let lastScoreText = '';
 
   // what's on show, to put it in the other language when that changes
-  const shown = { status: 'idle', paused: false, cam: 'chase' };
+  const shown = { status: 'idle', paused: false, cam: 'chase', best: [null, null] };
   onLang(() => {
     api.setStatus(shown.status);
     api.setPaused(shown.paused);
     api.setRideCam(shown.cam);
+    api.setBest(...shown.best);
     showMute(muteBtn.getAttribute('aria-pressed') === 'true');
     // the time and air readouts: just the decimal mark
     for (const el of [stat.time, stat.air]) el.textContent = getLang() === 'fr' ? el.textContent.replace('.', ',') : el.textContent.replace(',', '.');
@@ -228,8 +229,22 @@ export function createUI(opts) {
       stat.speed.classList.remove('fast');
       progressFill.style.transform = 'scaleX(0)';
     },
-    setBest(best) {
-      bestEl.textContent = best ? fmt(best.score) : '—';
+    // the records: the best score, and the best time when there is one
+    setBest(best, bestTime = null) {
+      shown.best = [best, bestTime];
+      const parts = [];
+      if (best) parts.push(fmt(best.score));
+      if (bestTime) parts.push(`${num(bestTime.time, 2)} s`);
+      bestEl.textContent = parts.length ? parts.join(' · ') : '—';
+    },
+    // the gates: { count, total, missed, running } or null for none
+    setGates(g) {
+      const row = $('#stat-gates');
+      row.hidden = !g;
+      if (!g) return;
+      $('#s-gates').textContent = `${g.count}/${g.total}`;
+      row.classList.toggle('all', g.running && g.count === g.total);
+      row.classList.toggle('missed', g.running && g.missed);
     },
     // big trick call-outs in the middle of the screen
     trick(item) {
@@ -250,7 +265,19 @@ export function createUI(opts) {
       $('#res-eyebrow').textContent = t(r.eyebrow);
       $('#res-score').textContent = fmt(r.score);
       $('#res-best').hidden = !r.isBest;
-      $('#res-time').textContent = `${num(r.time, 1)} s`;
+      $('#res-best-time').hidden = !r.isBestTime;
+      // the time, next to the best one (faster: minus)
+      const d = r.timeDelta;
+      // race times to the hundredth
+      $('#res-time').textContent = `${num(r.time, 2)} s${d === null || d === undefined ? '' : ` (${d <= 0 ? '−' : '+'}${num(Math.abs(d), 2)})`}`;
+      $('#res-score').classList.toggle('res-void', r.eyebrow === 'res.invalid');
+      const g = r.gates;
+      $('#res-gates-row').hidden = !g;
+      if (g) {
+        const el = $('#res-gates');
+        el.textContent = `${g.count}/${g.total}${g.missing.length ? ` · ${t('res.missed', { n: g.missing.length, list: g.missing.join(', ') })}` : ''}`;
+        el.classList.toggle('res-gates-bad', g.missing.length > 0);
+      }
       $('#res-top').textContent = `${Math.round(r.top)} km/h`;
       $('#res-tricks').textContent = r.tricks;
       $('#res-wipeouts').textContent = r.wipeouts;

@@ -1,10 +1,12 @@
 // The mountain as you ride it: the slope you designed (slopes.js) with your tiles on top
 // (tiles.js, terrain.js). Then the snow (packed, powder and ice where you put them, bare
 // rock on the rock bands and any face too steep to hold snow, but never on a kicker) and
-// the trees you planted: none on the rock, on a jump or a drop, or right on the start gate.
-// (The base can hold a forest of its own too; a designed slope starts bare.)
+// the trees you planted: none on the rock, on a jump or a drop, right on the start gate or
+// in a gate of the course (course.js). (The base can hold a forest of its own too; a
+// designed slope starts bare.)
 
 import { applyTerrain } from './terrain.js';
+import { buildGates } from './course.js';
 import { smoothstep } from './heightfield.js';
 import { TREE } from './props.js';
 
@@ -19,7 +21,7 @@ export const GATE_CLEAR = 7; // metres kept clear around the start gate
 /**
  * Reset hf and surf to the base and build the tiles on it.
  * start: { x, z } of the start gate (nothing grows on it), or null.
- * Returns { props }.
+ * Returns { props, gates } (gates: the course, see course.js).
  */
 export function buildWorld(hf, surf, base, { tiles = [], start = null } = {}) {
   hf.h.set(base.h);
@@ -74,7 +76,8 @@ export function buildWorld(hf, surf, base, { tiles = [], start = null } = {}) {
   surf.version++;
 
   // trees and boulders: off the rock, the jumps and the drops, thinned by clearings, clear of
-  // the start gate
+  // the start gate and of the gates (between the poles and a little either side)
+  const gates = buildGates(hf, tiles, start);
   const cellOf = (p) => {
     const [gi, gj] = hf.toGrid(p.x, hf.startZ + p.u);
     const i = Math.round(gi);
@@ -86,6 +89,11 @@ export function buildWorld(hf, surf, base, { tiles = [], start = null } = {}) {
     const q = cellOf(p);
     if (q < 0) return false;
     if (start && Math.hypot(p.x - start.x, p.u - su) < GATE_CLEAR + (p.k === TREE ? 0 : -3)) return false;
+    for (const g of gates) {
+      const dx = p.x - g.x;
+      const dz = hf.startZ + p.u - g.z;
+      if (Math.abs(dx * g.dir[0] + dz * g.dir[1]) < 4 && Math.abs(dx * g.across[0] + dz * g.across[1]) < g.half + 2.5) return false;
+    }
     if (rockF && T.fieldAt(rockF, q % nx, Math.floor(q / nx)) > 0.25) return false;
     if (T.noTrees && T.fieldAt(T.noTrees, q % nx, Math.floor(q / nx)) > 0.1) return false;
     if (natural && T.clearing) {
@@ -95,7 +103,7 @@ export function buildWorld(hf, surf, base, { tiles = [], start = null } = {}) {
     return true;
   };
   const props = base.forest.filter((p) => keep(p, true)).concat(T.trees.filter((p) => keep(p, false)));
-  return { props };
+  return { props, gates };
 }
 
 // The fall line around (x, z), averaged over a few metres: [dx, dz] (straight down the map

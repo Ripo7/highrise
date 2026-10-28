@@ -13,6 +13,7 @@ import { buildWorld, fallLine } from '../src/core/world.js';
 import { tileCenter, gridCols, gridRows } from '../src/core/terrain.js';
 import { ACTIONS, TABS, applyAction, copyTiles, pasteTiles, tileKey } from '../src/core/tiles.js';
 import { LEVELS, resolveGoal, checkContext, emptyRun, followRun } from '../src/core/tutorial.js';
+import { CourseRun } from '../src/core/course.js';
 
 const placeholders = (s) => [...s.matchAll(/\{(\w+)(\|[^}]*)?\}/g)].map((m) => m[1]).sort().join(',');
 
@@ -79,6 +80,9 @@ const PLAN = {
   'drop.land': ['ride'],
   'rocks.band': ['sel', 'rocks', 'unsel'],
   'rocks.over': ['ride'],
+  'gates.one': ['sel', 'gate', 'unsel'],
+  'gates.wide': ['sel', 'gate', 'unsel'],
+  'gates.race': ['ride'],
   'trees.wood': ['sel', 'trees', 'trees', 'unsel'],
   'trees.lane': ['sel', 'clear', 'unsel'],
   'trees.through': ['ride'],
@@ -94,12 +98,13 @@ const PLAN = {
 // ride straight down from the start gate, no hands
 function rideStraight(w) {
   const { hf, surf, base, tiles, start } = w;
-  const built = buildWorld(hf, surf, base, { tiles });
+  const built = buildWorld(hf, surf, base, { tiles, start });
   const props = new PropSet(hf);
   props.set(built.props);
   const sk = new Skier(hf, { x: start.x, z: start.z, dir: fallLine(hf, start.x, start.z) });
   sk.props = props;
   sk.surface = surf;
+  sk.course = new CourseRun(built.gates);
   const run = emptyRun();
   for (let k = 0; k < 240 * 40 && sk.status === 'running'; k++) {
     sk.step(1 / 240);
@@ -109,7 +114,7 @@ function rideStraight(w) {
 }
 
 test('every tutorial level has its words, goals on the grid, and nothing done before you start', () => {
-  assert.equal(LEVELS.length, 12, 'twelve levels');
+  assert.equal(LEVELS.length, 13, 'thirteen levels');
   const actions = new Set();
   for (const level of LEVELS) {
     for (const k of [`tut.${level.id}`, `tut.${level.id}.lede`]) assert.ok(k in TUT_STRINGS.en && k in TUT_STRINGS.fr, k);

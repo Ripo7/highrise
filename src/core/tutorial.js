@@ -1,4 +1,4 @@
-// The tutorial: twelve short levels, one action (or two) at a time. Each level is a small
+// The tutorial: thirteen short levels, one action (or two) at a time. Each level is a small
 // slope of its own, maybe with tiles already on it, and a few steps to do in order. A step
 // marks its goal tiles in gold on the snow and is done when its check passes.
 //
@@ -131,6 +131,16 @@ export const LEVELS = [
     ],
   },
   {
+    id: 'gates',
+    design: { width: 'narrow', sections: [S(14, 260)] },
+    start: { x: 0, u: 14 },
+    steps: [
+      { id: 'one', goal: { x: 0, u: 80, size: 1 }, tab: 'features', hint: 'gate', done: (c) => c.allGoal((t) => t.gate > 0) },
+      { id: 'wide', goal: { line: [[-5, 170], [5, 170]], size: 1 }, tab: 'features', hint: 'gate', done: (c) => c.allGoal((t) => t.gate > 0) && c.groups('gate') === 1 },
+      { id: 'race', goal: null, ride: true, hint: 'ride', done: (c) => c.run.finished && c.run.gatesTotal >= 2 && c.run.gatesCount === c.run.gatesTotal },
+    ],
+  },
+  {
     id: 'trees',
     design: { width: 'narrow', sections: [S(14, 260)] },
     start: { x: 0, u: 14 },
@@ -190,6 +200,8 @@ export function checkContext(hf, game, goal, run = emptyRun()) {
     goalSelected: () => goal.length > 0 && goal.every(([i, j]) => game.sel.has(tileKey(i, j))),
     allGoal: (f) => goal.length > 0 && goal.every((g) => f(rec(g))),
     countGoal: (f) => goal.filter((g) => f(rec(g))).length,
+    // how many groups (gates, jumps...) the goal's tiles make: field 'gate', 'g' or 'flat'
+    groups: (field) => new Set(goal.map((g) => rec(g)[field]).filter(Boolean)).size,
     startOnGoal: () => {
       if (!game.start) return false;
       const t = tileOf(hf, game.start.x, game.start.z);
@@ -198,7 +210,7 @@ export function checkContext(hf, game, goal, run = emptyRun()) {
   };
 }
 
-export const emptyRun = () => ({ air: 0, cleanLand: false, landAt: -1, finished: false, hits: {}, wipeouts: 0, u: 0, status: 'idle', seen: 0 });
+export const emptyRun = () => ({ air: 0, cleanLand: false, landAt: -1, finished: false, hits: {}, wipeouts: 0, u: 0, status: 'idle', gatesCount: 0, gatesTotal: 0, seen: 0 });
 
 // Follow a run for the ride steps: call with the skier after each frame (it reads the new
 // events and the skier's state). startZ: the start line's z.
@@ -217,6 +229,8 @@ export function followRun(run, sk, startZ) {
   // landed, and still up a second later
   if (run.landAt >= 0 && sk.grounded && !(sk.wipeout > 0) && sk.time - run.landAt >= 1) run.cleanLand = true;
   run.wipeouts = sk.wipeouts;
+  run.gatesCount = sk.course ? sk.course.count : 0;
+  run.gatesTotal = sk.course ? sk.course.total : 0;
   run.u = Math.max(run.u, sk.pos[2] - startZ);
   run.status = sk.status;
   if (sk.status === 'finished') run.finished = true;

@@ -154,7 +154,8 @@ export class Skier {
     this.pitchVel = 0;
     this.flipTotal = 0; // accumulated pitch this jump (signed)
     this.props = null; // PropSet of trees and rocks to collide with
-    this.structures = null; // StructureSet: rails, buildings, nets, gates...
+    this.structures = null; // StructureSet: rails, buildings, nets...
+    this.course = null; // CourseRun (course.js): the gates to go through
     this.surface = null; // SurfaceMap: groomed / powder / ice (null: groomed everywhere)
     this.finishes = null; // finish lines [{ x, z, dir, w }]: crossing one ends the run (so does the bottom edge)
     this._surf = { groomed: 0, ice: 0, powder: 0, rock: 0 };
@@ -164,9 +165,7 @@ export class Skier {
     this.grind = null; // { rail, s, va, time, dist, slideTime, entry }
     this.grindCooldown = 0;
     this.grinds = 0;
-    this.gatesPassed = 0;
-    this._gates = new Set();
-    this._crossed = [];
+    this._gateEvents = [];
     this.events = []; // { type: 'pop' | 'land' | 'wipeout' | 'recover', t, ... }
     this.path = [[...this.pos]];
     this._pathTimer = 0;
@@ -387,14 +386,9 @@ export class Skier {
   // Bookkeeping shared by snow and rail steps: wipeout timer, gates, time, path, edges, end
   after(dt, ox, oy, oz, braking, inp = this.input) {
     const { P, hf, pos, vel } = this;
-    if (this.structures) {
-      this._crossed.length = 0;
-      for (const g of this.structures.gatesCrossed(this, this._crossed)) {
-        if (this._gates.has(g)) continue;
-        this._gates.add(g);
-        this.gatesPassed++;
-        this.events.push({ type: 'gate', t: this.time, order: g.order, total: this.structures.gates.length, count: this.gatesPassed });
-      }
+    if (this.course) {
+      this._gateEvents.length = 0;
+      for (const ev of this.course.step(ox, oz, pos[0], pos[2], this.time + dt, this._gateEvents)) this.events.push(ev);
     }
     // tumbling: count down, then get back up facing down the hill
     if (this.wipeout > 0) {

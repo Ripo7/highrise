@@ -64,6 +64,12 @@ const EN = {
   'tut.rocks.band': 'Put rocks on the marked line (Features ▸ Rocks).',
   'tut.rocks.over': 'Ride off your cliff and land it.',
 
+  'tut.gates': 'Gates',
+  'tut.gates.lede': 'Gates make a course: a run only counts through every gate, numbered down the mountain. Then race your best time.',
+  'tut.gates.one': 'Put a gate on the marked tile (Features ▸ Gate).',
+  'tut.gates.wide': 'A wider gate: select both marked tiles, then Gate once.',
+  'tut.gates.race': 'Ride through both gates to the finish: watch the gate count in the scoreboard.',
+
   'tut.trees': 'Trees and clearings',
   'tut.trees.lede': 'Trees plants pines, denser each tap. Clear keeps a space free of trees.',
   'tut.trees.wood': 'Plant a wood on the marked tiles: Trees twice (2/3).',
@@ -148,6 +154,12 @@ const FR = {
   'tut.rocks.lede': 'Rochers pose une barre de roche nue en travers de la pente : une petite falaise.',
   'tut.rocks.band': 'Pose des rochers sur la ligne marquée (Modules ▸ Rochers).',
   'tut.rocks.over': 'Saute ta falaise et réceptionne-toi.',
+
+  'tut.gates': 'Portes',
+  'tut.gates.lede': 'Les portes font un parcours : une descente ne compte qu’en passant toutes les portes, numérotées du haut vers le bas. Ensuite, bats ton meilleur temps.',
+  'tut.gates.one': 'Pose une porte sur la tuile marquée (Modules ▸ Porte).',
+  'tut.gates.wide': 'Une porte plus large : choisis les deux tuiles marquées, puis Porte une seule fois.',
+  'tut.gates.race': 'Passe les deux portes jusqu’à l’arrivée : regarde le compteur de portes du tableau.',
 
   'tut.trees': 'Arbres et clairières',
   'tut.trees.lede': 'Arbres plante des sapins, plus denses à chaque appui. Dégager garde un espace sans arbres.',

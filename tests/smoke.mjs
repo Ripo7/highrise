@@ -2,8 +2,8 @@
 // a slope section by section, put the start gate anywhere, select hexagon tiles and act on
 // them: raise, undo and redo, a jump, rotate, copy and paste, deselect; edit the slope and
 // keep the tiles; ride, pause to build, ride on from where the skier was, start again from
-// the gate; switch to French; play the first tutorial level and leave it) and fails on any
-// page error. Run after `npm run build`:
+// the gate; switch to French; play the first tutorial level and leave it; set a course of
+// gates, race it, miss a gate; reload) and fails on any page error. Run after `npm run build`:
 //   npm run smoke      (SMOKE_OUT=dir keeps screenshots; defaults to smoke-shots/)
 import { preview } from 'vite';
 import { chromium } from 'playwright';
@@ -287,9 +287,64 @@ try {
   await page.click('#lang-btn');
   assert.equal(await page.evaluate(() => document.documentElement.lang), 'en');
 
+  // a course: two gates in the skier's line (Features ▸ Gate), the second two tiles wide;
+  // a run through both counts and sets the best time
+  await page.evaluate(() => {
+    const h = window.__highrise;
+    h.applyWorld({ design: { width: 'narrow', sections: [{ slope: 14, length: 260 }] }, tiles: [], start: { x: 0, u: 14 } });
+    h.selectAt(0, h.hf.startZ + 80, 1);
+    h.act('gate');
+    h.clearSelection();
+    h.selectAt(-5, h.hf.startZ + 170, 1);
+    h.selectAt(5, h.hf.startZ + 170, 1);
+    h.act('gate');
+    h.clearSelection();
+  });
+  assert.equal(await get(() => window.__highrise.gates.length), 2, 'two gates');
+  assert.ok(await page.isVisible('#stat-gates'), 'the gate count in the scoreboard');
+  assert.equal((await page.textContent('#s-gates')).trim(), '0/2');
+  await page.screenshot({ path: `${OUT}/9-gates.png` });
+  const raceIt = async () => {
+    await page.click('#send');
+    await page.waitForFunction(() => window.__highrise.riding, null, { timeout: 60000 });
+    await page.evaluate(() => window.__highrise.advance(40, {}));
+    await page.waitForSelector('#results:not([hidden])');
+  };
+  await raceIt();
+  assert.equal(await get(() => window.__highrise.skier.status), 'finished');
+  assert.equal((await page.textContent('#res-gates')).trim(), '2/2', 'through both gates');
+  assert.equal((await page.textContent('#res-eyebrow')).trim(), 'Run complete');
+  assert.ok(await page.isVisible('#res-best-time'), 'a best time');
+  const bestTime = await get(() => window.__highrise.state.bestTime.time);
+  assert.ok((await page.textContent('#s-best')).includes(' s'), 'the best time in the scoreboard');
+  await page.screenshot({ path: `${OUT}/10-course.png` });
+  // a third gate off the skier's line: a new course (its records start again), and a run
+  // that misses it doesn't count
+  await page.click('#res-sculpt');
+  await page.waitForFunction(() => !window.__highrise.riding, null, { timeout: 60000 });
+  await page.evaluate(() => {
+    const h = window.__highrise;
+    h.selectAt(-70, h.hf.startZ + 120, 1);
+    h.act('gate');
+    h.clearSelection();
+  });
+  assert.equal((await page.textContent('#s-best')).trim(), '—', 'records start again on a new course');
+  await raceIt();
+  assert.match(await page.textContent('#res-gates'), /^2\/3 · missed gate 2/, 'gate 2 missed');
+  assert.equal((await page.textContent('#res-eyebrow')).trim(), 'Missed a gate: the run doesn’t count');
+  assert.equal(await get(() => window.__highrise.state.bestTime), null, 'no record from it');
+  // reload: the tiles and the gates are saved
+  await page.click('#res-sculpt');
+  await page.waitForFunction(() => !window.__highrise.riding, null, { timeout: 60000 });
+  const course = await get(() => JSON.stringify({ tiles: window.__highrise.state.tiles, gates: window.__highrise.gates.length }));
+  await page.waitForTimeout(800); // the autosave
+  await page.reload({ waitUntil: 'load' });
+  await page.waitForFunction(() => window.__highrise?.hf);
+  assert.equal(await get(() => JSON.stringify({ tiles: window.__highrise.state.tiles, gates: window.__highrise.gates.length })), course, 'the same tiles and gates after a reload');
+
   assert.deepEqual(errors, [], 'no page errors');
   console.log(
-    `smoke test passed: a slope of 4 sections designed (and edited, tiles kept), start gate moved, ${picked} tiles selected and raised, undo/redo, a jump turned, copied and pasted (${tileCount} tiles), ride at ${(ride.speed * 3.6).toFixed(0)} km/h, pause and build, ride on at ${resumed.time.toFixed(1)} s, from the start; in French; a tutorial level done and left, your slope back`
+    `smoke test passed: a slope of 4 sections designed (and edited, tiles kept), start gate moved, ${picked} tiles selected and raised, undo/redo, a jump turned, copied and pasted (${tileCount} tiles), ride at ${(ride.speed * 3.6).toFixed(0)} km/h, pause and build, ride on at ${resumed.time.toFixed(1)} s, from the start; in French; a tutorial level done and left, your slope back; a course of gates raced in ${bestTime.toFixed(2)} s, a missed gate, saved`
   );
 } catch (err) {
   // on CI, say what failed where it shows on the run's page too (an annotation), with a

@@ -43,6 +43,7 @@
         <div><dt data-i18n="hud.speed">Speed</dt><dd><span id="s-speed">0</span><small>km/h</small></dd></div>
         <div><dt data-i18n="hud.time">Time</dt><dd><span id="s-time">0.0</span><small>s</small></dd></div>
         <div class="wide-only"><dt data-i18n="hud.air">Air</dt><dd><span id="s-air">0.0</span><small>s</small></dd></div>
+        <div id="stat-gates" class="stat-gates" hidden><dt data-i18n="hud.gates">Gates</dt><dd><span id="s-gates">0/0</span></dd></div>
       </dl>
       <div id="combo" class="combo" hidden>
         <span data-i18n="hud.combo">Combo</span><b id="combo-pts">0</b><b class="combo-mult" id="combo-mult">×1</b>
@@ -133,12 +134,13 @@
       <div class="results-card panel" role="dialog" aria-labelledby="res-title">
         <p class="intro-eyebrow" id="res-eyebrow">Run complete</p>
         <h1 id="res-title" class="res-score"><span id="res-score">0</span><small data-i18n="res.pts">pts</small></h1>
-        <p id="res-best" class="res-best" data-i18n="res.newBest" hidden>New best</p>
+        <p class="res-badges"><span id="res-best" class="res-best" data-i18n="res.newBest" hidden>New best</span> <span id="res-best-time" class="res-best" data-i18n="res.newBestTime" hidden>New best time</span></p>
         <dl class="res-grid">
           <div><dt data-i18n="res.time">Time</dt><dd id="res-time">0.0 s</dd></div>
           <div><dt data-i18n="res.top">Top speed</dt><dd id="res-top">0 km/h</dd></div>
           <div><dt data-i18n="res.tricks">Tricks</dt><dd id="res-tricks">0</dd></div>
           <div><dt data-i18n="res.wipeouts">Wipeouts</dt><dd id="res-wipeouts">0</dd></div>
+          <div id="res-gates-row" class="res-wide" hidden><dt data-i18n="res.gates">Gates</dt><dd id="res-gates">—</dd></div>
           <div class="res-wide"><dt data-i18n="res.speedBonus">Speed bonus (over 100 km/h)</dt><dd id="res-speed">—</dd></div>
           <div class="res-wide"><dt data-i18n="res.bestTrick">Best trick</dt><dd id="res-trick">—</dd></div>
           <div class="res-wide"><dt data-i18n="res.bestCombo">Best combo</dt><dd id="res-combo">—</dd></div>
@@ -195,8 +197,8 @@
           </li>
           <li>
             <b data-i18n="intro.select">Select, then shape</b>
-            <span class="desktop-only" data-i18n="intro.select.desktop">Click or drag on the snow to select hexagon tiles, then act on them: raise, lower, flatten, smooth, steepen; a jump, a drop, rocks; trees, a clearing, powder, ice; copy, paste, rotate, erase. Tap again for more. Tiles side by side melt into one shape.</span>
-            <span class="touch-only" data-i18n="intro.select.touch">Tap or drag on the snow to select hexagon tiles, then act on them: raise, lower, flatten, smooth, steepen; a jump, a drop, rocks; trees, a clearing, powder, ice; copy, paste, rotate, erase. Tap again for more. Tiles side by side melt into one shape.</span>
+            <span class="desktop-only" data-i18n="intro.select.desktop">Click or drag on the snow to select hexagon tiles, then act on them: raise, lower, flatten, smooth, steepen; a jump, a drop, rocks, a gate; trees, a clearing, powder, ice; copy, paste, rotate, erase. Tap again for more. Tiles side by side melt into one shape.</span>
+            <span class="touch-only" data-i18n="intro.select.touch">Tap or drag on the snow to select hexagon tiles, then act on them: raise, lower, flatten, smooth, steepen; a jump, a drop, rocks, a gate; trees, a clearing, powder, ice; copy, paste, rotate, erase. Tap again for more. Tiles side by side melt into one shape.</span>
           </li>
           <li>
             <b data-i18n="intro.start">Start anywhere</b>
@@ -214,8 +216,12 @@
             <span class="touch-only" data-i18n="intro.rideOn.touch">Build pauses the run; Ride on picks up where you were, at the same speed. From the start goes back to the gate.</span>
           </li>
           <li>
+            <b data-i18n="intro.course">Set a course</b>
+            <span data-i18n="intro.course.text">Put gates on the tiles (Features ▸ Gate): a run only counts through every gate. Then beat your best time, and your best score.</span>
+          </li>
+          <li>
             <b data-i18n="intro.learn">Learn with the tutorial</b>
-            <span data-i18n="intro.learn.text">Twelve short levels, one action at a time. Any time from the ••• menu.</span>
+            <span data-i18n="intro.learn.text">Thirteen short levels, one action at a time. Any time from the ••• menu.</span>
           </li>
         </ol>
         <div class="intro-actions">

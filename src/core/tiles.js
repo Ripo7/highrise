@@ -14,20 +14,22 @@
 //                      and its group (the tiles of one jump make one kicker)
 //     trees,           0..3: planted trees, sparse to dense                     Trees
 //     clear,           true: no trees here, not even the natural forest          Clear
-//     snow }           '' | 'powder' | 'ice'                                    Powder / Ice
+//     snow,            '' | 'powder' | 'ice'                                    Powder / Ice
+//     gate }           0, or a group id: the tiles of one tap make one gate       Gate
+//                      to ski through (course.js), on top of anything else
 
 import { toAxial, fromAxial } from './hex.js';
 
 export const LIFT_STEP = 1.5; // metres per Raise / Lower
 export const LIFT_MAX = 15;
 
-const BLANK = { lift: 0, pitch: 0, flat: 0, smooth: 0, feat: '', dir: 0, g: 0, trees: 0, clear: false, snow: '' };
+const BLANK = { lift: 0, pitch: 0, flat: 0, smooth: 0, feat: '', dir: 0, g: 0, trees: 0, clear: false, snow: '', gate: 0 };
 export const blankTile = (i, j) => ({ i, j, ...BLANK });
 
 export const tileKey = (i, j) => `${i},${j}`;
 
 // nothing changed on this tile any more: drop it
-export const isBlank = (t) => !t.lift && !t.pitch && !t.flat && !t.smooth && !t.feat && !t.trees && !t.clear && !t.snow;
+export const isBlank = (t) => !t.lift && !t.pitch && !t.flat && !t.smooth && !t.feat && !t.trees && !t.clear && !t.snow && !t.gate;
 
 // What each action does, for the build bar (group, label, hint)
 export const ACTIONS = {
@@ -40,6 +42,7 @@ export const ACTIONS = {
   jump: { tab: 'features', label: 'Jump', hint: 'A kicker facing down the slope. More tiles, bigger jump.' },
   drop: { tab: 'features', label: 'Drop', hint: 'A sharp step to drop off, with a landing below.' },
   rocks: { tab: 'features', label: 'Rocks', hint: 'A band of bare rock: a cliff across the slope.' },
+  gate: { tab: 'features', label: 'Gate', hint: 'A gate to ski through, as wide as the tiles: a run counts only through every gate.' },
   trees: { tab: 'nature', label: 'Trees', hint: 'Plants pines, denser each tap.' },
   clear: { tab: 'nature', label: 'Clear', hint: 'No trees on these tiles.' },
   powder: { tab: 'nature', label: 'Powder', hint: 'Deep untouched snow: slow and soft.' },
@@ -59,10 +62,10 @@ export const TABS = [
 const r1 = (v) => Math.round(v * 10) / 10;
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 
-// a fresh group id (for Flatten, Jump, Drop): one more than any in use
+// a fresh group id (for Flatten, Jump, Drop, Gate): one more than any in use
 export function newGroup(tiles) {
   let m = 0;
-  for (const t of tiles) m = Math.max(m, t.g, t.flat);
+  for (const t of tiles) m = Math.max(m, t.g, t.flat, t.gate || 0);
   return m + 1;
 }
 
@@ -114,6 +117,15 @@ export function applyAction(tiles, sel, action, opts = {}) {
     case 'rocks':
       edit = all((t) => t.feat === 'rocks') ? (t) => ({ ...t, feat: '' }) : (t) => ({ ...t, feat: 'rocks', g: 0, dir: 0 });
       break;
+    case 'gate': {
+      // one gate for the whole selection; tapped again on a gate, it goes
+      if (all((t) => t.gate > 0)) edit = (t) => ({ ...t, gate: 0 });
+      else {
+        const g = newGroup(tiles);
+        edit = (t) => ({ ...t, gate: g });
+      }
+      break;
+    }
     case 'trees':
       edit = (t) => ({ ...t, trees: Math.min(3, t.trees + 1), clear: false });
       break;
@@ -176,6 +188,7 @@ export function describe(tiles, sel) {
     clear: every((t) => t.clear),
     powder: every((t) => t.snow === 'powder'),
     ice: every((t) => t.snow === 'ice'),
+    gate: every((t) => t.gate > 0),
     turnable: picked.some((t) => t.feat === 'jump' || t.feat === 'drop'),
   };
 }
@@ -237,7 +250,7 @@ export function pasteTiles(tiles, clip, i, j, cols, rows) {
     const [ci, cj] = cells[k];
     if (ci < 0 || cj < 0 || ci >= cols || cj >= rows) return;
     placed.push([ci, cj]);
-    const t = { ...rec, i: ci, j: cj, g: fresh(rec.g), flat: fresh(rec.flat) };
+    const t = { ...rec, i: ci, j: cj, g: fresh(rec.g), flat: fresh(rec.flat), gate: fresh(rec.gate) };
     if (isBlank(t)) out.delete(tileKey(ci, cj));
     else out.set(tileKey(ci, cj), t);
   });
@@ -254,19 +267,22 @@ export function trimTiles(tiles, cols, rows) {
 
 const FEATS = ['', 'jump', 'drop', 'rocks'];
 const SNOWS = ['', 'powder', 'ice'];
-const N = 12;
+// numbers per tile: 13 since gates (save v11), 12 before
+export const PACKED = 13;
 
 export function packTiles(tiles) {
   const out = [];
   for (const t of tiles) {
-    out.push(t.i, t.j, Math.round(t.lift * 10), t.pitch, t.flat, t.smooth, FEATS.indexOf(t.feat), t.dir, t.g, t.trees, t.clear ? 1 : 0, SNOWS.indexOf(t.snow));
+    out.push(t.i, t.j, Math.round(t.lift * 10), t.pitch, t.flat, t.smooth, FEATS.indexOf(t.feat), t.dir, t.g, t.trees, t.clear ? 1 : 0, SNOWS.indexOf(t.snow), t.gate || 0);
   }
   return out;
 }
 
-export function unpackTiles(a) {
+// n: numbers per tile (12 for saves from before gates)
+export function unpackTiles(a, n = PACKED) {
   const out = [];
   if (!Array.isArray(a)) return out;
+  const N = n === 12 ? 12 : PACKED;
   const int = (v, lo, hi) => (Number.isInteger(v) ? clamp(v, lo, hi) : 0);
   for (let q = 0; q + N - 1 < a.length; q += N) {
     if (!Number.isInteger(a[q]) || !Number.isInteger(a[q + 1])) continue;
@@ -283,6 +299,7 @@ export function unpackTiles(a) {
       trees: int(a[q + 9], 0, 3),
       clear: a[q + 10] === 1,
       snow: SNOWS[int(a[q + 11], 0, 2)],
+      gate: N > 12 ? int(a[q + 12], 0, 1e6) : 0,
     };
     if (!isBlank(t)) out.push(t);
   }

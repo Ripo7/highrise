@@ -3,7 +3,9 @@
 // them: raise, undo and redo, a jump, rotate, copy and paste, deselect; edit the slope and
 // keep the tiles; ride, pause to build, ride on from where the skier was, start again from
 // the gate; switch to French; play the first tutorial level and leave it; set a course of
-// gates, race it, miss a gate; reload) and fails on any page error. Run after `npm run build`:
+// gates, race it, miss a gate; the slope editor in 3D, the view gizmo, double click a piece;
+// save as a project, open it again, reload) and fails on any page error. Run after
+// `npm run build`:
 //   npm run smoke      (SMOKE_OUT=dir keeps screenshots; defaults to smoke-shots/)
 import { preview } from 'vite';
 import { chromium } from 'playwright';
@@ -32,20 +34,24 @@ try {
   await page.goto(url, { waitUntil: 'load' });
   await page.waitForFunction(() => window.__highrise?.hf);
 
-  // welcome card, then design the slope: the Park template, wide, its first section two
-  // degrees steeper, and one more section at the bottom
+  // welcome card, then design the slope, in the 3D view: the Park template, wide, its first
+  // section two degrees steeper, and one more section at the bottom
   await page.click('#intro-go');
-  await page.waitForSelector('#slope:not([hidden])');
-  assert.ok(await page.isHidden('#sl-cancel'), 'a first slope: nothing to cancel back to');
-  await page.click('#slope [data-tpl="park"]');
-  await page.click('#slope [data-width="wide"]');
-  await page.click('#sl-list [data-i="0"] [data-key="slope"] [data-step="1"]');
-  await page.click('#sl-list [data-i="0"] [data-key="slope"] [data-step="1"]');
-  await page.click('#sl-add');
-  assert.equal(await page.locator('#sl-list .sl-row').count(), 4, 'four sections');
+  await page.waitForSelector('#slopebar:not([hidden])');
+  assert.ok(await page.isHidden('#sb-cancel'), 'a first slope: nothing to cancel back to');
+  await page.click('#sb-templates [data-tpl="park"]');
+  await page.click('#sb-width [data-width="wide"]');
+  await page.click('#sb-section [data-key="slope"] [data-step="1"]');
+  await page.click('#sb-section [data-key="slope"] [data-step="1"]');
+  await page.click('#sb-section [data-act="next"]');
+  await page.click('#sb-section [data-act="next"]');
+  await page.click('#sb-section [data-act="add"]');
+  assert.equal((await page.textContent('#sb-section .sb-num')).trim(), 'Section 4/4', 'four sections');
+  // the snow follows the design as it changes
+  await page.waitForFunction(() => window.__highrise.hf.sizeX === 720 && window.__highrise.state.design.sections.length === 4);
   await page.screenshot({ path: `${OUT}/0-slope.png` });
-  await page.click('#sl-go');
-  await page.waitForSelector('#slope', { state: 'hidden' });
+  await page.click('#sb-go');
+  await page.waitForSelector('#slopebar', { state: 'hidden' });
   const design = await page.evaluate(() => window.__highrise.state.design);
   assert.equal(design.width, 'wide');
   assert.deepEqual(design.sections.map((x) => x.slope), [12, 16, 10, 10]);
@@ -90,6 +96,22 @@ try {
     await page.mouse.up();
   };
   const get = (fn) => page.evaluate(fn);
+  // a double click on tile (i, j), in one go (a slow renderer can't keep up with a real one)
+  const doubleClickTile = (i, j) =>
+    page.evaluate(
+      ([i, j]) => {
+        const h = window.__highrise;
+        const c = h.tileCenter(i, j);
+        const p = h.screenOf(c.x, c.z);
+        const el = document.getElementById('scene');
+        const ev = (type) => el.dispatchEvent(new PointerEvent(type, { clientX: p.x, clientY: p.y, button: 0, buttons: type === 'pointerdown' ? 1 : 0, pointerId: 7, pointerType: 'mouse', isPrimary: true, bubbles: true }));
+        ev('pointerdown');
+        ev('pointerup');
+        ev('pointerdown');
+        ev('pointerup');
+      },
+      [i, j]
+    );
 
   // the start gate goes anywhere: tap the snow with Start
   await page.click('#buildbar [data-tool="start"]');
@@ -142,9 +164,10 @@ try {
   await page.click('#buildbar [data-action="paste"]');
   assert.equal(await get(() => window.__highrise.state.tool), 'paste', 'pasting');
   {
-    const [px, py] = await at(-150, 230);
+    const [px, py] = await at(-135, 250);
     const box = await page.locator('#scene').boundingBox();
     assert.ok(px > box.x && px < box.x + box.width && py > box.y && py < box.y + box.height * 0.7, 'the paste spot is on screen');
+    assert.ok(await page.evaluate(([x, y]) => document.elementFromPoint(x, y)?.id === 'scene', [px, py]), 'nothing over the paste spot');
     await page.mouse.click(px, py);
   }
   const tileCount = await get(() => window.__highrise.state.tiles.length);
@@ -156,14 +179,52 @@ try {
   assert.equal(await get(() => window.__highrise.selection.length), 0, 'deselected');
   assert.ok(await page.isHidden('#buildbar .bb-chip'), 'the chip is gone');
 
-  // edit the slope (••• menu): a steeper top, keeping what's built
+  // a double click on what was built selects all of that piece again (the pasted jump)
+  const jumpTile = await get(() => window.__highrise.state.tiles.find((x) => x.feat === 'jump'));
+  await doubleClickTile(jumpTile.i, jumpTile.j);
+  const piece = { n: await get(() => window.__highrise.selection.length) };
+  assert.equal(piece.n, picked, `a double click selects the whole jump (${piece.n} tiles)`);
+  assert.match(await page.textContent('#toast'), /^Selected: the jump/);
+  await page.keyboard.press('Escape');
+
+  // the view gizmo: Z looks down from above
+  await page.click('.gizmo .gz-b[data-id="+z"]');
+  await page.waitForFunction(() => !window.__highrise.viewMoving);
+  const down = await get(() => {
+    const h = window.__highrise;
+    return h.camera.position.clone().sub(h.controls.target).normalize().y;
+  });
+  assert.ok(down > 0.99, `from above (${down.toFixed(3)})`);
+  await page.screenshot({ path: `${OUT}/2-top.png` });
+
+  // edit the slope (••• menu), in 3D: drag the dot at the bottom of section 2, undo that,
+  // then a steeper top, keeping what's built
   await page.click('#more');
   await page.click('#reset');
-  await page.waitForSelector('#slope:not([hidden])');
-  assert.ok(await page.isVisible('#sl-keep-row'), 'it offers to keep the tiles');
-  await page.click('#sl-list [data-i="0"] [data-key="slope"] [data-step="1"]');
-  await page.click('#sl-go');
-  await page.waitForSelector('#slope', { state: 'hidden' });
+  await page.waitForSelector('#slopebar:not([hidden])');
+  assert.ok(await page.isVisible('#sb-keep-row'), 'it offers to keep the tiles');
+  await page.click('#sb-side');
+  await page.waitForFunction(() => !window.__highrise.viewMoving);
+  const side = await get(() => {
+    const h = window.__highrise;
+    return h.camera.position.clone().sub(h.controls.target).normalize().x;
+  });
+  assert.ok(side < -0.9, `seen from the side (${side.toFixed(2)})`);
+  const knob = await get(() => window.__highrise.slopeHandle(1));
+  await page.mouse.move(knob.x, knob.y);
+  await page.mouse.down();
+  await page.mouse.move(knob.x + 40, knob.y - 30, { steps: 6 });
+  await page.mouse.up();
+  const dragged = await get(() => window.__highrise.slopeDesign.sections[1]);
+  assert.ok(dragged.length !== 360 || dragged.slope !== 16, `the dot moved section 2 (${dragged.slope}°, ${dragged.length} m)`);
+  await page.screenshot({ path: `${OUT}/3-slope-edit.png` });
+  await page.keyboard.press('Control+z');
+  assert.deepEqual(await get(() => window.__highrise.slopeDesign.sections[1]), { slope: 16, length: 360 }, 'undone');
+  await page.click('#sb-section [data-act="prev"]');
+  assert.equal((await page.textContent('#sb-section .sb-num')).trim(), 'Section 1/4');
+  await page.click('#sb-section [data-key="slope"] [data-step="1"]');
+  await page.click('#sb-go');
+  await page.waitForSelector('#slopebar', { state: 'hidden' });
   assert.equal(await get(() => window.__highrise.state.design.sections[0].slope), 13, 'the new slope');
   assert.equal(await get(() => window.__highrise.state.tiles.length), tileCount, 'the tiles are kept');
 
@@ -274,6 +335,12 @@ try {
   await page.waitForFunction(() => window.__highrise.tutorial.step === 'big');
   await page.click('#buildbar [data-size="3"]');
   await page.evaluate(() => window.__highrise.selectAt(-30, window.__highrise.hf.startZ + 110));
+  await page.waitForFunction(() => window.__highrise.tutorial.step === 'piece');
+  await page.waitForFunction(() => !window.__highrise.viewMoving);
+  {
+    const [i, j] = await get(() => window.__highrise.tutorial.goals[3]);
+    await doubleClickTile(i, j);
+  }
   await page.waitForFunction(() => window.__highrise.tutorial.complete);
   await page.click('#tut [data-tut="next"]');
   await page.waitForFunction(() => window.__highrise.tutorial.level === 'raise');
@@ -333,18 +400,42 @@ try {
   assert.match(await page.textContent('#res-gates'), /^2\/3 · missed gate 2/, 'gate 2 missed');
   assert.equal((await page.textContent('#res-eyebrow')).trim(), 'Missed a gate: the run doesn’t count');
   assert.equal(await get(() => window.__highrise.state.bestTime), null, 'no record from it');
-  // reload: the tiles and the gates are saved
+  // Save as (••• menu): a project with a name, by the title
   await page.click('#res-sculpt');
   await page.waitForFunction(() => !window.__highrise.riding, null, { timeout: 60000 });
+  await page.click('#more');
+  await page.click('#save-btn');
+  await page.waitForSelector('#projects:not([hidden])');
+  await page.fill('#pj-name', 'Smoke slope');
+  await page.click('.pj-save-btn');
+  await page.waitForSelector('#projects', { state: 'hidden' });
+  assert.equal((await page.textContent('.brand-sub')).trim(), 'Smoke slope', 'the project’s name by the title');
   const course = await get(() => JSON.stringify({ tiles: window.__highrise.state.tiles, gates: window.__highrise.gates.length }));
+  // change it, then open the project again (it asks first: the change isn't saved)
+  await page.evaluate(() => {
+    const h = window.__highrise;
+    h.selectAt(60, h.hf.startZ + 200, 3);
+    h.act('trees');
+    h.clearSelection();
+  });
+  assert.notEqual(await get(() => JSON.stringify({ tiles: window.__highrise.state.tiles, gates: window.__highrise.gates.length })), course);
+  await page.click('#more');
+  await page.click('#projects-btn');
+  await page.waitForSelector('#projects:not([hidden])');
+  await page.click('#pj-list [data-act="open"]');
+  await page.click('#pj-list [data-act="yes"]');
+  await page.waitForSelector('#projects', { state: 'hidden' });
+  assert.equal(await get(() => JSON.stringify({ tiles: window.__highrise.state.tiles, gates: window.__highrise.gates.length })), course, 'the project as it was saved');
+  // reload: the tiles, the gates and the project are saved
   await page.waitForTimeout(800); // the autosave
   await page.reload({ waitUntil: 'load' });
   await page.waitForFunction(() => window.__highrise?.hf);
   assert.equal(await get(() => JSON.stringify({ tiles: window.__highrise.state.tiles, gates: window.__highrise.gates.length })), course, 'the same tiles and gates after a reload');
+  assert.equal(await get(() => window.__highrise.state.project?.name), 'Smoke slope', 'still that project');
 
   assert.deepEqual(errors, [], 'no page errors');
   console.log(
-    `smoke test passed: a slope of 4 sections designed (and edited, tiles kept), start gate moved, ${picked} tiles selected and raised, undo/redo, a jump turned, copied and pasted (${tileCount} tiles), ride at ${(ride.speed * 3.6).toFixed(0)} km/h, pause and build, ride on at ${resumed.time.toFixed(1)} s, from the start; in French; a tutorial level done and left, your slope back; a course of gates raced in ${bestTime.toFixed(2)} s, a missed gate, saved`
+    `smoke test passed: a slope of 4 sections designed (and edited, tiles kept), start gate moved, ${picked} tiles selected and raised, undo/redo, a jump turned, copied and pasted (${tileCount} tiles), ride at ${(ride.speed * 3.6).toFixed(0)} km/h, pause and build, ride on at ${resumed.time.toFixed(1)} s, from the start; in French; a tutorial level done and left, your slope back; a course of gates raced in ${bestTime.toFixed(2)} s, a missed gate; the 3D slope editor (side view, a dot dragged, undone), the gizmo, a double click on a piece; saved as a project, opened again, reloaded`
   );
 } catch (err) {
   // on CI, say what failed where it shows on the run's page too (an annotation), with a

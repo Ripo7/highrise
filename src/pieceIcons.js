@@ -26,6 +26,9 @@ export const ACTION_ICONS = {
 };
 
 // tints: each tab of actions, and what the tiles show on the snow
+// piste colours by difficulty (slopes.js difficulty), for the slope editor
+export const DIFF_COLORS = { green: '#22a35a', blue: '#2f6fd6', red: '#e0412f', black: '#3b2a55', up: '#8a6fd8' };
+
 export const CATEGORY_COLORS = {
   shape: '#4f7be8',
   features: '#e8763a',

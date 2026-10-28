@@ -12,15 +12,28 @@ This is **Phase 0**: a grey-box prototype to prove the core loop is fun before a
 
 ### Design the slope
 
-The first thing you do: stack **sections** down the mountain, top to bottom, each with its **slope** (−15° climbing to 50°, 1° at a time) and its **length** (20 to 400 m, 10 m at a time), up to 24 sections and 3 km. Press and hold − / + to run through the values. Pick the **width** (Narrow 360 m, Medium 540 m, Wide 720 m), or start from a template (**Classic**, **Cruiser**, **Park**, **Big mountain**).
+The first thing you do, **right on the mountain in 3D**: stack **sections** down the slope, top to bottom, each with its **slope** (−15° climbing to 50°, 1° at a time) and its **length** (20 to 400 m, 10 m at a time), up to 24 sections and 3 km. The snow is rebuilt as you change it. Each section is tinted on the snow like a piste marker (green under 12°, blue to 22°, red to 32°, black beyond, purple for a climb), with a line at each joint and a label (`2 · 22° · 160 m`) over it.
 
-A side view of the whole slope, true to scale, is coloured like piste markers (green under 12°, blue to 22°, red to 32°, black beyond, purple for a climb), with the length, the drop, the average and the steepest pitch. Tap it to pick a section. The joints between sections are eased over a few metres, so a change of pitch rolls over or scoops instead of kinking.
+- **Drag the dot** at the bottom of a section: along the slope it sets the length, up and down the pitch (the sections below keep theirs). **Side view** (or the gizmo's −X) shows the slope's profile, the best way to shape it.
+- **Tap a section** (or its label) to pick it; the bar at the bottom edits it: − / + for its pitch and its length (press and hold to run through the values), add a section after it, remove it. ← → pick a section, ↑ ↓ its pitch, Shift+↑ ↓ its length; Ctrl+Z undoes.
+- Pick the **width** (Narrow 360 m, Medium 540 m, Wide 720 m), start from a template (**Classic**, **Cruiser**, **Park**, **Big mountain**) or from one of **My projects**. The bar shows the length, the drop, the average and the steepest pitch.
+- **Build it** (`Enter`) keeps it; **Cancel** (`Esc`) puts the slope back as it was, with what you built and your records.
 
-The slope is bare snow, the same all the way across: no rolls, forest or rock but what you add with the tiles. **Edit the slope** (`N`, ••• menu) opens it again; **Keep what I built** leaves your tiles where they were (counted from the top, centred if the width changes) and the start gate too.
+The joints between sections are eased over a few metres, so a change of pitch rolls over or scoops instead of kinking. The top of the slope stays where it is while you edit, so the camera does too.
+
+The slope is bare snow, the same all the way across: no rolls, forest or rock but what you add with the tiles. **Edit the slope** (`N`, ••• menu) opens the editor again; **Keep what I built** leaves your tiles where they were (counted from the top, centred if the width changes) and the start gate too.
+
+### Projects: save as, open
+
+**Save as…** (••• menu, `Ctrl+S`) saves the slope under a name: the slope, the tiles, the start gate and the records. Its name shows by the title; `Ctrl+S` saves it again. **Projects** (••• menu, or **My projects** in the slope editor) lists them, latest first, with their length, gates, tiles and best time: open one to carry on with it or to start a new slope from it (it asks first if what you have isn't saved), or delete one. They're kept in the browser.
+
+### The view: the gizmo
+
+The **gizmo** (top right; on a phone, above the bar) shows the axes the Blender way: Z up, Y up the slope, X across it. Click an axis to look along it: **Z** from above (the slope going up the screen), **−Y** from the bottom of the slope looking up it, **X** / **−X** from the side; drag the gizmo to turn the view, the house button shows the whole mountain. The numpad does it too: `7` above, `1` from the bottom, `3` the side (with `Ctrl` the other way), `.` frames the selection.
 
 ### Learn: the tutorial
 
-**Thirteen short levels**, one action (or two) at a time: Select (and the brush sizes), Raise and lower, Flatten, Smooth, Steepen and ease, Jump (with the start gate, and a second in the air), Drop, Rocks, Gates (and a run through them), Trees and clearings, Powder and ice, Copy / paste / rotate, Erase. Each level is a small slope of its own; its card (top left, or under the scoreboard on a phone) lists the steps, the tiles to work on are **marked on the snow** (a pink outline), and the tab and the button to press pulse in the bar. A step is ticked as soon as it's done, including the ones you ride. Restart, skip or pick any level from the list; progress is kept.
+**Thirteen short levels**, one action (or two) at a time: Select (the brush sizes, and a double tap to pick a piece again), Raise and lower, Flatten, Smooth, Steepen and ease, Jump (with the start gate, and a second in the air), Drop, Rocks, Gates (and a run through them), Trees and clearings, Powder and ice, Copy / paste / rotate, Erase. Each level is a small slope of its own; its card (top left, or under the scoreboard on a phone) lists the steps, the tiles to work on are **marked on the snow** (a pink outline), and the tab and the button to press pulse in the bar. A step is ticked as soon as it's done, including the ones you ride. Restart, skip or pick any level from the list; progress is kept.
 
 Start it from the welcome card or the ••• menu (**Tutorial**). Your own slope is put aside meanwhile (nothing is saved during the tutorial) and comes back as it was when you leave (✕).
 
@@ -46,6 +59,10 @@ Valid runs set two records: the **best score** and the **best time** (to the hun
 ### Select tiles, then act on them
 
 The mountain is covered in **hexagon tiles** (about 10 m across, in rows across the slope). With **Select** (`S`, the default) tap or drag on the snow to pick tiles, a brush of 1, 7 or 19 at a time (`[` `]`: the tile, its six neighbours, two rings round it). Strokes add to the selection; one that starts on a selected tile takes tiles away. The chip at the top of the bar shows how many are selected: tap it (or `Esc`) to deselect. A second finger turns a stroke into a pinch, and the selection goes back to how it was.
+
+**Double-tap (or double-click) something you built to select all of it again**: the gate, the jump, the terrace, the hill you raised, the wood... (a piece made in one tap is its group; the rest are the connected tiles changed the same way). Double-tap again for the next piece there, ending with everything built that touches it; with `Shift` it adds to the selection. `A` selects everything built.
+
+**Faster with a keyboard**: `1`–`9` do the actions of the tab on show (the number is on each button), `Shift`+`1`–`4` change tab, `.` does the last action again; `+` `-` raise and lower, `F` flatten, `Q` rotate, `X` erase. **On a phone**: pinch to zoom, two fingers to pan and **twist to turn the view**, without leaving Select.
 
 Then act on the selection. Actions stay on the tiles, so they stack (tap again for more), mix (trees on a raised, smoothed tile) and undo one tap at a time. The buttons show what the selection holds (`+3` m, `2/3`):
 
@@ -106,11 +123,12 @@ Hold to load a jump (the ring fills) and release at a lip (a kicker, a raised cr
 
 **Speed bonus:** above 100 km/h a speed streak builds (40 points a second at 100 km/h, +3 per extra km/h: about 170/s at 145 km/h). It's banked once you've been back under 100 for 0.8 s, or at the finish, and lost on a wipeout. Tricks landed within 2.6 s of each other chain into a combo (×1.5, ×2, … up to ×5). A see-through ghost replays your best run.
 
-Your slope, tiles (gates included), start gate, best score and best time, ghost and ski tracks autosave in the browser (save v11; v9 and v10 saves load with their tiles). Saves from the wild mountains become sections of about the same length, width and steepness, with their tiles kept (and painted pieces from before the tile actions become the matching actions: a bump raised 3 m, a flat eased all the way, a wall steepened, forest planted, powder kept). Saves from before the wild mountains are kept aside, untouched, and you start on a new slope.
+Your slope, tiles (gates included), start gate, best score and best time, ghost, ski tracks and the project it's saved as autosave in the browser (save v12; v9 to v11 saves load with their tiles, their ghosts moved to the new height of the slope). Saves from the wild mountains become sections of about the same length, width and steepness, with their tiles kept (and painted pieces from before the tile actions become the matching actions: a bump raised 3 m, a flat eased all the way, a wall steepened, forest planted, powder kept). Saves from before the wild mountains are kept aside, untouched, and you start on a new slope.
 
 ## How the mountain is built
 
-- `src/core/slopes.js` is the slope you design: sections, width, templates, limits and stats, the side profile (pitches eased at the joints, integrated metre by metre) and the bare heightfield built from it, kept as the base. `src/slopeEditor.js` is its editor.
+- `src/core/slopes.js` is the slope you design: sections, width, templates, limits and stats, the side profile (pitches eased at the joints, integrated metre by metre), a section's joint dragged to a point (its length and pitch), and the bare heightfield built from it with its top at a fixed height, kept as the base. `src/slopeMode.js` is the editor's bar, `src/render/slopeGuides.js` its labels, dots and profile in 3D (the tint of the sections is the terrain shader's).
+- `src/core/pieces.js` finds the pieces of what you built a tile is part of (for the double tap); `src/projects.js` keeps the projects, `src/projectsDialog.js` is their dialog; `src/viewGizmo.js` the view gizmo.
 - `src/core/hex.js` is the grid: pointy-top hexagons in rows across the slope (odd rows shifted half a tile), which tile a point is in, a tile's centre and corners, brushes (1, 7, 19 tiles) and lines of tiles (a fast drag leaves no gaps).
 - `src/core/tiles.js` is what's on the tiles: a record per changed tile (how far raised, how steepened, its flatten group, how smoothed, a jump or drop with its facing and group, trees, a clearing, powder or ice) and the actions as pure functions on them, with copy and paste in axial coordinates (so a shape keeps its form on any row) and rotation.
 - `src/core/terrain.js` turns the tiles into snow, in order on the bare slope: steepen / ease and rock bands change the slope along the fall line, column by column, then ease back to the mountain below; each flatten group is levelled to its own average; raise / lower adds a blurred field of the lifts; smooth blends towards a blurred copy of the snow; each jump or drop group is shaped along its facing (its length sets its size, its width comes from the tiles); powder adds pillows. Every field is a mask of tiles and three box blurs (a near-gaussian).
@@ -142,9 +160,9 @@ Hand it to a few people. Do they say "one more tweak" and keep going? If not, fi
 ```bash
 npm install
 npm run dev      # local dev server
-npm test         # physics, scoring, slope design, the hexagon grid, tile actions and jumps, gates and courses, the translation, the tutorial levels (Node, no browser needed)
+npm test         # physics, scoring, slope design, the hexagon grid, tile actions and jumps, gates and courses, pieces, joints, projects, the gizmo, the translation, the tutorial levels (Node, no browser needed)
 npm run build    # production build into dist/
-npm run smoke    # browser smoke test on the build: design a slope, move the start, select tiles, raise, undo, a jump, rotate, copy and paste, edit the slope keeping the tiles, ride, pause and act, ride on, start again, switch to French, play a tutorial level and leave it, set a course of gates, race it, miss a gate, reload (needs Chromium: npx playwright install chromium)
+npm run smoke    # browser smoke test on the build: design a slope, move the start, select tiles, raise, undo, a jump, rotate, copy and paste, edit the slope keeping the tiles, ride, pause and act, ride on, start again, switch to French, play a tutorial level and leave it, set a course of gates, race it, miss a gate, the slope editor in 3D (side view, drag a dot, undo), the gizmo, double click a piece, save as a project, open it again, reload (needs Chromium: npx playwright install chromium)
 ```
 
 Add `?debug` to the URL for a frame-cost readout (fps, worst frame, draw calls, triangles). CI (`.github/workflows/ci.yml`) runs the tests, the build and the smoke test on every pull request.
@@ -158,6 +176,9 @@ src/
   core/        heightfield, slope design, hexagon grid, tiles and actions, terrain, skier physics, scoring, tutorial levels (pure JS)
   render/      terrain mesh + shader, trees and rocks, start gate, skier, spray, ski tracks
   buildBar.js  the build bar
+  slopeMode.js the slope editor's bar (in the 3D view)
+  viewGizmo.js the view gizmo
+  projects.js  projects (projectsDialog.js: their dialog)
   i18n.js      English and French, the language switch
   tutorial.js  the tutorial card (tutorialText.js: its words)
   ui.js        overlay controls

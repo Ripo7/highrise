@@ -87,6 +87,10 @@ const frag = /* glsl */ `
   uniform vec3 uGhost; // the selection's colour
   uniform vec3 uGoal; // the tutorial's goal tiles
   uniform float uTime;
+  // the slope editor: the sections down the slope, one texel per step of the slope's length
+  // (rgb: the section's colour, a: 100 + 40 for odd sections, + 100 for the one picked)
+  uniform sampler2D uSecTex;
+  uniform vec3 uSecInfo; // z of the top line, z of the bottom, on (1) / off (0)
   uniform vec3 uCatCol[6]; // tint of changed tiles, by what changed (A channel)
 
   // Manual bilinear lookup: iPhones can't filter float textures in hardware (they read
@@ -343,6 +347,21 @@ const frag = /* glsl */ `
 
     float dist = length(cameraPosition - vWorld);
 
+    // editing the slope: each section tinted its colour (the one picked more), a line
+    // across at each joint
+    if (uSecInfo.z > 0.5) {
+      float f = (vWorld.z - uSecInfo.x) / (uSecInfo.y - uSecInfo.x);
+      float df = max(fwidth(f), 1e-5) * 1.2;
+      vec4 sc = texture2D(uSecTex, vec2(clamp(f, 0.0, 1.0), 0.5));
+      if (f >= 0.0 && f <= 1.0) {
+        float picked = step(0.7, sc.a);
+        col = mix(col, sc.rgb, 0.13 + 0.2 * picked);
+        float a0 = texture2D(uSecTex, vec2(clamp(f - df, 0.0, 1.0), 0.5)).a;
+        float a1 = texture2D(uSecTex, vec2(clamp(f + df, 0.0, 1.0), 0.5)).a;
+        col = mix(col, uInk, step(0.05, abs(a1 - a0)) * 0.7);
+      }
+    }
+
     // building: the grid on the snow, the ghost of the piece under the finger
     if (uTileOn > 0.5) {
       vec3 hx = hexTile(vec2(vWorld.x - uTileInfo.x, vWorld.z - uTileInfo.y), uTileInfo.z);
@@ -505,7 +524,15 @@ export class TerrainMesh {
     geo.setAttribute('position', new THREE.BufferAttribute(positions, 3).setUsage(THREE.DynamicDrawUsage));
     geo.setAttribute('normal', new THREE.BufferAttribute(normals, 3).setUsage(THREE.DynamicDrawUsage));
     geo.setIndex(new THREE.BufferAttribute(index, 1));
-    const bound = new THREE.Sphere(new THREE.Vector3(0, 200, 0), Math.hypot(hf.halfX, hf.halfZ, 400));
+    // round the mountain as it stands (edits move it by metres; a margin covers them)
+    let lo = Infinity;
+    let hi = -Infinity;
+    for (let k = 0; k < hf.h.length; k += 7) {
+      lo = Math.min(lo, hf.h[k]);
+      hi = Math.max(hi, hf.h[k]);
+    }
+    if (!Number.isFinite(lo)) lo = hi = 0;
+    const bound = new THREE.Sphere(new THREE.Vector3(0, (lo + hi) / 2, 0), Math.hypot(hf.halfX, hf.halfZ, (hi - lo) / 2 + 400));
     geo.boundingSphere = bound;
     this.geo = geo;
 
@@ -558,6 +585,8 @@ export class TerrainMesh {
       uGhost: { value: c('#ffb020') },
       uGoal: { value: c('#e0338f') },
       uTime: { value: 0 },
+      uSecTex: { value: null },
+      uSecInfo: { value: new THREE.Vector3(0, 1, 0) },
       uCatCol: { value: ['#4f7be8', '#ff7a45', '#2f9e86', '#8a6fd8', '#b9855d', '#8a7aa3'].map(c) },
     };
     this.setTileGrid(1, 1, -240, 10);
@@ -671,6 +700,26 @@ export class TerrainMesh {
     this.tileTex.needsUpdate = true;
   }
 
+  // the slope editor's sections on the snow (data: SECTION_TEXELS × 4 bytes, see the shader),
+  // or null to hide them
+  setSections(data) {
+    if (!data) {
+      this.uniforms.uSecInfo.value.z = 0;
+      return;
+    }
+    if (!this.secTex) {
+      this.secData = new Uint8Array(data.length);
+      this.secTex = new THREE.DataTexture(this.secData, data.length / 4, 1, THREE.RGBAFormat, THREE.UnsignedByteType);
+      this.secTex.magFilter = THREE.NearestFilter;
+      this.secTex.minFilter = THREE.NearestFilter;
+      this.secTex.generateMipmaps = false;
+      this.uniforms.uSecTex.value = this.secTex;
+    }
+    this.secData.set(data);
+    this.secTex.needsUpdate = true;
+    this.uniforms.uSecInfo.value.set(this.hf.startZ, this.hf.finishZ, 1);
+  }
+
   // copy the surface map into the texture (after a run is built)
   refreshSurface() {
     const sf = this.surface;
@@ -729,6 +778,7 @@ export class TerrainMesh {
   }
 
   dispose() {
+    this.secTex?.dispose();
     this.group.traverse((o) => {
       if (o.geometry) o.geometry.dispose();
     });

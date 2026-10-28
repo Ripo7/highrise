@@ -1,8 +1,9 @@
-// The build bar. Three tools on the left: Look (move the camera only), Select (tap or drag
-// on the snow to pick hexagon tiles, with a brush of 1, 7 or 19 tiles) and Start (put the
-// start gate anywhere). Then the actions for the selected tiles, in four tabs: Shape,
-// Features, Nature, Tools. Each shows what the selection holds (how high, how steep, how
-// many trees...), and they wait greyed out until something is selected.
+// The build bar. You're always selecting (tap or drag on the snow to pick hexagon tiles,
+// with a brush of 1, 7 or 19 tiles: S M L at the end); Start on the left puts the start gate
+// anywhere (tap it again to go back). Then the actions for the selected tiles, in four
+// tabs: Shape, Features, Nature, Tools. Each shows what the selection holds (how high, how
+// steep, how many trees...), and they wait greyed out until something is selected. (The
+// view has its own buttons, floating over the mountain: viewButtons.js.)
 
 import { ACTIONS, TABS } from './core/tiles.js';
 import { BRUSH_TILES } from './core/terrain.js';
@@ -89,8 +90,6 @@ export function createBuildBar({ onTool, onAction, onDeselect, onSize }) {
   };
 
   const renderFixed = () => {
-    root.querySelector('.bb-fixed-look').innerHTML = `${svg(BAR_ICONS.look)}<span>${t('tool.view')}</span>`;
-    root.querySelector('.bb-fixed-select').innerHTML = `${svg(BAR_ICONS.select)}<span>${t('tool.select')}</span>`;
     root.querySelector('.bb-fixed-start').innerHTML = `${svg(BAR_ICONS.start)}<span>${t('tool.start')}</span>`;
     sizes.innerHTML = [1, 2, 3].map((n) => `<button type="button" data-size="${n}" title="${t('bar.sizeTitle', { n: BRUSH_TILES[n - 1] })}">${['S', 'M', 'L'][n - 1]}</button>`).join('');
   };
@@ -127,7 +126,7 @@ export function createBuildBar({ onTool, onAction, onDeselect, onSize }) {
   render();
 
   return {
-    // tool: 'view' | 'select' | 'start' | 'paste'
+    // tool: 'select' (always, unless) 'start' | 'paste'
     set(t) {
       tool = t;
       sync();

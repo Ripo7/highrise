@@ -1,7 +1,7 @@
 // The slope editor, in the 3D view. The mountain is rebuilt as you change it; on the snow
 // each section is tinted its piste colour with its label, and the dot at the bottom of each
 // section drags (main.js: along the slope its length, up or down its pitch; the side view
-// shows it best). This is the bar at the bottom: templates and saved projects to start
+// shows it best: the Side button over the view). This is the bar at the bottom: templates and saved projects to start
 // from, the width, the section picked (− / + for its pitch and length, press and hold to run
 // through them), add and remove, and Build it / Cancel.
 //
@@ -17,8 +17,8 @@ const fmtSlope = (v) => (v < 0 ? `↑ ${-v}°` : `${v}°`);
 const icon = (paths) => `<svg viewBox="0 0 24 24" aria-hidden="true">${paths}</svg>`;
 
 /**
- * on: { change(design) the design changed (rebuild the snow), done(design, keep),
- * cancel(), side() a side view, projects() open the projects }
+ * on: { change(design) the design changed (rebuild the snow), pick(i), done(design, keep),
+ * cancel(), projects() open the projects }
  */
 export function createSlopeMode(on) {
   const $ = (id) => document.getElementById(id);
@@ -217,7 +217,6 @@ export function createSlopeMode(on) {
     renderWidth();
     changed();
   });
-  $('sb-side').addEventListener('click', () => on.side());
 
   function done() {
     if (goBtn.disabled) return;

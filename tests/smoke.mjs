@@ -3,7 +3,7 @@
 // them: raise, undo and redo, a jump, rotate, copy and paste, deselect; edit the slope and
 // keep the tiles; ride, pause to build, ride on from where the skier was, start again from
 // the gate; switch to French; play the first tutorial level and leave it; set a course of
-// gates, race it, miss a gate; the slope editor in 3D, the view gizmo, double click a piece;
+// gates, race it, miss a gate; the slope editor in 3D, the view buttons, double click a piece;
 // save as a project, open it again, reload) and fails on any page error. Run after
 // `npm run build`:
 //   npm run smoke      (SMOKE_OUT=dir keeps screenshots; defaults to smoke-shots/)
@@ -122,8 +122,10 @@ try {
   const start = await get(() => ({ x: window.__highrise.state.start.x, u: window.__highrise.state.start.z - window.__highrise.hf.startZ }));
   assert.ok(Math.abs(start.x - 40) < 4 && Math.abs(start.u - 160) < 4, `the gate moved (${start.x.toFixed(1)}, ${start.u.toFixed(1)})`);
 
-  // select a row of tiles across the slope (drag with Select), then raise them twice
-  await page.click('#buildbar [data-tool="select"]');
+  // Start again: back to selecting (there's no Look or Select button: you always select)
+  await page.click('#buildbar [data-tool="start"]');
+  assert.equal(await get(() => window.__highrise.state.tool), 'select', 'back to selecting');
+  // select a row of tiles across the slope (a drag), then raise them twice
   await drag([-50, 110], [30, 110]);
   const picked = await get(() => window.__highrise.selection.length);
   assert.ok(picked >= 14, `selected tiles (${picked})`);
@@ -187,8 +189,34 @@ try {
   assert.match(await page.textContent('#toast'), /^Selected: the jump/);
   await page.keyboard.press('Escape');
 
-  // the view gizmo: Z looks down from above
-  await page.click('.gizmo .gz-b[data-id="+z"]');
+  // the view buttons over the mountain: Rotate on, a drag on the snow turns the view (and
+  // selects nothing), Rotate off; a drag on Move slides it; Top looks down from above
+  const camDir = () =>
+    get(() => {
+      const h = window.__highrise;
+      const d = h.camera.position.clone().sub(h.controls.target);
+      return Math.atan2(d.x, d.z);
+    });
+  const az0 = await camDir();
+  await page.click('#viewbtns [data-view="rotate"]');
+  assert.equal(await page.getAttribute('#viewbtns [data-view="rotate"]', 'aria-pressed'), 'true');
+  await drag([0, 140], [60, 140]);
+  assert.ok(Math.abs((await camDir()) - az0) > 0.05, 'the drag turned the view');
+  assert.equal(await get(() => window.__highrise.selection.length), 0, 'and selected nothing');
+  await page.click('#viewbtns [data-view="rotate"]');
+  assert.equal(await page.getAttribute('#viewbtns [data-view="rotate"]', 'aria-pressed'), 'false');
+  {
+    const t0 = await get(() => window.__highrise.controls.target.clone());
+    const b = await page.locator('#viewbtns [data-view="pan"]').boundingBox();
+    await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(b.x + b.width / 2 - 60, b.y + b.height / 2 + 30, { steps: 5 });
+    await page.mouse.up();
+    const t1 = await get(() => window.__highrise.controls.target.clone());
+    assert.ok(Math.hypot(t1.x - t0.x, t1.z - t0.z) > 5, 'dragging Move slid the view');
+    assert.equal(await page.getAttribute('#viewbtns [data-view="pan"]', 'aria-pressed'), 'false', 'a drag on it leaves it off');
+  }
+  await page.click('#viewbtns [data-view="top"]');
   await page.waitForFunction(() => !window.__highrise.viewMoving);
   const down = await get(() => {
     const h = window.__highrise;
@@ -203,7 +231,7 @@ try {
   await page.click('#reset');
   await page.waitForSelector('#slopebar:not([hidden])');
   assert.ok(await page.isVisible('#sb-keep-row'), 'it offers to keep the tiles');
-  await page.click('#sb-side');
+  await page.click('#viewbtns [data-view="side"]');
   await page.waitForFunction(() => !window.__highrise.viewMoving);
   const side = await get(() => {
     const h = window.__highrise;
@@ -435,7 +463,7 @@ try {
 
   assert.deepEqual(errors, [], 'no page errors');
   console.log(
-    `smoke test passed: a slope of 4 sections designed (and edited, tiles kept), start gate moved, ${picked} tiles selected and raised, undo/redo, a jump turned, copied and pasted (${tileCount} tiles), ride at ${(ride.speed * 3.6).toFixed(0)} km/h, pause and build, ride on at ${resumed.time.toFixed(1)} s, from the start; in French; a tutorial level done and left, your slope back; a course of gates raced in ${bestTime.toFixed(2)} s, a missed gate; the 3D slope editor (side view, a dot dragged, undone), the gizmo, a double click on a piece; saved as a project, opened again, reloaded`
+    `smoke test passed: a slope of 4 sections designed (and edited, tiles kept), start gate moved, ${picked} tiles selected and raised, undo/redo, a jump turned, copied and pasted (${tileCount} tiles), ride at ${(ride.speed * 3.6).toFixed(0)} km/h, pause and build, ride on at ${resumed.time.toFixed(1)} s, from the start; in French; a tutorial level done and left, your slope back; a course of gates raced in ${bestTime.toFixed(2)} s, a missed gate; the 3D slope editor (side view, a dot dragged, undone), the view buttons (rotate, move, top), a double click on a piece; saved as a project, opened again, reloaded`
   );
 } catch (err) {
   // on CI, say what failed where it shows on the run's page too (an annotation), with a

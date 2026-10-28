@@ -38,7 +38,5 @@ export const CATEGORY_COLORS = {
 };
 
 export const BAR_ICONS = {
-  look: '<circle cx="12" cy="12" r="3"/><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/>',
-  select: '<path d="M12 2.8 20 7.4v9.2l-8 4.6-8-4.6V7.4z" stroke-dasharray="3.2 2.2"/><path d="m11 9 6.5 3.5-3 1 2 3.2-1.6 1-2-3.2-2 2z" fill="currentColor" stroke-width="1.2"/>',
   start: '<path d="M5 21V4"/><path d="M5 4h12l-3 3.5 3 3.5H5"/>',
 };

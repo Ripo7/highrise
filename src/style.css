@@ -85,7 +85,7 @@ label {
   touch-action: none;
   cursor: crosshair;
 }
-body[data-tool='view'] #scene,
+body[data-view='rotate'] #scene,
 body.alt-orbit #scene {
   cursor: grab;
 }
@@ -2709,16 +2709,6 @@ body.riding .tut {
   font: 700 16px/1 var(--display);
   white-space: nowrap;
 }
-.sb-side {
-  flex: none;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  min-height: 40px;
-  padding: 0 12px;
-  font-size: 13px;
-}
-.sb-side svg,
 .sb-chip svg,
 .sb-arrow svg,
 .sb-edit svg {
@@ -2910,12 +2900,6 @@ body.slope-mode .dock {
   .sb-read dd {
     font-size: 14px;
   }
-  .sb-side span {
-    display: none;
-  }
-  .sb-side {
-    padding: 0 9px;
-  }
   .sb-start {
     flex-direction: column;
     align-items: stretch;
@@ -2973,96 +2957,6 @@ body.slope-mode .dock {
   .sb-go .res-retry {
     flex: 1;
     min-width: 0;
-  }
-}
-
-/* ---------- the view gizmo ---------- */
-.gizmo {
-  position: fixed;
-  z-index: 11;
-  right: max(var(--gut), var(--safe-r));
-  top: calc(var(--gut) + 132px + var(--safe-t));
-  width: 84px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 6px;
-  touch-action: none;
-  user-select: none;
-  -webkit-user-select: none;
-}
-.gizmo > svg {
-  width: 84px;
-  height: 84px;
-  cursor: grab;
-  overflow: visible;
-}
-.gz-bg {
-  fill: rgba(255, 248, 239, 0.55);
-  stroke: rgba(79, 59, 107, 0.18);
-  stroke-width: 1.5;
-}
-.gizmo:hover .gz-bg {
-  fill: rgba(255, 248, 239, 0.85);
-}
-.gz-b {
-  cursor: pointer;
-}
-.gz-b text {
-  font: 700 11px/1 var(--display);
-  fill: #fff;
-  text-anchor: middle;
-  pointer-events: none;
-}
-.gz-b:hover circle {
-  stroke: #fff;
-  stroke-width: 2.5;
-}
-.gz-home {
-  display: grid;
-  place-items: center;
-  width: 36px;
-  height: 36px;
-  border: 1px solid var(--panel-line);
-  border-radius: 10px;
-  background: var(--panel);
-  color: var(--ink);
-  cursor: pointer;
-}
-.gz-home svg {
-  width: 18px;
-  height: 18px;
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 2.2;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-}
-body.riding .gizmo {
-  display: none;
-}
-body.slope-mode .gizmo {
-  top: calc(var(--gut) + 64px + var(--safe-t));
-}
-@media (max-width: 720px) {
-  .gizmo {
-    top: auto;
-    bottom: calc(var(--gut) + 212px + var(--safe-b));
-    width: 70px;
-  }
-  .gizmo > svg {
-    width: 70px;
-    height: 70px;
-  }
-  .gz-home {
-    display: none;
-  }
-  body.slope-mode .gizmo {
-    top: calc(var(--gut) + 56px + var(--safe-t));
-    bottom: auto;
-  }
-  body.tutorial .gizmo {
-    bottom: calc(var(--gut) + 212px + var(--safe-b));
   }
 }
 
@@ -3203,4 +3097,96 @@ body.slope-mode #tutorial-btn,
 body.slope-mode #fresh-snow,
 body.slope-mode #reset {
   display: none;
+}
+
+/* ---------- the view buttons, floating over the mountain ---------- */
+.viewbtns {
+  position: fixed;
+  z-index: 11;
+  right: max(var(--gut), var(--safe-r));
+  top: calc(var(--gut) + 132px + var(--safe-t));
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.vb {
+  width: 58px;
+  min-height: 54px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  padding: 5px 2px 4px;
+  border: 2px solid var(--panel-line);
+  border-radius: 14px;
+  background: rgba(255, 248, 239, 0.88);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  box-shadow: 0 4px 14px rgba(59, 42, 85, 0.18);
+  color: var(--ink);
+  font: 600 10.5px/1 var(--display);
+  cursor: pointer;
+  touch-action: none;
+}
+.vb svg {
+  width: 22px;
+  height: 22px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  pointer-events: none;
+}
+.vb span {
+  pointer-events: none;
+}
+.vb[data-view='rotate'],
+.vb[data-view='pan'] {
+  cursor: grab;
+}
+.vb[aria-pressed='true'] {
+  border-color: var(--ink);
+  background: var(--ink);
+  color: #fff;
+  box-shadow: 0 3px 0 rgba(0, 0, 0, 0.25);
+}
+.vb:active {
+  transform: translateY(1px);
+}
+.viewbtns.is-dragging .vb {
+  cursor: grabbing;
+}
+/* the top pair (how a drag moves the view) apart from the views */
+.vb[data-view='top'] {
+  margin-top: 6px;
+}
+body.riding .viewbtns {
+  display: none;
+}
+body[data-view='pan'] #scene {
+  cursor: move;
+}
+body.slope-mode .viewbtns {
+  top: calc(var(--gut) + 64px + var(--safe-t));
+}
+@media (max-width: 720px) {
+  .viewbtns {
+    top: auto;
+    bottom: calc(var(--gut) + 206px + var(--safe-b));
+    gap: 5px;
+  }
+  .vb {
+    width: 52px;
+    min-height: 48px;
+    font-size: 9.5px;
+  }
+  body.slope-mode .viewbtns {
+    top: calc(var(--gut) + 56px + var(--safe-t));
+    bottom: auto;
+  }
 }

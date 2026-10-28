@@ -483,7 +483,7 @@ function editSlope() {
 
 // Build a (new) slope. keep: what you built stays where it was (tiles are counted from the
 // top line, and stay centred if the width changes), and so does the start gate.
-function newWorld(design, { keep = false, changed = true } = {}) {
+function newWorld(design, { keep = false, changed = true, quiet = false } = {}) {
   if (keep && !changed) return;
   if (riding) exitRide();
   endRun();
@@ -525,7 +525,18 @@ function newWorld(design, { keep = false, changed = true } = {}) {
   setTool('select');
   const st = designStats(state.design);
   const len = st.length >= 1000 ? `${(st.length / 1000).toFixed(2).replace(/\.?0+$/, '')} km` : `${st.length} m`;
-  ui.toast(`${len} long, ${Math.round(st.drop)} m down, ${widthOf(state.design)} m wide. ${keep ? 'Your tiles are where they were.' : 'Select tiles and shape them, pick Start to put the gate anywhere, then Ride.'}`);
+  if (!quiet) ui.toast(`${len} long, ${Math.round(st.drop)} m down, ${widthOf(state.design)} m wide. ${keep ? 'Your tiles are where they were.' : 'Select tiles and shape them, pick Start to put the gate anywhere, then Ride.'}`);
+}
+
+// Put a whole world in place at once: a slope, its tiles and the start gate (the tutorial,
+// tests). start: { x, u } (u metres below the top line) or null for the default.
+function applyWorld({ design, tiles = [], start = null }) {
+  newWorld(design, { quiet: true });
+  state.tiles = trimTiles(tiles, cols(), rows());
+  if (start) state.start = clampStart({ x: start.x, z: hf.startZ + start.u });
+  generate();
+  refreshScene();
+  scheduleSave();
 }
 
 // ---------- the start gate ----------
@@ -1717,6 +1728,7 @@ window.__highrise = {
     return selection.size;
   },
   clearSelection: () => clearSelection(),
+  applyWorld: (w) => applyWorld(w),
   get selection() {
     return selList();
   },

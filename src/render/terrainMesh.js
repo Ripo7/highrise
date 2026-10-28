@@ -2,6 +2,8 @@ import * as THREE from 'three';
 import { THEME, SUN_DIR, CUT_SHADOW, CUT_LIT } from './theme.js';
 import { lightUniforms, shadowVertPars, shadowVert, shadowFragPars } from './toon.js';
 
+const toHalf = THREE.DataUtils.toHalfFloat;
+
 // Terrain rendered as a diorama slab: the sculptable top surface plus four
 // stratified side walls of constant thickness, so the long piste reads as an object
 // you own (a tilted slab rather than a 500 m tall block).
@@ -69,6 +71,8 @@ const frag = /* glsl */ `
   uniform vec2 uLocalSize;
   uniform sampler2D uSurf;
   uniform vec2 uSurfSize;
+  uniform sampler2D uNormTex; // the snow's normals (x, z packed in r, g), filtered
+  uniform float uNormOn;
   uniform float uCell;
   uniform vec3 uIceLit;
   uniform vec3 uIceShadow;
@@ -177,7 +181,15 @@ const frag = /* glsl */ `
   }
 
   void main() {
+    // the light's normal comes from a texture of the grid's normals, filtered square by
+    // square: the mesh's triangles all split one way, so their own normals would draw every
+    // sharp change of light (a terrace's edge, a kicker's lip) as a comb of tiny teeth
     vec3 n = normalize(vNormal);
+    if (uNormOn > 0.5) {
+      vec4 nt = texture2D(uNormTex, ((vWorld.xz + uHalf) / uCell + 0.5) / uSurfSize);
+      vec2 nxz = nt.rg;
+      n = normalize(vec3(nxz.x, sqrt(max(0.0, 1.0 - dot(nxz, nxz))), nxz.y));
+    }
     float slope = 1.0 - n.y; // 0 flat .. 1 vertical
 
     // Cartoon light: three flat bands (0 shadow, 1 mid, 2 lit).
@@ -187,15 +199,20 @@ const frag = /* glsl */ `
     // on their sunny side and one down on the other.
     vec3 L = normalize(uSunDir);
     vec2 uvc = clamp((vWorld.xz + uHalf) / (2.0 * uHalf), 0.0, 1.0);
-    vec2 du = vec2(8.0 / (2.0 * uHalf.x), 0.0);
-    vec2 dv = vec2(0.0, 8.0 / (2.0 * uHalf.y));
-    float gx = (localMeanAt(uvc + du) - localMeanAt(uvc - du)) / 16.0;
-    float gz = (localMeanAt(uvc + dv) - localMeanAt(uvc - dv)) / 16.0;
+    // differences a texel and a half apart: the bilinear samples then give a slope that
+    // changes smoothly from texel to texel (closer, it would jump at each texel's edge and
+    // the broad band would show the texture's squares as blocks of light)
+    vec2 du = vec2(1.5 / uLocalSize.x, 0.0);
+    vec2 dv = vec2(0.0, 1.5 / uLocalSize.y);
+    float gx = (localMeanAt(uvc + du) - localMeanAt(uvc - du)) / (2.0 * du.x * 2.0 * uHalf.x);
+    float gz = (localMeanAt(uvc + dv) - localMeanAt(uvc - dv)) / (2.0 * dv.y * 2.0 * uHalf.y);
     vec3 ns = normalize(vec3(-gx, 1.0, -gz));
     float ndlS = dot(ns, L);
     float ndl = dot(n, L);
-    float aaS = fwidth(ndlS) + 0.002;
-    float aa = fwidth(ndl) + 0.003;
+    // the bands' edges: crisp, but a little soft, so where the slope bends hard they read as
+    // a curve and never as the mesh's triangles
+    float aaS = fwidth(ndlS) + 0.006;
+    float aa = fwidth(ndl) + 0.012;
     float level = smoothstep(uCutShadow - aaS, uCutShadow + aaS, ndlS) + smoothstep(uCutLit - aaS, uCutLit + aaS, ndlS);
     float rel = ndl - ndlS;
     level += smoothstep(0.17 - aa, 0.17 + aa, rel) - smoothstep(0.17 - aa, 0.17 + aa, -rel);
@@ -217,8 +234,12 @@ const frag = /* glsl */ `
     float powder = sf.a;
     float camDist = length(cameraPosition - vWorld);
     if (uRelief < 0.5) {
-      // fresh powder is a touch brighter and softer
-      snow = mix(snow, min(vec3(1.0), snow * 1.035 + 0.012), powder);
+      // fresh powder: soft pillows, their hollows a little cool and shaded, their tops
+      // bright, so untracked snow reads apart from packed snow even in full sun
+      float pil = vnoise(vWorld.xz * 0.28) * 0.65 + vnoise(vWorld.xz * 0.9 + 7.0) * 0.35;
+      vec3 fluff = mix(snow, mix(uSnowMid, uSnowShadow, 0.25), smoothstep(0.55, 0.15, pil) * 0.55);
+      fluff = mix(fluff, vec3(1.0), smoothstep(0.6, 0.9, pil) * 0.6);
+      snow = mix(snow, fluff, powder);
       // groomer passes: wide bands across the piste, a hair lighter and darker
       float band = step(0.5, fract((vWorld.x + 0.8 * sin(vWorld.z * 0.013)) / 4.4));
       snow *= 1.0 + groomed * (band - 0.5) * 0.026 * (1.0 - smoothstep(250.0, 700.0, camDist));
@@ -228,11 +249,14 @@ const frag = /* glsl */ `
       snow *= 1.0 - groomed * cord * 0.06;
       // ice: pale blue, streaked, with a sharp glint of sun
       vec3 iceCol = level < 1.0 ? mix(uIceShadow, mix(uIceShadow, uIceLit, 0.5), level) : mix(mix(uIceShadow, uIceLit, 0.5), uIceLit, level - 1.0);
-      float streak = vnoise(vec2(vWorld.x * 0.4, vWorld.z * 3.0));
-      iceCol *= 0.94 + 0.1 * streak;
+      // scraped streaks down the fall line, and a polished sheen of sky at grazing angles
+      float streak = vnoise(vec2(vWorld.x * 0.45, vWorld.z * 0.08)) * 0.7 + vnoise(vec2(vWorld.x * 1.7, vWorld.z * 0.3)) * 0.3;
+      iceCol *= 0.9 + 0.16 * streak;
       vec3 vd = normalize(cameraPosition - vWorld);
+      float fres = pow(1.0 - max(0.0, dot(n, vd)), 3.0);
+      iceCol = mix(iceCol, vec3(0.62, 0.72, 0.96), fres * 0.35);
       float glint = pow(max(0.0, dot(reflect(-L, n), vd)), 60.0) * smoothstep(0.35, 0.65, sunShadow());
-      snow = mix(snow, iceCol + glint * 0.5, ice * 0.9);
+      snow = mix(snow, iceCol + glint * 0.6, smoothstep(0.05, 0.6, ice));
     }
     // rock faces: layered strata, a little broken up, darker in the cracks
     float strata = vWorld.y / 2.4 + 0.6 * vnoise(vWorld.xz * 0.12) + 0.25 * vnoise(vWorld.xz * 0.5);
@@ -505,10 +529,12 @@ export class TerrainMesh {
       uHalf: { value: new THREE.Vector2(hf.halfX, hf.halfZ) },
       uLocalSize: { value: new THREE.Vector2(1, 1) },
       uSurf: { value: null },
+      uNormTex: { value: null },
+      uNormOn: { value: 1 },
       uSurfSize: { value: new THREE.Vector2(hf.nx, hf.nz) },
       uCell: { value: hf.cell },
-      uIceLit: { value: c('#eef4ff') },
-      uIceShadow: { value: c('#9fb6f0') },
+      uIceLit: { value: c('#d6ebff') },
+      uIceShadow: { value: c('#86a8ea') },
       uTiles: { value: null },
       uTileInfo: { value: new THREE.Vector4(-240, hf.startZ, 6, 1) },
       uTileCols: { value: 1 },
@@ -526,6 +552,14 @@ export class TerrainMesh {
     this.surfTex.generateMipmaps = false;
     this.uniforms.uSurf.value = this.surfTex;
     this.refreshSurface();
+    // the normals as a filterable texture: x and z as half floats (8 bits would band the
+    // light into fine stripes where it changes slowly)
+    this.normData = new Uint16Array(n * 2);
+    this.normTex = new THREE.DataTexture(this.normData, hf.nx, hf.nz, THREE.RGFormat, THREE.HalfFloatType);
+    this.normTex.magFilter = THREE.LinearFilter;
+    this.normTex.minFilter = THREE.LinearFilter;
+    this.normTex.generateMipmaps = false;
+    this.uniforms.uNormTex.value = this.normTex;
     // blurred copy of the terrain at 1/6 resolution: the "surroundings" the relief view
     // compares each point against
     this.ds = 6;
@@ -684,6 +718,7 @@ export class TerrainMesh {
     this.sides[0]?.material.dispose();
     this.localTex.dispose();
     this.surfTex.dispose();
+    this.normTex?.dispose();
     this.tileTex?.dispose();
   }
 
@@ -720,6 +755,7 @@ export class TerrainMesh {
     const res = hf.nx;
     const pos = this.geo.attributes.position.array;
     const nor = this.geo.attributes.normal.array;
+    const nd = this.normData;
     const i0 = Math.max(0, rect.i0 - 1);
     const i1 = Math.min(hf.nx - 1, rect.i1 + 1);
     const j0 = Math.max(0, rect.j0 - 1);
@@ -729,14 +765,23 @@ export class TerrainMesh {
       for (let i = i0; i <= i1; i++) {
         const k = j * res + i;
         pos[k * 3 + 1] = hf.h[k];
-        const dx = (hf.heightAtCell(i + 1, j) - hf.heightAtCell(i - 1, j)) / c2;
-        const dz = (hf.heightAtCell(i, j + 1) - hf.heightAtCell(i, j - 1)) / c2;
+        // Sobel gradient: the neighbours either side count too, so the light changes along
+        // smooth curves across the triangles (a plain central difference lets the toon bands
+        // follow the mesh in stair steps where the slope bends sharply)
+        const a = (di, dj) => hf.heightAtCell(i + di, j + dj);
+        const dx = (a(1, -1) - a(-1, -1) + 2 * (a(1, 0) - a(-1, 0)) + a(1, 1) - a(-1, 1)) / (4 * c2);
+        const dz = (a(-1, 1) - a(-1, -1) + 2 * (a(0, 1) - a(0, -1)) + a(1, 1) - a(1, -1)) / (4 * c2);
         const len = Math.hypot(dx, 1, dz);
         nor[k * 3] = -dx / len;
         nor[k * 3 + 1] = 1 / len;
         nor[k * 3 + 2] = -dz / len;
+        if (nd) {
+          nd[k * 2] = toHalf(-dx / len);
+          nd[k * 2 + 1] = toHalf(-dz / len);
+        }
       }
     }
+    if (nd) this.normTex.needsUpdate = true;
     this.localDirty = true;
     this.version = (this.version || 0) + 1;
     // upload only the touched rows: a full-mesh upload every frame stutters on phones. The

@@ -571,3 +571,89 @@ test('ice is fast and the edges barely hold', () => {
   const tb = run(packed, null, 0.8);
   assert.ok(Math.abs(ta.x) < Math.abs(tb.x) * 0.8, `turns wider on ice (${ta.x.toFixed(1)} vs ${tb.x.toFixed(1)} m)`);
 });
+
+// ---------- merging and folds ----------
+
+// the steepest pitch (degrees) in a box around world (x, z)
+const steepest = (hf, x0, z0, r) => {
+  let w = 0;
+  const c = hf.cell;
+  for (let z = z0 - r; z < z0 + r; z += c) {
+    for (let x = x0 - r; x < x0 + r; x += c) {
+      const g = Math.hypot(hf.heightAt(x + c, z) - hf.heightAt(x - c, z), hf.heightAt(x, z + c) - hf.heightAt(x, z - c)) / (2 * c);
+      w = Math.max(w, (Math.atan(g) * 180) / Math.PI);
+    }
+  }
+  return w;
+};
+
+test('a terrace is cut and filled with banks the snow can hold, never a cliff', () => {
+  const { hf, surf, base } = fresh('small', 'gentle');
+  const t = tileAt(hf, 0, 300);
+  const c = tileCenter(hf, t.i, t.j);
+  buildWorld(hf, surf, base, { tiles: actOn([], brushTiles(t.i, t.j, 3), 'flatten') });
+  assert.ok(steepest(hf, c.x, c.z, 45) < 33, `banks of ${steepest(hf, c.x, c.z, 45).toFixed(1)}° on a 15° slope`);
+  assert.ok(Math.abs(hf.heightAt(c.x, c.z - 6) - hf.heightAt(c.x, c.z + 6)) < 0.05, 'level in the middle');
+  // and far from it the slope is untouched
+  const nat = natural(hf, base);
+  assert.ok(Math.abs(hf.heightAt(c.x + 120, c.z) - nat.heightAt(c.x + 120, c.z)) < 1e-6);
+  // on a steep slope the banks stay just steeper than the slope, not a wall
+  const steep = fresh('small', 'steep');
+  const s = tileAt(steep.hf, 0, 300);
+  const sc = tileCenter(steep.hf, s.i, s.j);
+  buildWorld(steep.hf, steep.surf, steep.base, { tiles: actOn([], brushTiles(s.i, s.j, 3), 'flatten') });
+  assert.ok(steepest(steep.hf, sc.x, sc.z, 60) < 42, `banks of ${steepest(steep.hf, sc.x, sc.z, 60).toFixed(1)}° on a 29° slope`);
+});
+
+test('a big raise or dig spreads its flanks: a hill and a bowl, not a tower and a pit', () => {
+  const { hf, surf, base } = fresh('small', 'medium');
+  const t = tileAt(hf, 0, 300);
+  const c = tileCenter(hf, t.i, t.j);
+  const up = [];
+  for (let k = 0; k < 10; k++) up.push('raise');
+  buildWorld(hf, surf, base, { tiles: actOn([], brushTiles(t.i, t.j, 2), ...up) });
+  const nat = natural(hf, base);
+  assert.ok(hf.heightAt(c.x, c.z) - nat.heightAt(c.x, c.z) > 9.5, 'a big hill (15 m asked, on just 7 tiles)');
+  assert.ok(steepest(hf, c.x, c.z, 40) < 47, `flanks of ${steepest(hf, c.x, c.z, 40).toFixed(1)}°`);
+  buildWorld(hf, surf, base, { tiles: actOn([], brushTiles(t.i, t.j, 2), ...up.map(() => 'lower')) });
+  assert.ok(steepest(hf, c.x, c.z, 40) < 47, 'a bowl too');
+});
+
+test('jumps made one after the other side by side merge into one wide kicker', () => {
+  const { hf, surf, base } = fresh('small', 'medium');
+  const nat = natural(hf, base);
+  const t = tileAt(hf, 0, 250);
+  const a = tileCenter(hf, t.i, t.j);
+  const b = tileCenter(hf, t.i + 1, t.j);
+  const lipAcross = () => {
+    let bz = 0;
+    let best = 0;
+    for (let dz = -6; dz < 10; dz += 0.25) {
+      const v = hf.heightAt((a.x + b.x) / 2, a.z + dz) - nat.heightAt((a.x + b.x) / 2, a.z + dz);
+      if (v > best) {
+        best = v;
+        bz = dz;
+      }
+    }
+    const hs = [];
+    for (let x = a.x - 2; x <= b.x + 2; x += 0.5) hs.push(hf.heightAt(x, a.z + bz) - nat.heightAt(x, a.z + bz));
+    return [Math.min(...hs), Math.max(...hs)];
+  };
+  buildWorld(hf, surf, base, { tiles: applyAction(applyAction([], [[t.i, t.j]], 'jump', { dir: 0 }), [[t.i + 1, t.j]], 'jump', { dir: 0 }) });
+  const [lo, hi] = lipAcross();
+  assert.ok(hi - lo < 0.1, `an even lip (${lo.toFixed(2)} to ${hi.toFixed(2)} m), no double-height seam`);
+});
+
+test('folds between sections ride well: a sharp break is a lip, a dip absorbs, no wipeout', () => {
+  for (const secs of [[[10, 150], [40, 150], [10, 150]], [[30, 200], [5, 60], [30, 150]], [[25, 150], [-10, 40], [25, 200]]]) {
+    const hf = new Heightfield();
+    const surf = new SurfaceMap(hf);
+    buildSlope(hf, surf, { width: 'narrow', sections: secs.map(([slope, length]) => ({ slope, length })) });
+    const sk = new Skier(hf, { x: 0, z: hf.startZ + 5, dir: [0, 1] });
+    sk.props = new PropSet(hf);
+    sk.surface = surf;
+    for (let k = 0; k < 240 * 80 && sk.status === 'running'; k++) sk.step(1 / 240);
+    assert.equal(sk.status, 'finished', secs.join(' → '));
+    assert.equal(sk.wipeouts, 0, `${secs.join(' → ')}: no wipeout`);
+  }
+});

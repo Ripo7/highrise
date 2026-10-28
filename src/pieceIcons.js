@@ -12,6 +12,7 @@ export const ACTION_ICONS = {
   jump: '<path d="M2 20h6c4 0 7-3 9-8v8h5"/><path d="M18 8c1.5-2 3-2.5 4-2" stroke-dasharray="2 2"/>',
   drop: '<path d="M2 8h9v12h11"/><path d="M13 6c3 0 5 3 6 8" stroke-dasharray="2 2.2"/>',
   rocks: '<path d="M2 7h9v13h11"/><path d="M11 9l-2 3 2 2-1 3"/><path d="M5 7l1-2 2 1"/>',
+  gate: '<path d="M7 21V3M17 21V3"/><path d="M7 3H3v6h4M17 3h4v6h-4" fill="currentColor" fill-opacity=".25"/><path d="M9 19h6" stroke-dasharray="2 2"/>',
   // nature
   trees: '<path d="M7 4 3 11h2.5L2 16h10L8.5 11H11z"/><path d="M16 7l-3.5 6h2L11 18h10l-3.5-5h2z"/><path d="M7 16v3M16 18v3"/>',
   clear: '<path d="M5 6 2.5 11H4l-2 4h7l-2-4h1.5z"/><path d="M19 6l-2.5 5H18l-2 4h7l-2-4h1.5z"/><path d="M5 15v3M19 15v3"/><ellipse cx="12" cy="18" rx="4" ry="1.6"/>',

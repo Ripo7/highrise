@@ -29,6 +29,8 @@ import { GhostRider, packPath } from './render/ghost.js';
 import { Sound } from './audio.js';
 import { t as tx, num, applyDom, onLang } from './i18n.js';
 import { createTutorial } from './tutorial.js';
+import { CourseRun, courseKey } from './core/course.js';
+import { GateMeshes } from './render/gates.js';
 import { RideControls } from './rideControls.js';
 import { createUI } from './ui.js';
 import { createBuildBar } from './buildBar.js';
@@ -40,8 +42,8 @@ import { createDebugOverlay } from './debugOverlay.js';
 // ---------- state ----------
 const COARSE = window.matchMedia('(pointer: coarse)').matches;
 let altHeld = false; // Alt/Option held: left button orbits
-const SAVE_KEY = 'highrise.ski.v3'; // v10: the slope you designed, the tiles and their actions, the start gate
-const INTRO_KEY = 'highrise.intro.v7';
+const SAVE_KEY = 'highrise.ski.v3'; // v11: the slope you designed, the tiles and their actions (gates too), the start gate, the records
+const INTRO_KEY = 'highrise.intro.v8'; // v8: gates
 const TRACKS_KEY = 'highrise.tracks.v1';
 const BACKUP_KEY = 'highrise.ski.backup';
 let loadNote = null; // told to the player once the UI is up
@@ -66,9 +68,14 @@ const state = {
   contours: false,
   relief: false,
   muted: false,
-  best: null, // { score, time }
-  bestPath: null, // packed path of the best run, for the ghost
+  best: null, // the best score of a valid run: { score, time }
+  bestPath: null, // packed path of the best-score run, for the ghost
+  bestTime: null, // the fastest valid run: { time, score, splits: [time at each gate] }
+  bestTimePath: null, // its path: the ghost when there are gates to race through
+  course: '', // the course the records were set on (courseKey of its gates)
 };
+let gates = []; // the course: the gates on the tiles (core/course.js)
+let booted = false; // the UI is up (a course change can say so)
 let base = null; // the bare slope before any tile
 // the selected tiles (keys "i,j"; not saved, not undone) and the copied ones
 const selection = new Set();
@@ -93,7 +100,25 @@ function makeSlope(design) {
 function generate(tiles = state.tiles) {
   const w = buildWorld(hf, surf, base, { tiles, start: state.start });
   props.set(w.props);
+  gates = w.gates;
+  const key = courseKey(gates);
+  if (key !== state.course) {
+    // another course (gates added, moved or taken away): its records start again
+    const had = state.best || state.bestTime;
+    state.course = key;
+    state.best = null;
+    state.bestPath = null;
+    state.bestTime = null;
+    state.bestTimePath = null;
+    if (had && booted) {
+      ui.setBest(null, null);
+      ui.toast(tx('toast.courseChanged'));
+    }
+  }
 }
+// the ghost to race: the fastest run when there are gates, else the best score
+const ghostPath = () => (courseTotal() && state.bestTimePath ? state.bestTimePath : state.bestPath);
+const courseTotal = () => gates.filter((g) => !g.behind).length;
 
 const cols = () => gridCols(hf);
 const rows = () => gridRows(hf);
@@ -239,7 +264,7 @@ function writeTiles() {
   for (const t of state.tiles) {
     if (!inside(t.i, t.j)) continue;
     const o = (t.j * nc + t.i) * 4;
-    const cat = t.feat ? 3 : t.lift || t.pitch || t.flat || t.smooth ? 1 : 2;
+    const cat = t.feat || t.gate ? 3 : t.lift || t.pitch || t.flat || t.smooth ? 1 : 2;
     const turn = t.feat === 'jump' || t.feat === 'drop' ? (Math.round(t.dir / 7.5) % 48) + 1 : 0;
     d[o + 1] = 255;
     d[o + 3] = cat + 4 * turn;
@@ -260,6 +285,8 @@ function setGhost(tiles = []) {
 
 const propMeshes = new PropMeshes(props);
 scene.add(propMeshes.group);
+const gateMeshes = new GateMeshes(hf);
+scene.add(gateMeshes.group);
 // ski tracks, kept from run to run
 const tracks = new Tracks(hf);
 scene.add(tracks.mesh);
@@ -396,6 +423,7 @@ const ui = createUI({
   },
 });
 window.__highriseToast = (msg, kind) => ui.toast(msg, kind);
+booted = true;
 
 const bar = createBuildBar({
   onTool: (t) => {
@@ -431,6 +459,21 @@ function restore(snap) {
   refreshScene();
 }
 
+// the gates on screen and in the HUD: how many there are, and during a run (or while it
+// waits) which you've been through and which you missed
+let gateShown = '';
+function showGates() {
+  // the run on the course as it is (one that finished stays on show until you change it)
+  const run = skier && skier.course && courseKey(skier.course.gates) === state.course ? skier.course : null;
+  const total = run ? run.total : courseTotal();
+  const sig = run ? `${run.passed.join()}|${run.missed.join()}` : `-${total}`;
+  if (sig === gateShown) return;
+  gateShown = sig;
+  const missed = !!run && run.missed.some((m, k) => m && !run.passed[k]);
+  ui.setGates(total ? { count: run ? run.count : 0, total, missed, running: !!run } : null);
+  gateMeshes.show(run ? run.gates.map((g, k) => (run.passed[k] ? 'passed' : run.missed[k] ? 'missed' : null)) : null);
+}
+
 // what's on screen follows the model: the snow (only the cells that changed), the snow
 // texture, trees, start and finish
 function refreshScene({ redrape = true } = {}) {
@@ -438,6 +481,9 @@ function refreshScene({ redrape = true } = {}) {
   if (rect) terrain.update(rect);
   terrain.refreshSurface();
   propMeshes.rebuild();
+  gateMeshes.set(gates);
+  gateShown = '';
+  showGates();
   showEnds();
   if (redrape && rect) tracks.redrape();
   writeTiles();
@@ -517,13 +563,15 @@ function newWorld(design, { keep = false, changed = true, quiet = false } = {}) 
   // a different slope: a different run (the old best and its ghost don't fit any more)
   state.best = null;
   state.bestPath = null;
+  state.bestTime = null;
+  state.bestTimePath = null;
   history.clear();
   rebuildTerrain();
   propMeshes.rebuild();
   tracks.clear();
   saveTracks();
   trail.clear();
-  ui.setBest(null);
+  ui.setBest(null, null);
   ui.setStatus('idle');
   ui.clearStats();
   refreshHistoryButtons();
@@ -566,6 +614,8 @@ const tutorial = createTutorial({
       start: { x: state.start.x, u: state.start.z - hf.startZ },
       best: state.best,
       bestPath: state.bestPath,
+      bestTime: state.bestTime,
+      bestTimePath: state.bestTimePath,
       brush: state.brush,
     };
     tutOn = true;
@@ -580,7 +630,9 @@ const tutorial = createTutorial({
       applyWorld(s);
       state.best = s.best;
       state.bestPath = s.bestPath;
-      ui.setBest(state.best);
+      state.bestTime = s.bestTime;
+      state.bestTimePath = s.bestTimePath;
+      ui.setBest(state.best, state.bestTime);
       state.brush = s.brush;
       bar.setSize(s.brush);
       tracks.clear();
@@ -728,6 +780,7 @@ const ACT_DONE = {
   jump: (d) => tx(d.jump ? 'done.jump' : 'done.jumpOff'),
   drop: (d) => tx(d.drop ? 'done.drop' : 'done.dropOff'),
   rocks: (d) => tx(d.rocks ? 'done.rocks' : 'done.rocksOff'),
+  gate: (d) => tx(d.gate ? 'done.gate' : 'done.gateOff'),
   trees: (d) => tx(`done.trees${d.trees}`),
   clear: (d) => tx(d.clear ? 'done.clear' : 'done.clearOff'),
   powder: (d) => tx(d.powder ? 'done.powder' : 'done.packed'),
@@ -1010,13 +1063,16 @@ function scheduleSave() {
       localStorage.setItem(
         SAVE_KEY,
         JSON.stringify({
-          v: 10,
+          v: 11,
           design: state.design,
           tiles: packTiles(state.tiles),
           start: { x: r1(state.start.x), u: r1(state.start.z - hf.startZ) },
           brush: state.brush,
           best: state.best,
           bestPath: state.bestPath,
+          bestTime: state.bestTime,
+          bestTimePath: state.bestTimePath,
+          course: state.course,
           rideCam: state.rideCam,
           relief: state.relief,
           contours: state.contours,
@@ -1041,7 +1097,7 @@ function loadSave() {
     raw = localStorage.getItem(SAVE_KEY);
     if (!raw) return false;
     const data = JSON.parse(raw);
-    if (![7, 8, 9, 10].includes(data.v)) {
+    if (![7, 8, 9, 10, 11].includes(data.v)) {
       backupSave(raw);
       loadNote = 'toast.oldRun';
       return false;
@@ -1052,9 +1108,11 @@ function loadSave() {
     if (wild && !(data.mountain && data.mountain.size && data.mountain.steep)) throw new Error('no mountain in save');
     if (!wild && !(data.design && Array.isArray(data.design.sections))) throw new Error('no slope in save');
     makeSlope(wild ? designFromWild(data.mountain) : normalizeDesign(data.design));
-    // v9: tiles and their actions; v8 painted pieces on the hexagons; v7 on 10 m squares
+    // v11: tiles and their actions, gates too; v9 and v10 the same without gates; v8
+    // painted pieces on the hexagons; v7 on 10 m squares
     let tiles;
-    if (data.v === 9) tiles = unpackTiles(data.tiles);
+    if (data.v >= 11) tiles = unpackTiles(data.tiles);
+    else if (data.v >= 9) tiles = unpackTiles(data.tiles, 12);
     else {
       const pieces = unpackPieces(data.tiles);
       tiles = fromPieces(data.v === 7 ? squaresToHexes(pieces, cols(), rows()) : pieces);
@@ -1069,9 +1127,16 @@ function loadSave() {
     state.relief = !!data.relief;
     state.contours = !!data.contours;
     state.muted = !!data.muted;
-    if (data.v >= 10 && data.best && typeof data.best.score === 'number') {
-      state.best = data.best;
-      state.bestPath = Array.isArray(data.bestPath) ? data.bestPath : null;
+    // the records, if they were set on this course
+    if (data.v >= 10 && (data.course || '') === state.course) {
+      if (data.best && typeof data.best.score === 'number') {
+        state.best = data.best;
+        state.bestPath = Array.isArray(data.bestPath) ? data.bestPath : null;
+      }
+      if (data.bestTime && typeof data.bestTime.time === 'number') {
+        state.bestTime = { time: data.bestTime.time, score: data.bestTime.score || 0, splits: Array.isArray(data.bestTime.splits) ? data.bestTime.splits : [] };
+        state.bestTimePath = Array.isArray(data.bestTimePath) ? data.bestTimePath : null;
+      }
     }
     if (data.rideCam === 'helmet' || data.rideCam === 'chase') state.rideCam = data.rideCam;
     if (wild) loadNote = 'toast.fromWild';
@@ -1146,15 +1211,16 @@ function startRun() {
   skier = new Skier(hf, startOf());
   skier.props = props;
   skier.surface = surf;
+  skier.course = new CourseRun(gates);
   tracks.startRun();
-  score = new ScoreKeeper();
+  score = new ScoreKeeper({ splits: state.bestTime?.splits });
   lastEventCount = 0;
   lastFeedCount = 0;
   spray.clear();
   skierMesh.reset();
   skierMesh.visible = true;
   trail.clear();
-  ghostRider.setPath(state.bestPath);
+  ghostRider.setPath(ghostPath());
   tutorial.runStarted();
   lastStatus = 'running';
   ui.setStatus('running');
@@ -1164,6 +1230,7 @@ function startRun() {
   paused = false;
   ui.setPaused(false);
   enterRide();
+  showGates();
   rig.snap = true;
   rig.shake = 0;
   trail.line.visible = false; // behind the chase cam the trail climbs past the lens
@@ -1175,6 +1242,8 @@ function resumeRide() {
   if (moving) endMove(true);
   setGhost();
   skier.resume();
+  // the course may have changed while you built: the gates still there keep their state
+  skier.course = skier.course.carryTo(gates);
   rideControls.reset();
   paused = false;
   ui.setPaused(false);
@@ -1205,6 +1274,7 @@ function endRun() {
   if (skier && skier.status === 'running') skier.status = 'aborted';
   skier = null;
   skierMesh.visible = false;
+  showGates();
 }
 
 function enterRide() {
@@ -1221,6 +1291,7 @@ function enterRide() {
   terrain.uniforms.uContours.value = 0;
   showEnds();
   ui.setRiding(true);
+  gateMeshes.building = false;
   ui.setRideCam(state.rideCam);
   skierMesh.setFirstPerson(state.rideCam === 'helmet');
 }
@@ -1234,6 +1305,7 @@ function exitRide() {
   terrain.uniforms.uContours.value = state.contours ? 1 : 0;
   terrain.uniforms.uTileOn.value = gridShown() ? 1 : 0;
   setGateFade(1);
+  gateMeshes.building = true;
   ui.setRiding(false);
   ui.clearTricks();
   ui.setRush(0);
@@ -1246,6 +1318,7 @@ function exitRide() {
   controls.enabled = true;
   trail.line.visible = true;
   showEnds();
+  showGates();
   // look down on where the skier is, a drone's view of him and the snow ahead: ready to
   // build right there
   const p = skier ? new THREE.Vector3(skier.pos[0], skier.pos[1], skier.pos[2]) : HOME_TARGET.clone();
@@ -1487,18 +1560,32 @@ function onRunEnd(s) {
   paused = false;
   ui.setPaused(false);
   const finished = s.status === 'finished';
-  const isBest = finished && (!state.best || score.total > state.best.score);
+  // a run counts once it's down, through every gate
+  const course = s.course;
+  const valid = finished && (!course || course.complete);
+  const isBest = valid && (!state.best || score.total > state.best.score);
+  const lastBestTime = state.bestTime ? state.bestTime.time : null;
+  const isBestTime = valid && (lastBestTime === null || s.time < lastBestTime);
   if (isBest) {
     state.best = { score: score.total, time: s.time };
     state.bestPath = packPath(s.path);
-    ui.setBest(state.best);
+  }
+  if (isBestTime) {
+    state.bestTime = { time: Math.round(s.time * 100) / 100, score: score.total, splits: course ? course.splits.map((t) => (t === null ? null : Math.round(t * 100) / 100)) : [] };
+    state.bestTimePath = packPath(s.path);
+  }
+  if (isBest || isBestTime) {
+    ui.setBest(state.best, state.bestTime);
     scheduleSave();
   }
   if (finished) sound.finish();
   ui.showResults({
-    eyebrow: finished ? 'res.complete' : s.status === 'stuck' ? 'res.stuck' : 'res.timeout',
+    eyebrow: finished ? (valid ? 'res.complete' : 'res.invalid') : s.status === 'stuck' ? 'res.stuck' : 'res.timeout',
     score: score.total,
     isBest,
+    isBestTime,
+    timeDelta: valid && lastBestTime !== null ? s.time - lastBestTime : null,
+    gates: course && course.total ? { count: course.count, total: course.total, missing: course.missing } : null,
     time: s.time,
     top: s.maxSpeed * 3.6,
     tricks: score.tricks.length,
@@ -1654,6 +1741,7 @@ function rideStep(dt) {
     if (score) score.update(skier, skier.status === 'running' ? dt : 0);
     for (; lastEventCount < skier.events.length; lastEventCount++) onSkierEvent(skier.events[lastEventCount]);
     if (score) drainFeed();
+    showGates();
     tutorial.rideFrame(skier);
     skierMesh.sync(skier, hf, dt);
     trail.setPath(skier.path);
@@ -1799,7 +1887,7 @@ applyDom();
 onLang(() => setTool(state.tool));
 if (!seenIntro) ui.openIntro();
 else if (!hadSave) setTimeout(() => slopeEd.open(null, { cancel: false }), 0);
-ui.setBest(state.best);
+ui.setBest(state.best, state.bestTime);
 if (loadNote) ui.toast(tx(loadNote), 'bad');
 setTool(state.tool);
 refreshScene();
@@ -1856,6 +1944,9 @@ window.__highrise = {
   clearSelection: () => clearSelection(),
   applyWorld: (w) => applyWorld(w),
   tutorial,
+  get gates() {
+    return gates;
+  },
   // select these tiles ([[i, j], ...]), put the start gate at (x, u), paste with the copy's
   // anchor on tile (i, j) (tests)
   selectTiles(list) {

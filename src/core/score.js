@@ -20,9 +20,12 @@ export function speedRate(kmh) {
   return kmh < SPEED_BONUS_KMH ? 0 : 40 + (kmh - SPEED_BONUS_KMH) * 3; // points per second
 }
 
+// Gates of the course (course.js): points for each one, and the time there next to the
+// best run's (its splits)
+export const GATE_POINTS = 150;
+
 // Rails and boxes: points for the distance ground, more for a slide (skis across), a
 // little more on a rail than a box, and switch.
-export const GATE_POINTS = 150;
 export function judgeGrind(ev) {
   const what = ev.box ? 'Box' : 'Rail';
   const move = ev.slide ? 'Slide' : '50-50';
@@ -79,7 +82,10 @@ export function judgeLanding(ev) {
 }
 
 export class ScoreKeeper {
-  constructor() {
+  // splits: the best run's time at each gate (in course order), to compare with
+  constructor({ splits = null } = {}) {
+    this.bestSplits = splits;
+    this.gatePoints = 0;
     this.total = 0;
     this.combo = null; // { points, tricks: [names], timer }
     this.tricks = [];
@@ -146,8 +152,16 @@ export class ScoreKeeper {
   onEvent(ev) {
     if (ev.type === 'gate') {
       this.total += GATE_POINTS;
-      this.gatePoints = (this.gatePoints || 0) + GATE_POINTS;
-      this.feed.push({ kind: 'gate', text: `Gate ${ev.count}/${ev.total}`, sub: '', points: GATE_POINTS, i18n: { text: ['feed.gate', { n: ev.count, total: ev.total }] } });
+      this.gatePoints += GATE_POINTS;
+      const t = Math.round(ev.t * 100) / 100;
+      const best = this.bestSplits?.[ev.n - 1];
+      const d = Number.isFinite(best) ? Math.round((ev.t - best) * 100) / 100 : null;
+      const sub = d === null ? ['feed.split', { t }] : [d <= 0 ? 'feed.splitAhead' : 'feed.splitBehind', { t, d: Math.abs(d) }];
+      this.feed.push({ kind: d !== null && d > 0 ? 'gate-slow' : 'gate', text: `Gate ${ev.count}/${ev.total}`, sub: `${t.toFixed(2)} s`, points: GATE_POINTS, i18n: { text: ['feed.gate', { n: ev.count, total: ev.total }], sub } });
+      return;
+    }
+    if (ev.type === 'miss') {
+      this.feed.push({ kind: 'wipeout', text: `Missed gate ${ev.n}`, sub: 'The run won’t count', points: 0, i18n: { text: ['feed.missed', { n: ev.n }], sub: ['feed.missedSub'] } });
       return;
     }
     if (ev.type === 'land' || ev.type === 'grind') {

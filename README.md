@@ -20,13 +20,21 @@ The slope is bare snow, the same all the way across: no rolls, forest or rock bu
 
 ### Learn: the tutorial
 
-**Twelve short levels**, one action (or two) at a time: Select (and the brush sizes), Raise and lower, Flatten, Smooth, Steepen and ease, Jump (with the start gate, and a second in the air), Drop, Rocks, Trees and clearings, Powder and ice, Copy / paste / rotate, Erase. Each level is a small slope of its own; its card (top left, or under the scoreboard on a phone) lists the steps, the tiles to work on are **marked on the snow** (a pink outline), and the tab and the button to press pulse in the bar. A step is ticked as soon as it's done, including the ones you ride. Restart, skip or pick any level from the list; progress is kept.
+**Thirteen short levels**, one action (or two) at a time: Select (and the brush sizes), Raise and lower, Flatten, Smooth, Steepen and ease, Jump (with the start gate, and a second in the air), Drop, Rocks, Gates (and a run through them), Trees and clearings, Powder and ice, Copy / paste / rotate, Erase. Each level is a small slope of its own; its card (top left, or under the scoreboard on a phone) lists the steps, the tiles to work on are **marked on the snow** (a pink outline), and the tab and the button to press pulse in the bar. A step is ticked as soon as it's done, including the ones you ride. Restart, skip or pick any level from the list; progress is kept.
 
 Start it from the welcome card or the ••• menu (**Tutorial**). Your own slope is put aside meanwhile (nothing is saved during the tutorial) and comes back as it was when you leave (✕).
 
 ### English and French
 
 The whole game is in **English and French** (`src/i18n.js`, `src/tutorialText.js`): it follows the browser's language, and the ••• menu switches (**Français** / **English**), remembered in the browser. Numbers are written the French way too (1,5 m).
+
+### Set a course: gates, best time, best score
+
+Put **gates** on the tiles (Features ▸ **Gate**): the tiles of one tap make one gate, two poles across the fall line as far apart as the tiles are wide (one tile: about 9 m; select a row for a wider one). They're numbered down the mountain, red and blue in turn like a slalom, with their number floating over them while you build; gates above the start gate don't count. Tap Gate again on a gate to take it away; Erase, Copy / Paste and Undo know them too, and trees keep out of them.
+
+**A run counts only through every gate**: between the poles, going down (flying over the line counts). Ride past one outside its poles and the feed says *Missed gate 3*: the run goes on, but it won't count. The scoreboard shows the gates done (`2/4`, red once one is missed), each gate gives points and its **split time**, against your fastest run's (`12.4 s · −0.38 s`).
+
+Valid runs set two records: the **best score** and the **best time** (to the hundredth), both in the scoreboard and on the results card (*New best time*, the time against the best, the gates and the ones missed). With gates, the ghost is your fastest run, to race. A different course (a gate added, moved or taken away) starts its records again; building the snow around the gates doesn't.
 
 ### Start anywhere, pause, ride on
 
@@ -50,6 +58,7 @@ Then act on the selection. Actions stay on the tiles, so they stack (tap again f
 | Features | **Jump** | A kicker facing down the fall line: a curved ramp up to a lip at about 24°, and the snow falling away behind it. Its size comes from the selection: one tile is a 1.6 m kicker, three in a line one of 4.5 m. A chevron on the tiles shows the way it faces. |
 | | **Drop** | A sharp step to drop off (2 to 5 m), a shelf above it and a landing below. |
 | | **Rocks** | A band of bare rock across the slope: a cliff face and a run-out. |
+| | **Gate** | A gate of the course (see above): one per tap, as wide as the tiles, on top of anything else (a gate on a jump: jump through it). |
 | Nature | **Trees** | Plants pines, sparse, a wood, then dense (three taps). |
 | | **Clear** | No trees at all here, the natural forest included. |
 | | **Powder** / **Ice** | Deep, slow, soft snow, or hard, fast ice where the edges barely hold. Tap again for packed snow. |
@@ -97,7 +106,7 @@ Hold to load a jump (the ring fills) and release at a lip (a kicker, a raised cr
 
 **Speed bonus:** above 100 km/h a speed streak builds (40 points a second at 100 km/h, +3 per extra km/h: about 170/s at 145 km/h). It's banked once you've been back under 100 for 0.8 s, or at the finish, and lost on a wipeout. Tricks landed within 2.6 s of each other chain into a combo (×1.5, ×2, … up to ×5). A see-through ghost replays your best run.
 
-Your slope, tiles, start gate, best score, ghost and ski tracks autosave in the browser. Saves from the wild mountains become sections of about the same length, width and steepness, with their tiles kept (and painted pieces from before the tile actions become the matching actions: a bump raised 3 m, a flat eased all the way, a wall steepened, forest planted, powder kept). Saves from before the wild mountains are kept aside, untouched, and you start on a new slope.
+Your slope, tiles (gates included), start gate, best score and best time, ghost and ski tracks autosave in the browser (save v11; v9 and v10 saves load with their tiles). Saves from the wild mountains become sections of about the same length, width and steepness, with their tiles kept (and painted pieces from before the tile actions become the matching actions: a bump raised 3 m, a flat eased all the way, a wall steepened, forest planted, powder kept). Saves from before the wild mountains are kept aside, untouched, and you start on a new slope.
 
 ## How the mountain is built
 
@@ -105,7 +114,8 @@ Your slope, tiles, start gate, best score, ghost and ski tracks autosave in the 
 - `src/core/hex.js` is the grid: pointy-top hexagons in rows across the slope (odd rows shifted half a tile), which tile a point is in, a tile's centre and corners, brushes (1, 7, 19 tiles) and lines of tiles (a fast drag leaves no gaps).
 - `src/core/tiles.js` is what's on the tiles: a record per changed tile (how far raised, how steepened, its flatten group, how smoothed, a jump or drop with its facing and group, trees, a clearing, powder or ice) and the actions as pure functions on them, with copy and paste in axial coordinates (so a shape keeps its form on any row) and rotation.
 - `src/core/terrain.js` turns the tiles into snow, in order on the bare slope: steepen / ease and rock bands change the slope along the fall line, column by column, then ease back to the mountain below; each flatten group is levelled to its own average; raise / lower adds a blurred field of the lifts; smooth blends towards a blurred copy of the snow; each jump or drop group is shaped along its facing (its length sets its size, its width comes from the tiles); powder adds pillows. Every field is a mask of tiles and three box blurs (a near-gaussian).
-- `src/core/world.js` puts it together on every action: base, tiles, then the snow (packed / powder / ice / rock in `src/core/surface.js`, kickers kept snowy) and the trees and boulders, kept off the rock, the jumps and the drops, and clear of the start gate. A rebuild takes a few milliseconds.
+- `src/core/course.js` is the course: the gates from the tiles (where, how wide, facing down the fall line, numbered down the mountain), and a run through them (between the poles or a miss, the splits).
+- `src/core/world.js` puts it together on every action: base, tiles, then the snow (packed / powder / ice / rock in `src/core/surface.js`, kickers kept snowy) and the trees and boulders, kept off the rock, the jumps and the drops, and clear of the start gate and the gates. A rebuild takes a few milliseconds.
 - The hexagon grid, the tinted tiles, the selection outline, the brush or paste preview, the jump chevrons, the start ring and the finish line are drawn by the terrain shader (`src/render/terrainMesh.js`); `src/buildBar.js` is the bar at the bottom.
 
 ## Trees and rocks
@@ -132,9 +142,9 @@ Hand it to a few people. Do they say "one more tweak" and keep going? If not, fi
 ```bash
 npm install
 npm run dev      # local dev server
-npm test         # physics, scoring, slope design, the hexagon grid, tile actions and jumps, the translation, the tutorial levels (Node, no browser needed)
+npm test         # physics, scoring, slope design, the hexagon grid, tile actions and jumps, gates and courses, the translation, the tutorial levels (Node, no browser needed)
 npm run build    # production build into dist/
-npm run smoke    # browser smoke test on the build: design a slope, move the start, select tiles, raise, undo, a jump, rotate, copy and paste, edit the slope keeping the tiles, ride, pause and act, ride on, start again, switch to French, play a tutorial level and leave it (needs Chromium: npx playwright install chromium)
+npm run smoke    # browser smoke test on the build: design a slope, move the start, select tiles, raise, undo, a jump, rotate, copy and paste, edit the slope keeping the tiles, ride, pause and act, ride on, start again, switch to French, play a tutorial level and leave it, set a course of gates, race it, miss a gate, reload (needs Chromium: npx playwright install chromium)
 ```
 
 Add `?debug` to the URL for a frame-cost readout (fps, worst frame, draw calls, triangles). CI (`.github/workflows/ci.yml`) runs the tests, the build and the smoke test on every pull request.

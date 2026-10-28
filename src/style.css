@@ -903,6 +903,10 @@ body.riding .view-row {
     grid-template-columns: repeat(3, auto);
     gap: 4px 12px;
   }
+  .stats:has(.stat-gates:not([hidden])) {
+    grid-template-columns: repeat(4, auto);
+    gap: 4px 9px;
+  }
   .wide-only {
     display: none !important;
   }
@@ -1454,9 +1458,18 @@ body.riding .build-kinds {
   text-transform: uppercase;
   color: var(--muted);
 }
+.res-badges {
+  margin: 0;
+}
+.res-badges:has(.res-best:not([hidden])) {
+  margin-top: 8px;
+}
+.res-best[hidden] {
+  display: none;
+}
 .res-best {
   display: inline-block;
-  margin: 8px 0 0;
+  margin: 0;
   padding: 4px 8px;
   border-radius: 4px;
   background: var(--good);
@@ -2845,4 +2858,36 @@ body.riding .tut {
   .tut-steps li.is-now {
     animation: none;
   }
+}
+
+/* ---------- the course: gates ---------- */
+.stat-gates[hidden] {
+  display: none !important;
+}
+.stat-gates.all dd {
+  color: var(--good);
+}
+.stat-gates.missed dd {
+  color: #e0412f;
+}
+.trick-gate b,
+.trick-gate-slow b {
+  color: #fff;
+}
+.trick-gate small {
+  color: #8ff0c4;
+}
+.trick-gate-slow small {
+  color: #ffb4a8;
+}
+.res-gates-bad {
+  color: #e0412f;
+}
+#s-best {
+  text-transform: none;
+}
+.res-void {
+  opacity: 0.4;
+  text-decoration: line-through;
+  text-decoration-thickness: 4px;
 }

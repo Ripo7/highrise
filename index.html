@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover, user-scalable=no" />
     <title>Highrise</title>
-    <meta name="description" content="A wild mountain to shape and ride: paint the terrain, start anywhere, ski it." />
+    <meta name="description" content="A wild mountain to shape and ride: select its tiles and shape them, start anywhere, ski it." />
     <meta name="theme-color" content="#99adf9" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -56,11 +56,15 @@
 
     <footer class="dock">
       <div id="buildbar" class="buildbar panel" aria-label="Build">
-        <div class="bb-tabs" role="tablist"></div>
+        <div class="bb-head">
+          <div class="bb-tabs" role="tablist"></div>
+          <button type="button" class="bb-chip" hidden></button>
+        </div>
         <div class="bb-strip">
           <button type="button" class="bb-fixed bb-fixed-look" data-tool="view" title="Look around: move the camera without editing (V)"></button>
+          <button type="button" class="bb-fixed bb-fixed-select" data-tool="select" title="Select tiles: tap or drag on the snow (S)"></button>
           <button type="button" class="bb-fixed bb-fixed-start" data-tool="start" title="Put the start gate anywhere: tap or drag on the snow (G)"></button>
-          <div class="bb-pieces" role="listbox" aria-label="Tools"></div>
+          <div class="bb-pieces" role="toolbar" aria-label="Actions on the selected tiles"></div>
           <div class="bb-size seg" role="group" aria-label="Brush size" hidden></div>
         </div>
       </div>
@@ -181,9 +185,9 @@
         <p class="intro-lede">A wild mountain, all yours. Shape the snow, put the start wherever you like, and ride it. Jump between riding and building whenever you want: the run waits for you.</p>
         <ol class="intro-steps">
           <li>
-            <b>Shape</b>
-            <span class="desktop-only">Terrain and Nature: pick a bump, a hollow, a flat, a wall, a rock band, forest, a clearing or powder and paint it on the hexagon tiles. Pieces side by side melt into one shape.</span>
-            <span class="touch-only">Terrain and Nature: pick a bump, a hollow, a flat, a wall, a rock band, forest, a clearing or powder and paint it on the hexagon tiles with your finger. Pieces side by side melt into one shape.</span>
+            <b>Select, then shape</b>
+            <span class="desktop-only">Click or drag on the snow to select hexagon tiles, then act on them: raise, lower, flatten, smooth, steepen; a jump, a drop, rocks; trees, a clearing, powder, ice; copy, paste, rotate, erase. Tap again for more. Tiles side by side melt into one shape.</span>
+            <span class="touch-only">Tap or drag on the snow to select hexagon tiles, then act on them: raise, lower, flatten, smooth, steepen; a jump, a drop, rocks; trees, a clearing, powder, ice; copy, paste, rotate, erase. Tap again for more. Tiles side by side melt into one shape.</span>
           </li>
           <li>
             <b>Start anywhere</b>

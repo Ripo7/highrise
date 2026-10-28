@@ -1,8 +1,8 @@
-// The mountain as you ride it: the wild base (wild.js) with your terrain and nature pieces
-// on top (terrain.js). Then the snow (packed, powder where you painted it, bare rock on the
-// cliffs, the rock bands and any face too steep to hold snow) and the trees and boulders:
-// the natural forest less your clearings, plus the forests you planted, none on the rock
-// and none right on the start gate.
+// The mountain as you ride it: the wild base (wild.js) with your tiles on top (tiles.js,
+// terrain.js). Then the snow (packed, powder and ice where you put them, bare rock on the
+// cliffs, the rock bands and any face too steep to hold snow, but never on a kicker) and
+// the trees and boulders: the natural forest less your clearings, plus the trees you
+// planted, none on the rock, on a jump or a drop, or right on the start gate.
 
 import { applyTerrain } from './terrain.js';
 import { smoothstep } from './heightfield.js';
@@ -18,33 +18,48 @@ const hash01 = (p) => (((Math.round(p.x * 10) * 73856093) ^ (Math.round(p.u * 10
 export const GATE_CLEAR = 7; // metres kept clear around the start gate
 
 /**
- * Reset hf and surf to the base and build the pieces on it.
+ * Reset hf and surf to the base and build the tiles on it.
  * start: { x, z } of the start gate (nothing grows on it), or null.
  * Returns { props }.
  */
-export function buildWorld(hf, surf, base, { pieces = [], start = null } = {}) {
+export function buildWorld(hf, surf, base, { tiles = [], start = null } = {}) {
   hf.h.set(base.h);
-  const T = applyTerrain(hf, pieces);
+  const T = applyTerrain(hf, tiles);
   const { nx, nz } = hf;
   const n = nx * nz;
   const rockF = T.rock;
-  const powF = T.powder;
-  // bare rock: the mountain's rock bands, and any face too steep to hold snow
+  // bare rock: the mountain's rock bands, and any face too steep to hold snow (a kicker's
+  // back is steep, but it's snow)
   const steep = steepness(hf, scratchRock(n));
+  for (const K of T.kickers) {
+    for (let jj = 0; jj < K.h; jj++) {
+      for (let ii = 0; ii < K.w; ii++) {
+        const k = K.f[jj * K.w + ii];
+        if (k) {
+          const q = (K.j0 + jj) * nx + K.i0 + ii;
+          steep[q] = Math.round(steep[q] * (1 - k));
+        }
+      }
+    }
+  }
   for (let q = 0; q < n; q++) {
     surf.g[q] = 0;
     surf.ice[q] = 0;
     surf.pow[q] = 0;
     surf.rock[q] = Math.max(base.rock[q], steep[q]);
   }
-  if (powF) {
-    for (let jj = 0; jj < powF.h; jj++) {
-      for (let ii = 0; ii < powF.w; ii++) {
-        const q = (powF.j0 + jj) * nx + powF.i0 + ii;
-        surf.pow[q] = Math.round(255 * smoothstep(0.2, 0.6, powF.f[jj * powF.w + ii]));
+  // powder and ice where you put them
+  const paint = (F, arr) => {
+    if (!F) return;
+    for (let jj = 0; jj < F.h; jj++) {
+      for (let ii = 0; ii < F.w; ii++) {
+        const q = (F.j0 + jj) * nx + F.i0 + ii;
+        arr[q] = Math.round(255 * smoothstep(0.2, 0.6, F.f[jj * F.w + ii]));
       }
     }
-  }
+  };
+  paint(T.powder, surf.pow);
+  paint(T.ice, surf.ice);
   if (rockF) {
     for (let jj = 0; jj < rockF.h; jj++) {
       for (let ii = 0; ii < rockF.w; ii++) {
@@ -53,12 +68,14 @@ export function buildWorld(hf, surf, base, { pieces = [], start = null } = {}) {
         const q = (rockF.j0 + jj) * nx + rockF.i0 + ii;
         surf.rock[q] = Math.max(surf.rock[q], Math.round(255 * v));
         surf.pow[q] = Math.round(surf.pow[q] * (1 - v));
+        surf.ice[q] = Math.round(surf.ice[q] * (1 - v));
       }
     }
   }
   surf.version++;
 
-  // trees and boulders: off the rock, thinned by clearings, clear of the start gate
+  // trees and boulders: off the rock, the jumps and the drops, thinned by clearings, clear of
+  // the start gate
   const cellOf = (p) => {
     const [gi, gj] = hf.toGrid(p.x, hf.startZ + p.u);
     const i = Math.round(gi);
@@ -71,6 +88,7 @@ export function buildWorld(hf, surf, base, { pieces = [], start = null } = {}) {
     if (q < 0) return false;
     if (start && Math.hypot(p.x - start.x, p.u - su) < GATE_CLEAR + (p.k === TREE ? 0 : -3)) return false;
     if (rockF && T.fieldAt(rockF, q % nx, Math.floor(q / nx)) > 0.25) return false;
+    if (T.noTrees && T.fieldAt(T.noTrees, q % nx, Math.floor(q / nx)) > 0.1) return false;
     if (natural && T.clearing) {
       const c = T.fieldAt(T.clearing, q % nx, Math.floor(q / nx));
       if (c > 0.15 + 0.6 * hash01(p)) return false;

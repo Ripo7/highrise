@@ -1,7 +1,8 @@
 // Browser smoke test: serves the production build, plays the core loop in Chromium (pick a
-// wild mountain, put the start gate anywhere, paint bumps on the hexagon tiles, undo and
-// redo, ride, pause to build, ride on from where the skier was, start again from the gate)
-// and fails on any page error. Run after `npm run build`:
+// wild mountain, put the start gate anywhere, select hexagon tiles and act on them: raise,
+// undo and redo, a jump, rotate, deselect; ride, pause to build, ride on from where the
+// skier was, start again from the gate) and fails on any page error. Run after
+// `npm run build`:
 //   npm run smoke      (SMOKE_OUT=dir keeps screenshots; defaults to smoke-shots/)
 import { preview } from 'vite';
 import { chromium } from 'playwright';
@@ -20,6 +21,9 @@ const browser = await chromium.launch({
 const errors = [];
 try {
   const page = await browser.newPage({ viewport: { width: 1100, height: 800 } });
+  // a software renderer on a small CI machine can take seconds a frame: clicks wait for the
+  // page to settle across frames
+  page.setDefaultTimeout(120000);
   page.on('pageerror', (e) => errors.push(e.message));
   // block third-party requests (fonts): the game must not depend on them
   await page.route(/^https?:\/\/(?!localhost)/, (r) => r.abort());
@@ -38,7 +42,7 @@ try {
   const mt = await page.evaluate(() => window.__highrise.state.mountain);
   assert.equal(mt.steep, 'gentle');
   assert.equal(mt.size, 'small');
-  assert.equal(await page.evaluate(() => window.__highrise.state.pieces.length), 0, 'a wild mountain, nothing built yet');
+  assert.equal(await page.evaluate(() => window.__highrise.state.tiles.length), 0, 'a wild mountain, nothing built yet');
   await page.waitForFunction(() => window.__highrise.cameraSettled, null, { timeout: 120000 });
 
   // look down on the top of the mountain (a slow software renderer makes free flying
@@ -82,27 +86,61 @@ try {
   const start = await get(() => ({ x: window.__highrise.state.start.x, u: window.__highrise.state.start.z - window.__highrise.hf.startZ }));
   assert.ok(Math.abs(start.x - 40) < 4 && Math.abs(start.u - 160) < 4, `the gate moved (${start.x.toFixed(1)}, ${start.u.toFixed(1)})`);
 
-  // terrain: a row of bumps across the slope, on the hexagon tiles
-  await page.evaluate(() => (window.__before = window.__highrise.hf.h.slice()));
-  await page.click('#buildbar [data-tab="terrain"]');
-  await page.click('#buildbar [data-piece="bump"]');
+  // select a row of tiles across the slope (drag with Select), then raise them twice
+  await page.click('#buildbar [data-tool="select"]');
   await drag([-50, 110], [30, 110]);
-  const bumps = await get(() => window.__highrise.state.pieces.filter((p) => p.k === 'bump').length);
-  assert.ok(bumps >= 14, `bump tiles (${bumps})`);
+  const picked = await get(() => window.__highrise.selection.length);
+  assert.ok(picked >= 14, `selected tiles (${picked})`);
+  assert.ok(await page.isVisible('#buildbar .bb-chip'), 'the selection chip shows');
+  await page.evaluate(() => (window.__before = window.__highrise.hf.h.slice()));
+  await page.click('#buildbar [data-tab="shape"]');
+  await page.click('#buildbar [data-action="raise"]');
+  await page.click('#buildbar [data-action="raise"]');
+  const lifts = await get(() => [...new Set(window.__highrise.state.tiles.map((t) => t.lift))]);
+  assert.deepEqual(lifts, [3], 'two taps: 3 m');
+  assert.equal(await page.textContent('#buildbar [data-action="raise"] .bb-badge'), '+3', 'the button shows it');
   const rise = await get(() => {
     const h = window.__highrise.hf.h;
     let m = 0;
     for (let i = 0; i < h.length; i++) m = Math.max(m, h[i] - window.__before[i]);
     return m;
   });
-  assert.ok(rise > 2, `the bumps raised the snow (${rise.toFixed(2)} m)`);
-  await page.screenshot({ path: `${OUT}/1-bumps.png` });
+  assert.ok(rise > 2.5, `the snow rose (${rise.toFixed(2)} m)`);
 
-  // undo takes the bumps away, redo brings them back
+  // undo takes one tap back, redo brings it again
   await page.keyboard.press('Control+z');
-  assert.equal(await get(() => window.__highrise.state.pieces.length), 0, 'undo');
+  assert.deepEqual(await get(() => [...new Set(window.__highrise.state.tiles.map((t) => t.lift))]), [1.5], 'undo');
   await page.keyboard.press('Control+Shift+z');
-  assert.equal(await get(() => window.__highrise.state.pieces.length), bumps, 'redo');
+  assert.deepEqual(await get(() => [...new Set(window.__highrise.state.tiles.map((t) => t.lift))]), [3], 'redo');
+
+  // a jump on the same tiles, facing down the fall line, then turned
+  await page.click('#buildbar [data-tab="features"]');
+  await page.click('#buildbar [data-action="jump"]');
+  const dir0 = await get(() => window.__highrise.state.tiles.find((t) => t.feat === 'jump')?.dir);
+  assert.ok(Number.isFinite(dir0), 'a jump');
+  await page.click('#buildbar [data-tab="tools"]');
+  await page.click('#buildbar [data-action="rotate"]');
+  assert.equal(await get(() => window.__highrise.state.tiles.find((t) => t.feat === 'jump').dir), (dir0 + 330) % 360, 'turned');
+  await page.screenshot({ path: `${OUT}/1-tiles.png` });
+  // copy them and paste them further down, well to the side of the run from the gate (the
+  // copy spans 80 m to the right of where it's put): the pasted tiles become the selection
+  await page.click('#buildbar [data-action="copy"]');
+  await page.click('#buildbar [data-action="paste"]');
+  assert.equal(await get(() => window.__highrise.state.tool), 'paste', 'pasting');
+  {
+    const [px, py] = await at(-150, 230);
+    const box = await page.locator('#scene').boundingBox();
+    assert.ok(px > box.x && px < box.x + box.width && py > box.y && py < box.y + box.height * 0.7, 'the paste spot is on screen');
+    await page.mouse.click(px, py);
+  }
+  const tileCount = await get(() => window.__highrise.state.tiles.length);
+  assert.equal(tileCount, picked * 2, `pasted (${tileCount} tiles)`);
+  assert.equal(await get(() => window.__highrise.state.tiles.filter((t) => t.feat === 'jump').map((t) => t.g).filter((g, k, a) => a.indexOf(g) === k).length), 2, 'two jumps, each its own');
+  assert.equal(await get(() => window.__highrise.state.tool), 'select', 'back to selecting');
+  // Esc deselects
+  await page.keyboard.press('Escape');
+  assert.equal(await get(() => window.__highrise.selection.length), 0, 'deselected');
+  assert.ok(await page.isHidden('#buildbar .bb-chip'), 'the chip is gone');
 
   // ride from the gate (a few real frames, then a couple of seconds in one go: the software
   // renderer is far too slow to ride in real time)
@@ -130,14 +168,25 @@ try {
     status: document.getElementById('status').textContent,
   }));
   assert.deepEqual(paused, { paused: true, label: 'Ride on', restart: true, status: 'Paused' }, 'paused');
-  // build something just ahead of him while he waits
+  // build something just ahead of him while he waits: select 7 tiles there, lower them
   await page.evaluate(() => {
     const h = window.__highrise;
     const s = h.skier;
     const v = Math.hypot(s.vel[0], s.vel[2]) || 1;
-    h.paintAt(s.pos[0] + (s.vel[0] / v) * 30, s.pos[2] + (s.vel[2] / v) * 30, 'hollow', 2);
+    h.selectAt(s.pos[0] + (s.vel[0] / v) * 30, s.pos[2] + (s.vel[2] / v) * 30, 2);
   });
-  assert.equal(await get(() => window.__highrise.state.pieces.filter((p) => p.k === 'hollow').length), 7, 'seven hexagons of hollow');
+  const liftOf = () =>
+    get(() => {
+      const h = window.__highrise;
+      const by = new Map(h.state.tiles.map((t) => [`${t.i},${t.j}`, t.lift]));
+      return h.selection.map(([i, j]) => by.get(`${i},${j}`) || 0);
+    });
+  const liftBefore = await liftOf();
+  assert.equal(liftBefore.length, 7, 'seven tiles selected ahead of him');
+  await page.click('#buildbar [data-tab="shape"]');
+  await page.click('#buildbar [data-action="lower"]');
+  const liftAfter = await liftOf();
+  assert.ok(liftAfter.every((v, k) => Math.abs(v - (liftBefore[k] - 1.5)) < 1e-6), 'all seven lowered 1.5 m');
   await page.waitForFunction(() => window.__highrise.cameraSettled, null, { timeout: 120000 });
   await page.screenshot({ path: `${OUT}/3-paused.png` });
 
@@ -169,8 +218,15 @@ try {
 
   assert.deepEqual(errors, [], 'no page errors');
   console.log(
-    `smoke test passed: wild mountain, start gate moved, ${bumps} hexagon bump tiles, undo/redo, ride at ${(ride.speed * 3.6).toFixed(0)} km/h, pause and build, ride on at ${resumed.time.toFixed(1)} s, from the start`
+    `smoke test passed: wild mountain, start gate moved, ${picked} tiles selected and raised, undo/redo, a jump turned, copied and pasted (${tileCount} tiles), ride at ${(ride.speed * 3.6).toFixed(0)} km/h, pause and build, ride on at ${resumed.time.toFixed(1)} s, from the start`
   );
+} catch (err) {
+  // on CI, say what failed where it shows on the run's page too (an annotation), with a
+  // screenshot of the moment in the artifacts
+  const msg = String(err.message || err).split('\n').slice(0, 12).join(' | ').replace(/[\r\n%]/g, ' ');
+  console.log(`::error title=Smoke test::${msg}`);
+  for (const p of browser.contexts().flatMap((c) => c.pages())) await p.screenshot({ path: `${OUT}/failed.png` }).catch(() => {});
+  throw err;
 } finally {
   await browser.close();
   await new Promise((r) => server.httpServer.close(r));

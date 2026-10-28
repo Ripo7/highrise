@@ -6,7 +6,8 @@ import { SurfaceMap } from '../src/core/surface.js';
 import { PropSet, TREE } from '../src/core/props.js';
 import { Skier } from '../src/core/skier.js';
 import { newWild, buildWild, wildDims, makeWild, SIZES, STEEPNESS } from '../src/core/wild.js';
-import { KINDS, placeTiles, eraseTiles, brushTiles, lineTiles, packTiles, unpackTiles, trimTiles, tileOf, tileCenter, gridCols, gridRows, squaresToHexes } from '../src/core/terrain.js';
+import { brushTiles, lineTiles, tileOf, tileCenter, gridCols, gridRows, squaresToHexes } from '../src/core/terrain.js';
+import { applyAction, describe, copyTiles, rotateCopy, pasteTiles, packTiles, unpackTiles, fromPieces, LIFT_MAX } from '../src/core/tiles.js';
 import { HEX_R, HEX_W, HEX_H, hexCenter, hexDistance } from '../src/core/hex.js';
 import { buildWorld, fallLine, defaultStart, GATE_CLEAR } from '../src/core/world.js';
 
@@ -100,33 +101,62 @@ test('pieces painted on the old 10 m squares land on the hexagons in the same pl
     assert.ok(x >= 200 && x < 260 && u >= 100 && u < 140, 'inside the old block');
   }
   assert.ok(hexes.some((p) => p.k === 'forest'));
+  // and the pieces become actions: bumps raised, the forest planted
+  const tiles = fromPieces(hexes);
+  assert.ok(tiles.filter((t) => t.lift === 3).length === bumps.length && tiles.some((t) => t.trees === 2));
 });
 
-// ---------- terrain pieces ----------
+// ---------- tiles and their actions ----------
 
-test('pieces replace what is on their layer, and erase clears every layer', () => {
-  let ps = placeTiles([], [{ k: 'bump', i: 3, j: 4 }, { k: 'forest', i: 3, j: 4 }], 50, 50);
-  assert.equal(ps.length, 2, 'a shape and a cover on one tile');
-  ps = placeTiles(ps, [{ k: 'hollow', i: 3, j: 4 }], 50, 50);
-  assert.deepEqual(ps.map((p) => p.k).sort(), ['forest', 'hollow']);
-  ps = placeTiles(ps, [{ k: 'powder', i: 3, j: 4 }, { k: 'bump', i: 99, j: 4 }], 50, 50);
-  assert.equal(ps.length, 3, 'off-grid pieces are dropped');
-  ps = eraseTiles(ps, [[3, 4]]);
-  assert.equal(ps.length, 0);
-  assert.deepEqual(brushTiles(5, 5, 3).length, 19);
-  const all = Object.keys(KINDS).map((k, n) => ({ k, i: n, j: n * 2 }));
-  assert.deepEqual(unpackTiles(packTiles(all)), all);
-  assert.equal(trimTiles([{ k: 'bump', i: 5, j: 400 }], 50, 50).length, 0);
-});
-
-test('bumps side by side melt into one ridge: no dip between them, no edges', () => {
-  const { hf, surf, base } = fresh('small', 'gentle', 3);
-  const t = tileAt(hf, 0, 300);
-  const row = [];
-  for (let di = -3; di <= 3; di++) row.push({ k: 'bump', i: t.i + di, j: t.j });
-  buildWorld(hf, surf, base, { pieces: row });
+// act on tiles, then build the mountain with them
+const actOn = (tiles, sel, ...names) => names.reduce((t, n) => applyAction(t, sel, n), tiles);
+const natural = (hf, base) => {
   const nat = new Heightfield(hf.sizeX, hf.sizeZ, hf.cell);
   nat.h.set(base.h);
+  return nat;
+};
+
+test('actions stack on the tiles, toggle, undo cleanly and erase back to nothing', () => {
+  const sel = brushTiles(10, 20, 2);
+  let t = actOn([], sel, 'raise', 'raise', 'raise');
+  assert.equal(t.length, 7);
+  assert.ok(t.every((x) => x.lift === 4.5), 'three taps: 4.5 m');
+  for (let k = 0; k < 20; k++) t = applyAction(t, sel, 'raise');
+  assert.ok(t.every((x) => x.lift === LIFT_MAX), 'as high as it goes');
+  t = actOn([], sel, 'raise', 'lower');
+  assert.equal(t.length, 0, 'raise then lower: nothing left to keep');
+  // toggles: on for all, then off
+  t = actOn([], sel, 'powder');
+  assert.ok(t.every((x) => x.snow === 'powder'));
+  t = applyAction(t, sel, 'ice');
+  assert.ok(t.every((x) => x.snow === 'ice'), 'ice replaces powder');
+  t = applyAction(t, sel, 'ice');
+  assert.equal(t.length, 0, 'tapped again: packed snow');
+  // trees get denser, a clearing takes them away
+  t = actOn([], sel, 'trees', 'trees', 'trees', 'trees');
+  assert.ok(t.every((x) => x.trees === 3));
+  t = applyAction(t, sel, 'clear');
+  assert.ok(t.every((x) => x.clear && !x.trees));
+  // an action that changes nothing hands back the same list (no undo step)
+  const full = actOn([], sel, 'smooth', 'smooth', 'smooth');
+  assert.equal(applyAction(full, sel, 'smooth'), full);
+  // erase: back to the wild mountain
+  assert.equal(applyAction(actOn([], sel, 'raise', 'steepen', 'jump', 'trees'), sel, 'erase').length, 0);
+  // the selection's readout
+  const d = describe(actOn([], sel, 'raise', 'raise', 'steepen', 'trees'), sel);
+  assert.deepEqual([d.n, d.lift, d.pitch, d.trees], [7, 3, 1, 1]);
+  // saved and read back exactly
+  const mix = actOn(actOn([], sel, 'raise', 'flatten', 'smooth', 'trees', 'ice'), [[3, 4], [4, 4]], 'jump', 'lower');
+  assert.deepEqual(unpackTiles(packTiles(mix)), mix);
+});
+
+test('raised tiles side by side melt into one ridge: no dip between them, no edges', () => {
+  const { hf, surf, base } = fresh('small', 'gentle', 3);
+  const nat = natural(hf, base);
+  const t = tileAt(hf, 0, 300);
+  const row = [];
+  for (let di = -3; di <= 3; di++) row.push([t.i + di, t.j]);
+  buildWorld(hf, surf, base, { tiles: actOn([], row, 'raise', 'raise') });
   const { x: x0, z: zc } = tileCenter(hf, t.i, t.j);
   // along the ridge: the rise never dips between tiles
   const rise = [];
@@ -134,32 +164,23 @@ test('bumps side by side melt into one ridge: no dip between them, no edges', ()
   const lo = Math.min(...rise);
   const hi = Math.max(...rise);
   assert.ok(lo > 2.2, `a ridge (${lo.toFixed(2)} to ${hi.toFixed(2)} m)`);
-  assert.ok(hi - lo < 0.6, 'even along its length');
-  // across it: a smooth rise and fall, no slope sharper than a gentle roller
+  assert.ok(hi - lo < 0.5, 'even along its length');
+  assert.ok(hi < 3.05, 'no higher than raised (3 m)');
+  // across it: a smooth rise and fall
   let maxStep = 0;
   for (let z = zc - 30; z < zc + 30; z += 0.5) {
     const a = hf.heightAt(x0, z) - nat.heightAt(x0, z);
     const b = hf.heightAt(x0, z + 0.5) - nat.heightAt(x0, z + 0.5);
     maxStep = Math.max(maxStep, Math.abs(b - a) / 0.5);
   }
-  assert.ok(maxStep < 0.45, `smooth flanks (${maxStep.toFixed(2)})`);
-  // a bigger block grows taller in the middle: one hill, not a plateau of bumps
-  const block = [];
-  for (let di = -3; di <= 3; di++) for (let dj = -3; dj <= 3; dj++) block.push({ k: 'bump', i: t.i + di, j: t.j + dj });
-  buildWorld(hf, surf, base, { pieces: block });
-  assert.ok(hf.heightAt(x0, zc) - nat.heightAt(x0, zc) > hi + 1, 'a hill');
-});
-
-test('a bump next to a hollow rolls into it', () => {
-  const { hf, surf, base } = fresh('small', 'gentle', 3);
-  const t = tileAt(hf, 0, 300);
-  buildWorld(hf, surf, base, { pieces: [{ k: 'bump', i: t.i, j: t.j }, { k: 'bump', i: t.i, j: t.j - 1 }, { k: 'hollow', i: t.i, j: t.j + 1 }, { k: 'hollow', i: t.i, j: t.j + 2 }] });
-  const nat = new Heightfield(hf.sizeX, hf.sizeZ, hf.cell);
-  nat.h.set(base.h);
-  const { x: x0, z: zc } = tileCenter(hf, t.i, t.j);
+  assert.ok(maxStep < 0.55, `smooth flanks (${maxStep.toFixed(2)})`);
+  // raised beside lowered: one rolling shape
+  const up = brushTiles(t.i, t.j, 2);
+  const down = brushTiles(t.i, t.j + 3, 2);
+  buildWorld(hf, surf, base, { tiles: actOn(actOn([], up, 'raise', 'raise'), down, 'lower', 'lower') });
   let prev = null;
-  let maxStep = 0;
-  for (let z = zc - 25; z < zc + 35; z += 0.5) {
+  maxStep = 0;
+  for (let z = zc - 25; z < zc + 50; z += 0.5) {
     const v = hf.heightAt(x0, z) - nat.heightAt(x0, z);
     if (prev !== null) maxStep = Math.max(maxStep, Math.abs(v - prev) / 0.5);
     prev = v;
@@ -167,52 +188,162 @@ test('a bump next to a hollow rolls into it', () => {
   assert.ok(maxStep < 0.6, `one rolling shape (${maxStep.toFixed(2)})`);
 });
 
-test('a flat eases the slope off, a wall steepens it, a rock band makes a cliff', () => {
+test('flatten levels a group to one height, smooth takes the lumps out', () => {
+  const { hf, surf, base } = fresh('small', 'steep', 4);
+  const nat = natural(hf, base);
+  const t = tileAt(hf, 0, 320);
+  const big = brushTiles(t.i, t.j, 3);
+  const mid = brushTiles(t.i, t.j, 2);
+  const spread = (field) => {
+    const ys = mid.map(([i, j]) => tileCenter(hf, i, j)).map((c) => field.heightAt(c.x, c.z));
+    return Math.max(...ys) - Math.min(...ys);
+  };
+  buildWorld(hf, surf, base, { tiles: actOn([], big, 'flatten') });
+  assert.ok(spread(hf) < 0.1 && spread(nat) > 5, `level (${spread(hf).toFixed(2)} m, was ${spread(nat).toFixed(2)})`);
+  // raised after flattening: still level, just higher
+  buildWorld(hf, surf, base, { tiles: actOn([], big, 'flatten', 'raise', 'raise') });
+  assert.ok(spread(hf) < 0.1, 'still level');
+  // smooth: the lumps go, the slope stays
+  const rough = (field) => {
+    let r = 0;
+    const c = tileCenter(hf, t.i, t.j);
+    for (let z = c.z - 8; z < c.z + 8; z += 1) for (let x = c.x - 8; x < c.x + 8; x += 1) r += Math.abs(field.heightAt(x - 1, z) + field.heightAt(x + 1, z) - 2 * field.heightAt(x, z)) + Math.abs(field.heightAt(x, z - 1) + field.heightAt(x, z + 1) - 2 * field.heightAt(x, z));
+    return r;
+  };
+  buildWorld(hf, surf, base, { tiles: actOn([], big, 'smooth', 'smooth', 'smooth') });
+  assert.ok(rough(hf) < rough(nat) * 0.5, `smoother (${rough(hf).toFixed(1)} vs ${rough(nat).toFixed(1)})`);
+  const c = tileCenter(hf, t.i, t.j);
+  const drop = (f) => f.heightAt(c.x, c.z - 10) - f.heightAt(c.x, c.z + 10);
+  assert.ok(Math.abs(drop(hf) - drop(nat)) < drop(nat) * 0.2, 'the same slope');
+});
+
+test('ease takes the slope off, steepen adds to it, rocks make a cliff of bare rock', () => {
   const { hf, surf, base } = fresh('small', 'medium', 5);
   const t = tileAt(hf, 0, 330);
-  const across = (k, rowsDeep) => {
+  const across = (rowsDeep) => {
     const out = [];
-    for (let di = -8; di <= 8; di++) for (let dj = 0; dj < rowsDeep; dj++) out.push({ k, i: t.i + di, j: t.j + dj });
+    for (let di = -8; di <= 8; di++) for (let dj = 0; dj < rowsDeep; dj++) out.push([t.i + di, t.j + dj]);
     return out;
   };
   // the top of the first row, where its hexagons' sides begin
   const z0 = tileCenter(hf, t.i, t.j).z - HEX_R / 2;
   const slopeIn = () => (hf.heightAt(0, z0 + 3) - hf.heightAt(0, z0 + 27)) / 24;
   buildWorld(hf, surf, base, {});
-  const natural = slopeIn();
-  buildWorld(hf, surf, base, { pieces: across('flat', 4) });
-  assert.ok(slopeIn() < natural * 0.45, `flatter (${slopeIn().toFixed(2)} vs ${natural.toFixed(2)})`);
-  buildWorld(hf, surf, base, { pieces: across('wall', 4) });
-  assert.ok(slopeIn() > natural * 1.5, `steeper (${slopeIn().toFixed(2)} vs ${natural.toFixed(2)})`);
-  buildWorld(hf, surf, base, { pieces: across('rocks', 1) });
+  const nat = slopeIn();
+  buildWorld(hf, surf, base, { tiles: actOn([], across(4), 'ease', 'ease', 'ease') });
+  assert.ok(slopeIn() < nat * 0.45, `flatter (${slopeIn().toFixed(2)} vs ${nat.toFixed(2)})`);
+  buildWorld(hf, surf, base, { tiles: actOn([], across(4), 'ease') });
+  assert.ok(slopeIn() < nat * 0.9 && slopeIn() > nat * 0.6, 'one tap: a little gentler');
+  buildWorld(hf, surf, base, { tiles: actOn([], across(4), 'steepen', 'steepen', 'steepen') });
+  assert.ok(slopeIn() > nat * 1.5, `steeper (${slopeIn().toFixed(2)} vs ${nat.toFixed(2)})`);
+  buildWorld(hf, surf, base, { tiles: actOn([], across(1), 'rocks') });
   let face = 0;
   for (let z = z0 - 5; z < z0 + 15; z += 0.5) face = Math.max(face, (hf.heightAt(0, z) - hf.heightAt(0, z + 0.5)) / 0.5);
   assert.ok(face > 0.95, `a cliff face (${((Math.atan(face) * 180) / Math.PI).toFixed(0)}°)`);
   assert.ok(surf.rock[hf.idx(Math.round((0 + hf.halfX) / hf.cell), Math.round((z0 + 5 + hf.halfZ) / hf.cell))] > 128, 'bare rock');
 });
 
-test('forest grows trees, clearings remove them, powder makes deep snow', () => {
+// a skier straight down the fall line through tile t, from 60 m above it: his longest flight
+function flight(hf, surf, base, t, tiles) {
+  buildWorld(hf, surf, base, { tiles });
+  const c = tileCenter(hf, t.i, t.j);
+  const fl = fallLine(hf, c.x, c.z, 10);
+  const props = new PropSet(hf);
+  const sk = new Skier(hf, { x: c.x - fl[0] * 60, z: c.z - fl[1] * 60, dir: fl });
+  sk.props = props;
+  sk.surface = surf;
+  let cur = 0;
+  let best = 0;
+  for (let k = 0; k < 240 * 8 && sk.status === 'running'; k++) {
+    sk.step(1 / 240);
+    cur = sk.grounded ? 0 : cur + 1 / 240;
+    best = Math.max(best, cur);
+  }
+  return { air: best, status: sk.status };
+}
+
+test('a jump faces down the slope and sends you flying; a longer one further; a drop too', () => {
   const { hf, surf, base } = fresh('small', 'medium', 5);
-  const t = tileAt(hf, -200, 300);
-  const forest = [];
-  for (let di = 0; di < 4; di++) for (let dj = 0; dj < 4; dj++) forest.push({ k: 'forest', i: t.i + di, j: t.j + dj });
-  const before = buildWorld(hf, surf, base, {}).props.filter((p) => p.k === TREE).length;
-  const withForest = buildWorld(hf, surf, base, { pieces: forest }).props.filter((p) => p.k === TREE).length;
-  assert.ok(withForest > before + 20, `forest adds trees (${withForest - before} on 40 × 40 m)`);
+  const t = tileAt(hf, 0, 250);
+  const c = tileCenter(hf, t.i, t.j);
+  const fl = fallLine(hf, c.x, c.z, 10);
+  const dir = (Math.atan2(fl[0], fl[1]) * 180) / Math.PI;
+  const none = flight(hf, surf, base, t, []);
+  const one = flight(hf, surf, base, t, applyAction([], [[t.i, t.j]], 'jump', { dir }));
+  const three = flight(hf, surf, base, t, applyAction([], [[t.i, t.j - 1], [t.i, t.j], [t.i, t.j + 1]], 'jump', { dir }));
+  const drop = flight(hf, surf, base, t, applyAction([], [[t.i, t.j]], 'drop', { dir }));
+  assert.ok(none.air < 0.25, `no jump: on the snow (${none.air.toFixed(2)} s)`);
+  assert.ok(one.air > 0.5 && one.status === 'running', `a jump: ${one.air.toFixed(2)} s in the air`);
+  assert.ok(three.air > one.air + 0.2 && three.status === 'running', `a bigger one: ${three.air.toFixed(2)} s (one tile: ${one.air.toFixed(2)} s, none: ${none.air.toFixed(2)} s)`);
+  assert.ok(drop.air > 0.25 && drop.status === 'running', `a drop: ${drop.air.toFixed(2)} s`);
+  // the kicker keeps its snow, however steep its back; and no trees grow on it
+  const w = buildWorld(hf, surf, base, { tiles: applyAction(actOn([], brushTiles(t.i, t.j, 2), 'trees', 'trees', 'trees'), [[t.i, t.j]], 'jump', { dir }) });
+  let rock = 0;
+  for (let d = -6; d < 8; d += 0.5) rock = Math.max(rock, surf.at(c.x + fl[0] * d, c.z + fl[1] * d).rock);
+  assert.ok(rock < 0.3, `snow on the kicker (rock ${rock.toFixed(2)})`);
+  assert.ok(!w.props.some((p) => Math.hypot(p.x - c.x, hf.startZ + p.u - c.z) < 5), 'no tree on the jump');
+});
+
+test('rotate turns a jump a twelfth of a turn; copies keep their shape on any row, turned or not', () => {
+  const sel = [[10, 20]];
+  let t = applyAction([], sel, 'jump', { dir: 0 });
+  t = applyAction(t, sel, 'rotate');
+  assert.equal(t[0].dir, 330);
+  assert.equal(applyAction(actOn([], sel, 'raise'), sel, 'rotate').length, 1, 'nothing to turn: unchanged');
+  // an L of three tiles with a jump on its corner
+  const shape = [[10, 20], [11, 20], [10, 21]];
+  const src = applyAction(actOn([], shape, 'raise'), [[10, 20]], 'jump', { dir: 0 });
+  const clip = copyTiles(src, shape);
+  const centres = (cells) => cells.map(([i, j]) => hexCenter(i, j));
+  const rel = (cells) => centres(cells).map(([x, u], k, a) => [x - a[0][0], u - a[0][1]]);
+  const close = (a, b) => a.every(([x, u], k) => Math.abs(x - b[k][0]) < 1e-9 && Math.abs(u - b[k][1]) < 1e-9);
+  for (const [i, j] of [[30, 40], [31, 41], [5, 7]]) {
+    const r = pasteTiles(src, clip, i, j, 68, 110);
+    assert.ok(close(rel(r.placed), rel(shape)), `same shape at ${i},${j}`);
+  }
+  // pasted groups are their own
+  const r = pasteTiles(src, clip, 30, 40, 68, 110);
+  const jumps = r.tiles.filter((x) => x.feat === 'jump');
+  assert.equal(new Set(jumps.map((x) => x.g)).size, 2);
+  // turned: the shape turns a sixth of a turn, and the jump turns with it
+  const turned = rotateCopy(clip);
+  const placed = pasteTiles([], turned, 30, 40, 68, 110);
+  const ang = (v) => (Math.atan2(v[0], v[1]) * 180) / Math.PI;
+  const before = rel(shape);
+  const after = rel(placed.placed);
+  for (let k = 1; k < 3; k++) {
+    let d = ang(after[k]) - ang(before[k]);
+    d = ((d % 360) + 540) % 360 - 180;
+    assert.ok(Math.abs(d + 60) < 1e-6, `tile ${k} turned ${d.toFixed(1)}°`);
+  }
+  assert.equal(placed.tiles.find((x) => x.feat === 'jump').dir, 300);
+});
+
+test('trees grow denser each tap, clearings open the natural forest, powder and ice change the snow', () => {
+  const { hf, surf, base } = fresh('small', 'medium', 5);
+  const t = tileAt(hf, -150, 160);
+  const patch = brushTiles(t.i, t.j, 3);
+  const count = (tiles) => buildWorld(hf, surf, base, { tiles }).props.filter((p) => p.k === TREE).length;
+  const n0 = count([]);
+  const n1 = count(actOn([], patch, 'trees'));
+  const n3 = count(actOn([], patch, 'trees', 'trees', 'trees'));
+  assert.ok(n1 > n0 + 8 && n3 > n1 + 25, `trees: ${n0} → ${n1} → ${n3}`);
   // a clearing over the natural woods
   const wood = base.forest.filter((p) => p.k === TREE);
   const spot = wood[Math.floor(wood.length / 2)];
   const ct = tileAt(hf, spot.x, spot.u);
-  const clearing = brushTiles(ct.i, ct.j, 3).map(([i, j]) => ({ k: 'clearing', i, j }));
-  const cleared = buildWorld(hf, surf, base, { pieces: clearing }).props;
+  const cleared = buildWorld(hf, surf, base, { tiles: actOn([], brushTiles(ct.i, ct.j, 3), 'clear') }).props;
   const near = (list) => list.filter((p) => p.k === TREE && Math.abs(p.x - spot.x) < 8 && Math.abs(p.u - spot.u) < 8).length;
   assert.ok(near(cleared) < near(base.forest), 'clearing');
-  // the snow is packed everywhere, powder where you paint it
+  // the snow: packed everywhere, powder or ice where you put it
   const pt = tileAt(hf, 0, 300);
-  buildWorld(hf, surf, base, { pieces: brushTiles(pt.i, pt.j, 3).map(([i, j]) => ({ k: 'powder', i, j })) });
-  assert.ok(surf.at(0, hf.startZ + 305).powder > 0.8, 'powder');
+  const pc = tileCenter(hf, pt.i, pt.j);
+  buildWorld(hf, surf, base, { tiles: actOn([], brushTiles(pt.i, pt.j, 3), 'powder') });
+  assert.ok(surf.at(pc.x, pc.z).powder > 0.8, 'powder');
+  buildWorld(hf, surf, base, { tiles: actOn([], brushTiles(pt.i, pt.j, 3), 'ice') });
+  assert.ok(surf.at(pc.x, pc.z).ice > 0.8 && surf.at(pc.x, pc.z).powder < 0.01, 'ice');
   const packed = surf.at(60, hf.startZ + 200);
-  assert.ok(packed.powder < 0.01 && packed.groomed < 0.01, 'packed snow elsewhere');
+  assert.ok(packed.powder < 0.01 && packed.ice < 0.01, 'packed snow elsewhere');
 });
 
 test('the start gate goes anywhere, faces down the fall line, and nothing grows on it', () => {
@@ -231,14 +362,19 @@ test('the start gate goes anywhere, faces down the fall line, and nothing grows 
   assert.ok(d.z < hf.startZ + 60, 'the default start is near the top');
 });
 
-test('rebuilding the mountain is fast enough to preview while dragging', () => {
+test('rebuilding the mountain is fast enough for every tap', () => {
   const { hf, surf, base } = fresh('medium', 'medium', 8);
   const t = tileAt(hf, 0, 500);
-  const pieces = brushTiles(t.i, t.j, 3).map(([i, j]) => ({ k: 'bump', i, j }));
+  const big = brushTiles(t.i, t.j, 3);
+  let tiles = actOn([], big, 'raise', 'smooth');
+  tiles = actOn(tiles, brushTiles(t.i, t.j + 5, 2), 'flatten', 'ice');
+  tiles = actOn(tiles, brushTiles(t.i + 6, t.j, 2), 'trees', 'trees');
+  tiles = actOn(tiles, brushTiles(t.i - 6, t.j + 6, 2), 'steepen', 'powder');
+  tiles = applyAction(tiles, brushTiles(t.i - 6, t.j, 2), 'jump', { dir: 0 });
   const start = { x: 0, z: hf.startZ + 30 };
-  buildWorld(hf, surf, base, { pieces, start });
+  buildWorld(hf, surf, base, { tiles, start });
   const t0 = performance.now();
-  for (let i = 0; i < 4; i++) buildWorld(hf, surf, base, { pieces, start });
+  for (let i = 0; i < 4; i++) buildWorld(hf, surf, base, { tiles, start });
   const ms = (performance.now() - t0) / 4;
   assert.ok(ms < 80, `${ms.toFixed(1)} ms per rebuild`);
   assert.ok(gridCols(hf) === 68 && gridRows(hf) > 100, `${gridCols(hf)} × ${gridRows(hf)} tiles`);
@@ -272,7 +408,7 @@ test('a paused run picks up where it was, on the snow as it is now', () => {
   const pos = [...sk.pos];
   // build a bump right under him while paused
   const t = tileOf(hf, pos[0], pos[2]);
-  buildWorld(hf, surf, base, { start, pieces: brushTiles(t.i, t.j, 3).map(([i, j]) => ({ k: 'bump', i, j })) });
+  buildWorld(hf, surf, base, { start, tiles: actOn([], brushTiles(t.i, t.j, 3), 'raise', 'raise') });
   sk.resume();
   assert.ok(Math.abs(sk.pos[1] - hf.heightAt(sk.pos[0], sk.pos[2])) < 1e-6, 'back on the snow');
   assert.ok(Math.abs(sk.speed - v) < v * 0.25, `same speed (${sk.speed.toFixed(1)} vs ${v.toFixed(1)})`);
@@ -373,4 +509,28 @@ test('the body leans into a carve, along the push of the snow', () => {
   const lean = Math.acos(Math.min(1, s.tilt[0] * s.n[0] + s.tilt[1] * s.n[1] + s.tilt[2] * s.n[2]));
   assert.ok(lean > 0.5, `leaning ${((lean * 180) / Math.PI).toFixed(0)}°`);
   assert.ok(s.tilt[0] < s.n[0], 'into the turn');
+});
+
+test('ice is fast and the edges barely hold', () => {
+  const ice = plane(20);
+  const isurf = new SurfaceMap(ice);
+  isurf.ice.fill(255);
+  isurf.version++;
+  const packed = plane(20);
+  const run = (hf, surf, steer) => {
+    const sk = new Skier(hf, { x: 0, z: -hf.halfZ + 30, dir: [0, 1] });
+    if (surf) sk.surface = surf;
+    for (let k = 0; k < 240 * 6; k++) sk.step(1 / 240);
+    for (let k = 0; k < 240 * 2; k++) {
+      sk.input.steer = steer;
+      sk.step(1 / 240);
+    }
+    return { v: sk.speed, x: sk.pos[0] };
+  };
+  const a = run(ice, isurf, 0);
+  const b = run(packed, null, 0);
+  assert.ok(a.v > b.v * 1.03, `faster on ice (${(a.v * 3.6).toFixed(0)} vs ${(b.v * 3.6).toFixed(0)} km/h)`);
+  const ta = run(ice, isurf, 0.8);
+  const tb = run(packed, null, 0.8);
+  assert.ok(Math.abs(ta.x) < Math.abs(tb.x) * 0.8, `turns wider on ice (${ta.x.toFixed(1)} vs ${tb.x.toFixed(1)} m)`);
 });

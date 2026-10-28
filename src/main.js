@@ -595,6 +595,7 @@ function editSlope({ first = false } = {}) {
   slopeUI.open(first ? null : state.design, { cancel: !first, tiles: state.tiles.length });
   applyViewOffset();
   setViewMode(null);
+  viewButtons.setSlope(true);
   ui.setHint(tx(COARSE ? 'hint.slope.touch' : 'hint.slope'));
   applyControlScheme();
   refreshBar();
@@ -663,6 +664,7 @@ function leaveSlope(commit, design, { keep = true, changed = false } = {}) {
   const { orig: o, origCols, first } = slope;
   slope = null;
   document.body.classList.remove('slope-mode');
+  viewButtons.setSlope(false);
   applyViewOffset();
   guides.visible = false;
   terrain.setSections(null);
@@ -2190,10 +2192,16 @@ function setViewMode(m) {
   if (!slope) ui.setHint(tx(m ? `hint.${m}` : `hint.${state.tool}`));
 }
 const viewButtons = createViewButtons({
-  mode: (m) => setViewMode(m),
+  mode: (m) => {
+    // Select: back to tiles (a Start or a Paste on the way is left too)
+    if (!m && !slope && state.tool !== 'select') setTool('select');
+    setViewMode(m);
+  },
   drag: (kind, dx, dy) => (kind === 'rotate' ? orbitBy(dx, dy) : panBy(dx, dy)),
   top: () => topView(),
   side: () => sideNow(),
+  // the slope editor; open, Build it
+  slope: () => (slope ? slopeUI.build() : editSlope()),
 });
 
 // The skis write into the snow: two carved grooves on packed snow, a trench in powder, a

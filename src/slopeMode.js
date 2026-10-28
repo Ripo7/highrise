@@ -265,6 +265,8 @@ export function createSlopeMode(on) {
       goBtn.focus({ preventScroll: true });
     },
     close,
+    // Build it (the Slope button over the view does it too)
+    build: () => done(),
     pick: pickSection,
     // a joint dragged in the 3D view: begin (for undo), then the design as it goes
     beginDrag() {

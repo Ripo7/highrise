@@ -21,7 +21,7 @@ The first thing you do, **right on the mountain in 3D**: stack **sections** down
 
 The joints between sections are eased over a few metres, so a change of pitch rolls over or scoops instead of kinking. The top of the slope stays where it is while you edit, so the camera does too.
 
-The slope is bare snow, the same all the way across: no rolls, forest or rock but what you add with the tiles. **Edit the slope** (`N`, ••• menu) opens the editor again; **Keep what I built** leaves your tiles where they were (counted from the top, centred if the width changes) and the start gate too.
+The slope is bare snow, the same all the way across: no rolls, forest or rock but what you add with the tiles. **Slope** (`N`, the view buttons over the mountain) opens the editor again, and builds it when it's open; **Keep what I built** leaves your tiles where they were (counted from the top, centred if the width changes) and the start gate too.
 
 ### Projects: save as, open
 
@@ -29,10 +29,12 @@ The slope is bare snow, the same all the way across: no rolls, forest or rock bu
 
 ### The view buttons
 
-There's no Look or Select tool: a tap or a drag on the snow always selects tiles. The view has its own buttons, **floating over the mountain** (top right; on a phone, above the bar):
+Buttons **floating over the mountain** (top right; on a phone, above the bar) say what a drag on the snow does, and move the view:
 
-- **Rotate** and **Move**: drag the button itself to turn or slide the view; or tap it, and drags on the snow turn (or slide) the view until you tap it again (or `Esc`). `V` toggles Rotate.
+- **Select** (on unless you turn another on, `S`): a tap or a drag on the snow selects tiles. (Not in the slope editor, where a drag turns the view.)
+- **Rotate** and **Move**: drag the button itself to turn or slide the view; or tap it, and drags on the snow turn (or slide) the view until you tap it again, tap Select (or `Esc`). `V` toggles Rotate.
 - **Top**: straight down on what you're looking at, the slope going up the screen. **Side**: from the side of the slope (in the slope editor, the whole profile).
+- **Slope** (`N`): the slope editor; while it's open, the same button builds it (like **Build it**).
 
 The mouse still turns with the right button, slides with the middle one and zooms with the wheel; on a phone, pinch to zoom, two fingers to slide and twist to turn.
 
@@ -168,7 +170,7 @@ npm install
 npm run dev      # local dev server
 npm test         # physics, scoring, slope design, the hexagon grid, tile actions and jumps, gates and courses, pieces, joints, projects, the translation, the tutorial levels (Node, no browser needed)
 npm run build    # production build into dist/
-npm run smoke    # browser smoke test on the build: design a slope, move the start, select tiles, raise, undo, a jump, rotate, copy and paste, edit the slope keeping the tiles, ride, pause and act, ride on, start again, switch to French, play a tutorial level and leave it, set a course of gates, race it, miss a gate, the slope editor in 3D (side view, drag a dot, undo), the view buttons (rotate, move, top), double click a piece, save as a project, open it again, reload (needs Chromium: npx playwright install chromium)
+npm run smoke    # browser smoke test on the build: design a slope, move the start, select tiles, raise, undo, a jump, rotate, copy and paste, edit the slope keeping the tiles, ride, pause and act, ride on, start again, switch to French, play a tutorial level and leave it, set a course of gates, race it, miss a gate, the slope editor in 3D (side view, drag a dot, undo), the view buttons (select, rotate, move, top, slope), double click a piece, save as a project, open it again, reload (needs Chromium: npx playwright install chromium)
 ```
 
 Add `?debug` to the URL for a frame-cost readout (fps, worst frame, draw calls, triangles). CI (`.github/workflows/ci.yml`) runs the tests, the build and the smoke test on every pull request.
@@ -183,7 +185,7 @@ src/
   render/      terrain mesh + shader, trees and rocks, start gate, skier, spray, ski tracks
   buildBar.js  the build bar
   slopeMode.js the slope editor's bar (in the 3D view)
-  viewButtons.js the view buttons (rotate, move, top, side)
+  viewButtons.js the buttons over the view (select, rotate, move, top, side, slope)
   projects.js  projects (projectsDialog.js: their dialog)
   i18n.js      English and French, the language switch
   tutorial.js  the tutorial card (tutorialText.js: its words)

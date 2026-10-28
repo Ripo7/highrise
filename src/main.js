@@ -14,7 +14,8 @@ import { Skier, PHYS } from './core/skier.js';
 import { ScoreKeeper, SPEED_BONUS_KMH, speedRate } from './core/score.js';
 import { PropSet, TREE, propHeight } from './core/props.js';
 import { SurfaceMap } from './core/surface.js';
-import { newWild, buildWild, SIZES, STEEPNESS, sizeOf, steepOf } from './core/wild.js';
+import { buildSlope, templateDesign, normalizeDesign, designFromWild, designStats, widthOf } from './core/slopes.js';
+import { hexCols } from './core/hex.js';
 import { buildWorld, fallLine, defaultStart } from './core/world.js';
 import { HEX_R, gridCols, gridRows, tileOf, tileCenter, brushTiles, lineTiles, squaresToHexes } from './core/terrain.js';
 import { ACTIONS, applyAction, describe, copyTiles, rotateCopy, pasteCells, pasteTiles, trimTiles, packTiles, unpackTiles, unpackPieces, fromPieces, tileKey } from './core/tiles.js';
@@ -29,6 +30,7 @@ import { Sound } from './audio.js';
 import { RideControls } from './rideControls.js';
 import { createUI } from './ui.js';
 import { createBuildBar } from './buildBar.js';
+import { createSlopeEditor } from './slopeEditor.js';
 import { CATEGORY_COLORS } from './pieceIcons.js';
 import { THEME, SUN_DIR } from './render/theme.js';
 import { createDebugOverlay } from './debugOverlay.js';
@@ -36,11 +38,12 @@ import { createDebugOverlay } from './debugOverlay.js';
 // ---------- state ----------
 const COARSE = window.matchMedia('(pointer: coarse)').matches;
 let altHeld = false; // Alt/Option held: left button orbits
-const SAVE_KEY = 'highrise.ski.v3'; // v9: a wild mountain (seed), the tiles and their actions, the start gate
+const SAVE_KEY = 'highrise.ski.v3'; // v10: the slope you designed, the tiles and their actions, the start gate
 const INTRO_KEY = 'highrise.intro.v7';
 const TRACKS_KEY = 'highrise.tracks.v1';
 const BACKUP_KEY = 'highrise.ski.backup';
 let loadNote = null; // told to the player once the UI is up
+const WILD_WIDTH = { small: 600, medium: 720, large: 840 }; // how wide the old wild mountains were
 let saveFailed = false;
 
 const hf = new Heightfield();
@@ -50,7 +53,7 @@ const history = new History(40);
 const state = {
   tool: 'select', // view | select | start | paste
   brush: 2, // selection brush: 1 tile, 7 (with its neighbours) or 19 (see brushTiles)
-  mountain: null, // { size, steep, seed } (see core/wild.js)
+  design: null, // the slope: { width, sections: [{ slope, length }] } (see core/slopes.js)
   tiles: [], // the tiles you changed, with what's on them (see core/tiles.js)
   start: null, // the start gate: { x, z }
   rideCam: 'chase', // chase | helmet
@@ -60,7 +63,7 @@ const state = {
   best: null, // { score, time }
   bestPath: null, // packed path of the best run, for the ghost
 };
-let base = null; // the wild mountain before any tile
+let base = null; // the bare slope before any tile
 // the selected tiles (keys "i,j"; not saved, not undone) and the copied ones
 const selection = new Set();
 let clip = null;
@@ -75,9 +78,9 @@ let lastEventCount = 0;
 let lastFeedCount = 0;
 let viewAnim = null; // the edit camera gliding to a new view
 
-function makeMountain(m) {
-  state.mountain = m;
-  base = buildWild(hf, surf, m);
+function makeSlope(design) {
+  base = buildSlope(hf, surf, design);
+  state.design = base.design;
 }
 
 // Build the tiles on the base (the whole mountain, a few milliseconds)
@@ -99,8 +102,8 @@ const startOf = () => ({ ...state.start, dir: fallLine(hf, state.start.x, state.
 
 const hadSave = loadSave();
 if (!hadSave) {
-  // first visit: a medium mountain sits behind the welcome card
-  makeMountain(newWild('medium', 'medium'));
+  // first visit: a slope sits behind the welcome card (you design your own next)
+  makeSlope(templateDesign());
   state.start = defaultStart(hf, base);
   generate();
 }
@@ -344,8 +347,7 @@ const ui = createUI({
   onResetView: resetView,
   onRideExit: () => pauseRide(),
   onRideCam: () => toggleRideCam(),
-  onNewMountain: () => ui.openMountain(state.mountain, true),
-  onMountain: (m) => newWorld(m),
+  onEditSlope: () => editSlope(),
   onFreshSnow: () => {
     if (tracks.freshSnow()) {
       ui.toast('Fresh snow: your tracks are covered.');
@@ -377,10 +379,10 @@ const ui = createUI({
     } catch {
       /* ignore */
     }
-    // first visit: pick a mountain
+    // first visit: design your slope
     if (!hadSave && !pickedOnce) {
       pickedOnce = true;
-      ui.openMountain(state.mountain, false);
+      slopeEd.open(null, { cancel: false });
     }
   },
 });
@@ -471,15 +473,38 @@ function rebuild() {
   scheduleSave();
 }
 
-// ---------- a new mountain ----------
-function newWorld(m) {
+// ---------- the slope ----------
+const slopeEd = createSlopeEditor({ onBuild: (d, o) => newWorld(d, o) });
+function editSlope() {
+  if (riding) pauseRide();
+  ui.closeMenu();
+  slopeEd.open(state.design, { cancel: true, tiles: state.tiles.length });
+}
+
+// Build a (new) slope. keep: what you built stays where it was (tiles are counted from the
+// top line, and stay centred if the width changes), and so does the start gate.
+function newWorld(design, { keep = false, changed = true } = {}) {
+  if (keep && !changed) return;
   if (riding) exitRide();
   endRun();
-  makeMountain(m);
-  state.tiles = [];
+  const oldCols = cols();
+  const oldStart = state.start;
+  makeSlope(design);
   selection.clear();
-  state.start = defaultStart(hf, base);
+  if (keep) {
+    const di = Math.round((cols() - oldCols) / 2);
+    state.tiles = trimTiles(
+      state.tiles.map((t) => ({ ...t, i: t.i + di })),
+      cols(),
+      rows()
+    );
+    state.start = oldStart ? clampStart(oldStart) : defaultStart(hf, base);
+  } else {
+    state.tiles = [];
+    state.start = defaultStart(hf, base);
+  }
   generate();
+  // a different slope: a different run (the old best and its ghost don't fit any more)
   state.best = null;
   state.bestPath = null;
   history.clear();
@@ -495,13 +520,12 @@ function newWorld(m) {
   refreshScene();
   scheduleSave();
   computeHome();
-  camera.position.copy(HOME_CAM);
-  controls.target.copy(HOME_TARGET);
+  frameTop();
   viewAnim = null;
   setTool('select');
-  const s = sizeOf(m);
-  const st = steepOf(m);
-  ui.toast(`${st.label} mountain, ${s.L >= 1000 ? `${s.L / 1000} km` : `${s.L} m`}. Select tiles and shape them, pick Start to put the gate anywhere, then Ride.`);
+  const st = designStats(state.design);
+  const len = st.length >= 1000 ? `${(st.length / 1000).toFixed(2).replace(/\.?0+$/, '')} km` : `${st.length} m`;
+  ui.toast(`${len} long, ${Math.round(st.drop)} m down, ${widthOf(state.design)} m wide. ${keep ? 'Your tiles are where they were.' : 'Select tiles and shape them, pick Start to put the gate anywhere, then Ride.'}`);
 }
 
 // ---------- the start gate ----------
@@ -574,7 +598,7 @@ const ACT_DONE = {
   powder: (d) => (d.powder ? 'Powder: deep, slow, soft' : 'Packed snow again'),
   ice: (d) => (d.ice ? 'Ice: fast, the edges barely hold' : 'Packed snow again'),
   rotate: () => 'Turned a twelfth of a turn',
-  erase: () => 'Back to the wild mountain',
+  erase: () => 'Back to the bare slope',
 };
 
 // Do an action to the selected tiles (the buttons, the keys)
@@ -850,8 +874,8 @@ function scheduleSave() {
       localStorage.setItem(
         SAVE_KEY,
         JSON.stringify({
-          v: 9,
-          mountain: state.mountain,
+          v: 10,
+          design: state.design,
           tiles: packTiles(state.tiles),
           start: { x: r1(state.start.x), u: r1(state.start.z - hf.startZ) },
           brush: state.brush,
@@ -881,14 +905,17 @@ function loadSave() {
     raw = localStorage.getItem(SAVE_KEY);
     if (!raw) return false;
     const data = JSON.parse(raw);
-    if (data.v !== 7 && data.v !== 8 && data.v !== 9) {
+    if (![7, 8, 9, 10].includes(data.v)) {
       backupSave(raw);
-      loadNote = 'Highrise has wild mountains now: pick one and shape it. Your old run was kept aside.';
+      loadNote = 'Highrise starts from a slope you design now: design one and shape it. Your old run was kept aside.';
       return false;
     }
-    const m = data.mountain;
-    if (!m || !SIZES.some((s) => s.id === m.size) || !STEEPNESS.some((s) => s.id === m.steep) || !Number.isFinite(m.seed)) throw new Error('no mountain in save');
-    makeMountain({ size: m.size, steep: m.steep, seed: m.seed });
+    // v10 saves the slope you designed; before, a wild mountain (size, steepness, seed): it
+    // becomes sections of about the same length, width and steepness
+    const wild = data.v < 10;
+    if (wild && !(data.mountain && data.mountain.size && data.mountain.steep)) throw new Error('no mountain in save');
+    if (!wild && !(data.design && Array.isArray(data.design.sections))) throw new Error('no slope in save');
+    makeSlope(wild ? designFromWild(data.mountain) : normalizeDesign(data.design));
     // v9: tiles and their actions; v8 painted pieces on the hexagons; v7 on 10 m squares
     let tiles;
     if (data.v === 9) tiles = unpackTiles(data.tiles);
@@ -896,7 +923,9 @@ function loadSave() {
       const pieces = unpackPieces(data.tiles);
       tiles = fromPieces(data.v === 7 ? squaresToHexes(pieces, cols(), rows()) : pieces);
     }
-    state.tiles = trimTiles(tiles, cols(), rows());
+    // the wild mountains were wider or narrower: keep the tiles centred
+    const di = wild ? Math.round((cols() - hexCols(WILD_WIDTH[data.mountain.size] || 720)) / 2) : 0;
+    state.tiles = trimTiles(di ? tiles.map((t) => ({ ...t, i: t.i + di })) : tiles, cols(), rows());
     const st = data.start;
     state.start = st && Number.isFinite(st.x) && Number.isFinite(st.u) ? clampStart({ x: st.x, z: hf.startZ + st.u }) : defaultStart(hf, base);
     if ([1, 2, 3].includes(data.brush)) state.brush = data.brush;
@@ -904,13 +933,12 @@ function loadSave() {
     state.relief = !!data.relief;
     state.contours = !!data.contours;
     state.muted = !!data.muted;
-    if (data.v >= 8 && data.best && typeof data.best.score === 'number') {
+    if (data.v >= 10 && data.best && typeof data.best.score === 'number') {
       state.best = data.best;
       state.bestPath = Array.isArray(data.bestPath) ? data.bestPath : null;
     }
     if (data.rideCam === 'helmet' || data.rideCam === 'chase') state.rideCam = data.rideCam;
-    if (data.v === 7 && Array.isArray(data.pistes) && data.pistes.length) loadNote = 'No more pistes: the whole mountain is yours. Your terrain is kept; pick Start to put the gate anywhere.';
-    else if (data.v < 9 && state.tiles.length) loadNote = 'New: select tiles, then act on them. What you painted is kept, as tile actions.';
+    if (wild) loadNote = 'Highrise starts from a slope you design now: your mountain became sections (Edit the slope, in the ••• menu). Your tiles are kept.';
     return true;
   } catch {
     if (raw) {
@@ -1359,6 +1387,22 @@ function drainFeed() {
   }
 }
 
+// Near the top of the slope, looking down it from above the start: close enough to see the
+// tiles, which is where you begin building (R goes back to the whole mountain)
+function frameTop() {
+  const portrait = camera.aspect < 1;
+  const L = hf.finishZ - hf.startZ;
+  const u = Math.min(portrait ? 110 : 140, L * 0.35);
+  const z = hf.startZ + u;
+  const target = new THREE.Vector3(0, hf.heightAt(0, z), z);
+  const pos = target.clone().add(portrait ? new THREE.Vector3(0, 200, -190) : new THREE.Vector3(-150, 170, -190));
+  const g = hf.inside(pos.x, pos.z) ? hf.heightAt(pos.x, pos.z) : hf.heightAt(pos.x, hf.startZ);
+  pos.y = Math.max(pos.y, g + 70);
+  camera.position.copy(pos);
+  controls.target.copy(target);
+  controls.update();
+}
+
 function resetView() {
   if (riding) return;
   computeHome();
@@ -1584,7 +1628,7 @@ window.addEventListener('keydown', (e) => {
   else if (key === 'v') setTool('view');
   else if (key === 'c') ui.toggleContours();
   else if (key === 't') ui.toggleRelief();
-  else if (key === 'n') ui.openMountain(state.mountain, true);
+  else if (key === 'n') editSlope();
   else if (key === 'm') ui.toggleMute();
   else if (key === 'r') resetView();
   else if (e.key === '[' || e.key === ']') {
@@ -1615,9 +1659,9 @@ document.addEventListener(
 );
 
 // ---------- start ----------
-if (!hadSave) document.getElementById('intro-go').textContent = 'Choose my mountain';
+if (!hadSave) document.getElementById('intro-go').textContent = 'Design my slope';
 if (!seenIntro) ui.openIntro();
-else if (!hadSave) setTimeout(() => ui.openMountain(state.mountain, false), 0);
+else if (!hadSave) setTimeout(() => slopeEd.open(null, { cancel: false }), 0);
 ui.setBest(state.best);
 if (loadNote) ui.toast(loadNote, 'bad');
 setTool(state.tool);

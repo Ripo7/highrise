@@ -1,13 +1,12 @@
-// The mountain as you ride it: the wild base (wild.js) with your tiles on top (tiles.js,
-// terrain.js). Then the snow (packed, powder and ice where you put them, bare rock on the
-// cliffs, the rock bands and any face too steep to hold snow, but never on a kicker) and
-// the trees and boulders: the natural forest less your clearings, plus the trees you
-// planted, none on the rock, on a jump or a drop, or right on the start gate.
+// The mountain as you ride it: the slope you designed (slopes.js) with your tiles on top
+// (tiles.js, terrain.js). Then the snow (packed, powder and ice where you put them, bare
+// rock on the rock bands and any face too steep to hold snow, but never on a kicker) and
+// the trees you planted: none on the rock, on a jump or a drop, or right on the start gate.
+// (The base can hold a forest of its own too; a designed slope starts bare.)
 
 import { applyTerrain } from './terrain.js';
 import { smoothstep } from './heightfield.js';
 import { TREE } from './props.js';
-import { steepness } from './wild.js';
 
 let rockBuf = null;
 const scratchRock = (n) => (rockBuf && rockBuf.length === n ? rockBuf : (rockBuf = new Uint8Array(n)));
@@ -112,11 +111,31 @@ export function fallLine(hf, x, z, r = 6) {
 export function defaultStart(hf, base) {
   let best = null;
   for (let x = -120; x <= 120; x += 10) {
-    const u = 28;
+    const u = 14; // just below the top line
     const z = hf.startZ + u;
     const near = base.forest.filter((p) => Math.abs(p.x - x) < 12 && Math.abs(p.u - u) < 16).length;
     const cost = near * 3 + Math.abs(x) / 40;
     if (!best || cost < best.cost) best = { cost, x, z };
   }
   return { x: best.x, z: best.z };
+}
+
+// Bare rock where the snow can't hold: faces steeper than about 45 degrees (0..255 per cell)
+export function steepness(hf, out = new Uint8Array(hf.nx * hf.nz)) {
+  const { nx, nz, h } = hf;
+  const c2 = 2 * hf.cell;
+  for (let j = 0; j < nz; j++) {
+    const jm = j > 0 ? j - 1 : 0;
+    const jp = j < nz - 1 ? j + 1 : nz - 1;
+    for (let i = 0; i < nx; i++) {
+      const im = i > 0 ? i - 1 : 0;
+      const ip = i < nx - 1 ? i + 1 : nx - 1;
+      const gx = (h[j * nx + ip] - h[j * nx + im]) / c2;
+      const gz = (h[jp * nx + i] - h[jm * nx + i]) / c2;
+      const g2 = gx * gx + gz * gz;
+      // smoothstep(1, 1.25, |g|) (45 to 51 degrees) without the square root
+      out[j * nx + i] = g2 <= 1 ? 0 : g2 >= 1.5625 ? 255 : Math.round(255 * smoothstep(1, 1.25, Math.sqrt(g2)));
+    }
+  }
+  return out;
 }

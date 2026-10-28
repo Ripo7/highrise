@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover, user-scalable=no" />
     <title>Highrise</title>
-    <meta name="description" content="A wild mountain to shape and ride: select its tiles and shape them, start anywhere, ski it." />
+    <meta name="description" content="Design a ski slope section by section, shape its tiles, start anywhere, ski it." />
     <meta name="theme-color" content="#99adf9" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -75,7 +75,7 @@
           <button id="mute" class="btn btn-quiet" type="button" aria-pressed="false" title="Sound (M)">Sound on</button>
           <button id="reset-view" class="btn btn-quiet" type="button" title="Reset view (R)">Reset view</button>
           <button id="fresh-snow" class="btn btn-quiet" type="button" title="Cover your ski tracks with fresh snow">Fresh snow</button>
-          <button id="reset" class="btn btn-quiet" type="button" title="A new wild mountain (N)">New mountain</button>
+          <button id="reset" class="btn btn-quiet" type="button" title="Change the sections, the width, or start a new slope (N)">Edit the slope</button>
         </div>
         <div class="panel history">
           <button id="undo" class="icon-btn" type="button" aria-label="Undo" title="Undo (Ctrl+Z)">
@@ -151,29 +151,32 @@
     <div id="toast" class="toast" role="status" hidden></div>
 
     <!-- new mountain: how steep, how big, and which one -->
-    <div id="mountain" class="intro" hidden>
-      <div class="intro-card panel mountain-card" role="dialog" aria-modal="true" aria-labelledby="mt-title">
-        <p class="intro-eyebrow">New mountain</p>
-        <h1 id="mt-title">Choose your mountain</h1>
-        <div class="mt-body">
-          <figure class="mt-preview">
-            <canvas id="mt-canvas" width="150" height="230" aria-label="The mountain seen from above"></canvas>
-            <button id="mt-another" class="btn mt-another" type="button" title="Another mountain like this one">
-              <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="4"/><circle cx="8" cy="8" r="1.3"/><circle cx="16" cy="16" r="1.3"/><circle cx="16" cy="8" r="1.3"/><circle cx="8" cy="16" r="1.3"/><circle cx="12" cy="12" r="1.3"/></svg>
-              Another one
-            </button>
-          </figure>
-          <div class="mt-opts">
-            <div id="mt-slopes" class="mt-slopes" role="radiogroup" aria-label="Steepness"></div>
-            <div class="mt-row">
-              <span class="ctl-l">Size</span>
-              <div id="mt-length" class="seg" role="group" aria-label="Size"></div>
-            </div>
-          </div>
+    <div id="slope" class="intro" hidden>
+      <div class="intro-card panel slope-card" role="dialog" aria-modal="true" aria-labelledby="sl-title">
+        <p id="sl-eyebrow" class="intro-eyebrow">New slope</p>
+        <h1 id="sl-title">Design the slope</h1>
+        <figure class="sl-side">
+          <canvas id="sl-canvas" aria-label="The slope seen from the side, true to scale, coloured by steepness. Tap a section to pick it."></canvas>
+          <dl class="sl-read">
+            <div><dt>Length</dt><dd id="sl-len">0 m</dd></div>
+            <div><dt>Drop</dt><dd id="sl-drop">0 m</dd></div>
+            <div><dt>Average</dt><dd id="sl-avg">0°</dd></div>
+            <div><dt>Steepest</dt><dd id="sl-max">0°</dd></div>
+          </dl>
+        </figure>
+        <div id="sl-templates" class="sl-templates" role="group" aria-label="Start from"></div>
+        <div class="sl-width-row">
+          <span class="ctl-l">Width</span>
+          <div id="sl-width" class="seg" role="group" aria-label="Width"></div>
         </div>
+        <div class="sl-head" aria-hidden="true"><span></span><span class="ctl-l">Slope</span><span class="ctl-l">Length</span><span></span></div>
+        <ol id="sl-list" class="sl-list" aria-label="Sections, top to bottom"></ol>
+        <button id="sl-add" class="btn sl-add" type="button">+ Add a section</button>
+        <label id="sl-keep-row" class="check sl-keep" hidden><input id="sl-keep" type="checkbox" checked /><span>Keep what I built (<span id="sl-keep-n">0</span> tiles)</span></label>
+        <p id="sl-msg" class="sl-msg" role="status"></p>
         <div class="res-actions">
-          <button id="mt-cancel" class="btn res-btn" type="button">Cancel</button>
-          <button id="mt-go" class="send res-retry" type="button">Go</button>
+          <button id="sl-cancel" class="btn res-btn" type="button">Cancel</button>
+          <button id="sl-go" class="send res-retry" type="button">Build it</button>
         </div>
       </div>
     </div>
@@ -182,8 +185,12 @@
       <div class="intro-card panel" role="dialog" aria-modal="true" aria-labelledby="intro-title">
         <p class="intro-eyebrow">How to play</p>
         <h1 id="intro-title">Build it. Ride it.</h1>
-        <p class="intro-lede">A wild mountain, all yours. Shape the snow, put the start wherever you like, and ride it. Jump between riding and building whenever you want: the run waits for you.</p>
+        <p class="intro-lede">Design a slope section by section, then make it yours: shape the snow, add jumps and trees, put the start wherever you like, and ride it. Jump between riding and building whenever you want: the run waits for you.</p>
         <ol class="intro-steps">
+          <li>
+            <b>Design the slope</b>
+            <span>Stack sections down the mountain, each with its pitch and its length, and pick how wide it is. Change it any time with Edit the slope (••• menu).</span>
+          </li>
           <li>
             <b>Select, then shape</b>
             <span class="desktop-only">Click or drag on the snow to select hexagon tiles, then act on them: raise, lower, flatten, smooth, steepen; a jump, a drop, rocks; trees, a clearing, powder, ice; copy, paste, rotate, erase. Tap again for more. Tiles side by side melt into one shape.</span>

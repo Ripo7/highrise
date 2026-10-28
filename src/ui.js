@@ -1,7 +1,5 @@
-// DOM overlay: run HUD, trick pop-ups, results, dialogs, toasts, menu, mountain chooser.
-import { SIZES, STEEPNESS, newWild } from './core/wild.js';
-import { drawPreview } from './mountainPreview.js';
-import { THEME } from './render/theme.js';
+// DOM overlay: run HUD, trick pop-ups, results, dialogs, toasts, menu. (The slope editor
+// is its own module: slopeEditor.js.)
 
 const STATUS_LABEL = {
   idle: 'Ready',
@@ -27,56 +25,15 @@ export function createUI(opts) {
   // menu
   $('#reset').addEventListener('click', () => {
     setMenu(false);
-    opts.onNewMountain();
+    opts.onEditSlope();
   });
   $('#fresh-snow').addEventListener('click', () => {
     setMenu(false);
     opts.onFreshSnow();
   });
 
-  // the new-mountain card: how steep, how big, and which one (a preview from above)
-  const mt = $('#mountain');
-  let mtPick = newWild('medium', 'medium');
-  const profileSvg = (deg) => {
-    const t = Math.tan((deg * Math.PI) / 180);
-    const y = Math.min(36, 6 + 38 * t);
-    const path = `M4 6 C 20 ${(6 + (y - 6) * 0.3).toFixed(1)}, 36 ${(6 + (y - 6) * 0.8).toFixed(1)}, 56 ${y.toFixed(1)}`;
-    return `<svg viewBox="0 0 60 40" aria-hidden="true"><path class="fill" d="${path} L56 40 L4 40 Z"/><path d="${path}"/></svg>`;
-  };
-  const km = (m) => (m >= 1000 ? `${(m / 1000).toFixed(1).replace('.0', '')} km` : `${m} m`);
-  let previewTimer = 0;
-  const renderMt = () => {
-    $('#mt-slopes').innerHTML = STEEPNESS.map(
-      (sl) => `<button type="button" role="radio" class="mt-slope" data-slope="${sl.id}" aria-checked="${sl.id === mtPick.steep}" data-d="${sl.deg < 18 ? 'blue' : sl.deg < 25 ? 'red' : 'black'}">
-        ${profileSvg(sl.deg)}<b>${sl.label}</b><small>about ${sl.deg}°</small><em>${sl.blurb}</em></button>`
-    ).join('');
-    $('#mt-length').innerHTML = SIZES.map(
-      (l) => `<button type="button" data-len="${l.id}" aria-pressed="${l.id === mtPick.size}">${l.label}<small>${km(l.L)}</small></button>`
-    ).join('');
-    // draw the preview just after the card shows, so opening it stays instant
-    clearTimeout(previewTimer);
-    previewTimer = setTimeout(() => drawPreview($('#mt-canvas'), mtPick, THEME), 0);
-  };
-  const closeMt = () => {
-    mt.hidden = true;
-  };
-  mt.addEventListener('click', (e) => {
-    const sl = e.target.closest('[data-slope]');
-    const ln = e.target.closest('[data-len]');
-    if (sl) mtPick = { ...mtPick, steep: sl.dataset.slope };
-    if (ln) mtPick = { ...mtPick, size: ln.dataset.len };
-    if (sl || ln) renderMt();
-    if (e.target === mt && !$('#mt-cancel').hidden) closeMt();
-  });
-  $('#mt-another').addEventListener('click', () => {
-    mtPick = newWild(mtPick.size, mtPick.steep);
-    renderMt();
-  });
-  $('#mt-cancel').addEventListener('click', closeMt);
-  $('#mt-go').addEventListener('click', () => {
-    closeMt();
-    opts.onMountain({ ...mtPick });
-  });
+  // the slope editor (slopeEditor.js) is a dialog too
+  const slopeDlg = $('#slope');
 
   const toggle = (sel, initial, cb) => {
     const btn = $(sel);
@@ -151,7 +108,6 @@ export function createUI(opts) {
   window.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
       if (!intro.hidden) closeIntro();
-      else if (!mt.hidden && !$('#mt-cancel').hidden) closeMt();
       setMenu(false);
     }
   });
@@ -182,17 +138,9 @@ export function createUI(opts) {
   return {
     openIntro,
     get blocking() {
-      return !intro.hidden || !mt.hidden;
+      return !intro.hidden || !slopeDlg.hidden;
     },
-    openMountain(current, canCancel = true) {
-      setMenu(false);
-      // the same settings as now, a different mountain
-      if (current && current.size) mtPick = newWild(current.size, current.steep);
-      $('#mt-cancel').hidden = !canCancel;
-      renderMt();
-      mt.hidden = false;
-      $('#mt-go').focus({ preventScroll: true });
-    },
+    closeMenu: () => setMenu(false),
     get resultsOpen() {
       return !results.hidden;
     },

@@ -4,7 +4,7 @@
 // of raised tiles is a ridge, a cluster a hill, raised beside lowered rolls into it), with
 // no seam, step or hexagon corner anywhere.
 //
-// In order, on the wild mountain:
+// In order, on the bare slope you designed (slopes.js):
 //   steepen / ease and rock bands   change the slope down the fall line, then ease back
 //   flatten                         each group levelled to its own average height
 //   raise / lower                   the snow lifted or dug, metre for metre
@@ -16,7 +16,7 @@
 
 import { smoothstep, MIN_H, MAX_H, makeValueNoise } from './heightfield.js';
 import { TREE, rng } from './props.js';
-import { HEX_R, hexAt, hexCenter, hexCols, hexRows, hexDisk, hexLine } from './hex.js';
+import { HEX_R, HEX_W, hexAt, hexCenter, hexCols, hexRows, hexDisk, hexLine } from './hex.js';
 
 export { HEX_R };
 
@@ -179,7 +179,7 @@ const groupBy = (list, f) => {
 };
 
 /**
- * Shape the snow with the tiles (hf is changed in place; it holds the wild mountain when
+ * Shape the snow with the tiles (hf is changed in place; it holds the bare slope when
  * this is called). Returns what the rest of the world needs: the rock, powder, ice,
  * clearing and no-trees fields, the kickers' footprints (they keep their snow however
  * steep), and the planted trees.
@@ -364,7 +364,8 @@ export function applyTerrain(hf, tiles) {
 
 /**
  * A jump or a drop from a group of tiles, facing dirDeg (0 = down the map, 90 = +x). The
- * tiles set how wide it is (across its facing) and how long: a longer one is bigger.
+ * tiles set how wide it is (their span across its facing) and how long (their span along
+ * it): a longer one is bigger.
  *   jump: a concave ramp up to a lip near the far edge, then the snow falls away behind it
  *   drop: the snow shelves up to an edge, falls sharply, and a landing eases back below
  * Added to hf. Returns the footprint (a field of 0..1) for a jump, so world.js keeps snow
@@ -386,8 +387,10 @@ function shapeFeature(hf, tiles, kind, dirDeg) {
   const tMax = t1 + 0.5 * HEX_R;
   const L = tMax - tMin;
   const H = Math.max(1.4, Math.min(4.5, 0.22 * L)); // jump: lip height
-  // jump: the ramp curves up harder on a long one, so every lip kicks out at about 24°
-  const P = Math.max(1.6, Math.min(3.5, (0.45 * L) / H));
+  // jump: the ramp curves up harder on a long one, and its lip kicks out a little steeper
+  // the bigger it is (about 22° on one tile, 29° on the biggest)
+  const lip = 0.4 + 0.05 * (H - 1.4);
+  const P = Math.max(1.6, Math.min(3.8, (lip * L) / H));
   const K = 1.6 + 0.7 * H; // jump: how far behind the lip the snow is back to the slope
   const D = Math.max(2, Math.min(5, 1.6 + 0.12 * L)); // drop: the step
   const reach = kind === 'jump' ? K + 2 : 1.2 + 4 * D + 2;
@@ -400,9 +403,17 @@ function shapeFeature(hf, tiles, kind, dirDeg) {
         }
       : (t) => (D / 2) * smoothstep(tMin - 6, tMax - 1, t) - D * smoothstep(tMax, tMax + 1.2, t) + (D / 2) * smoothstep(tMax + 1.2, tMax + 1.2 + 4 * D, t);
 
-  // across: as wide as the tiles, measured on the line back inside them
-  const M = tileField(hf, tiles, 1.5);
-  if (!M) return null;
+  // across: as wide as the tiles side by side (a column of tiles zigzags down the rows, so
+  // it's the span of all of them, the same all along its length: a clean kicker)
+  const px = dz;
+  const pz = -dx;
+  const across = centres.map((c) => c.x * px + c.z * pz);
+  const hw = 0.5 * (HEX_W / 2 + HEX_R); // a hexagon's half width, between flats and corners
+  const coverage = (a) => {
+    let m = 0;
+    for (const ak of across) m = Math.max(m, 1 - smoothstep(hw - 1.2, hw + 1.2, Math.abs(a - ak)));
+    return m;
+  };
   const { cell, nx, h } = hf;
   let xa = Infinity;
   let xb = -Infinity;
@@ -427,10 +438,7 @@ function shapeFeature(hf, tiles, kind, dirDeg) {
       const x = i * cell - hf.halfX;
       const t = x * dx + z * dz;
       if (t < tMin - 7 || t > tMax + reach) continue;
-      const tc = Math.max(t0, Math.min(t1, t));
-      const qx = x - dx * (t - tc);
-      const qz = z - dz * (t - tc);
-      const m = fieldAt(M, Math.round((qx + hf.halfX) / cell), Math.round((qz + hf.halfZ) / cell));
+      const m = coverage(x * px + z * pz);
       if (m < 0.005) continue;
       const v = m * profile(t);
       if (!v) continue;

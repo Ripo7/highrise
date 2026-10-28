@@ -14,6 +14,7 @@ import { tileCenter, gridCols, gridRows } from '../src/core/terrain.js';
 import { ACTIONS, TABS, applyAction, copyTiles, pasteTiles, tileKey } from '../src/core/tiles.js';
 import { LEVELS, resolveGoal, checkContext, emptyRun, followRun } from '../src/core/tutorial.js';
 import { CourseRun } from '../src/core/course.js';
+import { pieceLayers } from '../src/core/pieces.js';
 
 const placeholders = (s) => [...s.matchAll(/\{(\w+)(\|[^}]*)?\}/g)].map((m) => m[1]).sort().join(',');
 
@@ -66,6 +67,7 @@ const PLAN = {
   'select.pick': ['sel'],
   'select.clear': ['unsel'],
   'select.big': ['sel'],
+  'select.piece': ['piece'],
   'raise.up': ['sel', 'raise', 'raise', 'unsel'],
   'raise.down': ['sel', 'lower', 'lower'],
   'flatten.terrace': ['sel', 'flatten'],
@@ -148,6 +150,7 @@ test('every tutorial level can be done, step by step, the way it says (rides inc
       const list = () => [...sel].map((k) => k.split(',').map(Number));
       for (const what of PLAN[`${level.id}.${s.id}`]) {
         if (what === 'sel') sel = new Set(goal.map(([i, j]) => tileKey(i, j)));
+        else if (what === 'piece') sel = new Set(pieceLayers(w.tiles, ...goal[0])[0].tiles.map(([i, j]) => tileKey(i, j)));
         else if (what === 'unsel') sel = new Set();
         else if (what === 'start') {
           const c = tileCenter(w.hf, ...goal[0]);

@@ -20,9 +20,16 @@ const BADGES = {
   ease: (d) => (d.pitch < 0 ? `${-d.pitch}/3` : ''),
   trees: (d) => (d.trees ? `${d.trees}/3` : ''),
 };
+// keys besides 1-9 (the actions of the tab on show, in order)
+const KEYS = { raise: '+', lower: '−', flatten: 'F', rotate: 'Q', erase: 'X', copy: 'Ctrl+C', paste: 'Ctrl+V' };
 // actions that are on or off for the whole selection
 const TOGGLES = ['flatten', 'jump', 'drop', 'rocks', 'gate', 'clear', 'powder', 'ice'];
 const flagOf = { flatten: 'flat' };
+
+const actionsOf = (tab) =>
+  Object.entries(ACTIONS)
+    .filter(([, a]) => a.tab === tab)
+    .map(([id]) => id);
 
 export function createBuildBar({ onTool, onAction, onDeselect, onSize }) {
   const root = document.getElementById('buildbar');
@@ -42,12 +49,11 @@ export function createBuildBar({ onTool, onAction, onDeselect, onSize }) {
       (x) => `<button type="button" role="tab" data-tab="${x.id}" aria-selected="${x.id === tab}" style="--c:${CATEGORY_COLORS[x.id]}">${t(`tab.${x.id}`)}</button>`
     ).join('');
     const c = CATEGORY_COLORS[tab];
-    list.innerHTML = Object.entries(ACTIONS)
-      .filter(([, a]) => a.tab === tab)
-      .map(
-        ([id]) =>
-          `<button type="button" class="bb-piece" data-action="${id}" style="--c:${c}" title="${t('bar.actTitle', { a: t(`act.${id}`), h: t(`act.${id}.hint`) })}">${svg(ACTION_ICONS[id])}<span>${t(`act.${id}`)}</span><em class="bb-badge" hidden></em></button>`
-      )
+    list.innerHTML = actionsOf(tab)
+      .map((id, k) => {
+        const keys = [String(k + 1), KEYS[id]].filter(Boolean).join(' · ');
+        return `<button type="button" class="bb-piece" data-action="${id}" style="--c:${c}" title="${t('bar.actTitle', { a: t(`act.${id}`), h: t(`act.${id}.hint`) })} (${keys})">${svg(ACTION_ICONS[id])}<span>${t(`act.${id}`)}</span><kbd class="bb-key">${k + 1}</kbd><em class="bb-badge" hidden></em></button>`;
+      })
       .join('');
     list.scrollLeft = 0;
     sync();
@@ -138,6 +144,10 @@ export function createBuildBar({ onTool, onAction, onDeselect, onSize }) {
     },
     get tab() {
       return tab;
+    },
+    // the actions of the tab on show, in order (keys 1-9)
+    get actions() {
+      return actionsOf(tab);
     },
     // show a tab (the tutorial points at an action), and mark what to press: an action, a
     // tool ('select', 'start'), the brush sizes ('size') or the selection chip ('chip')

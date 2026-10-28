@@ -62,10 +62,13 @@ export const LEVELS = [
     id: 'select',
     design: { width: 'narrow', sections: [S(14, 260)] },
     start: { x: 0, u: 14 },
+    // a hill already built, to pick again whole
+    tiles: (hf) => act(hf, [], { x: 30, u: 170, size: 2 }, 'raise', 'raise'),
     steps: [
       { id: 'pick', goal: { x: 0, u: 70, size: 2 }, hint: 'select', done: (c) => c.goalSelected() },
       { id: 'clear', goal: null, hint: 'chip', done: (c) => c.selCount === 0 },
       { id: 'big', goal: { x: -30, u: 110, size: 3 }, hint: 'size', done: (c) => c.goalSelected() },
+      { id: 'piece', goal: { x: 30, u: 170, size: 2 }, hint: 'select', done: (c) => c.goalSelected() && c.selCount === c.goal.length },
     ],
   },
   {

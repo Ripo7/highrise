@@ -77,6 +77,8 @@
           <button id="reset-view" class="btn btn-quiet" type="button" title="Reset view (R)" data-i18n-title="menu.resetView.title" data-i18n="menu.resetView">Reset view</button>
           <button id="fresh-snow" class="btn btn-quiet" type="button" title="Cover your ski tracks with fresh snow" data-i18n-title="menu.freshSnow.title" data-i18n="menu.freshSnow">Fresh snow</button>
           <button id="reset" class="btn btn-quiet" type="button" title="Change the sections, the width, or start a new slope (N)" data-i18n-title="menu.editSlope.title" data-i18n="menu.editSlope">Edit the slope</button>
+          <button id="save-btn" class="btn btn-quiet" type="button" title="Save this slope under a name (Ctrl+S)" data-i18n-title="menu.saveAs.title" data-i18n="menu.saveAs">Save as…</button>
+          <button id="projects-btn" class="btn btn-quiet" type="button" title="Open a slope you saved" data-i18n-title="menu.projects.title" data-i18n="menu.projects">Projects</button>
           <button id="tutorial-btn" class="btn btn-quiet" type="button" title="Learn every action, one level at a time" data-i18n-title="menu.tutorial.title" data-i18n="menu.tutorial">Tutorial</button>
           <button id="lang-btn" class="btn btn-quiet" type="button" lang="fr" title="Passer le jeu en français" data-i18n-title="menu.lang.title" data-i18n="menu.lang">Français</button>
         </div>
@@ -154,34 +156,54 @@
 
     <div id="toast" class="toast" role="status" hidden></div>
 
-    <!-- the slope editor (slopeEditor.js) -->
-    <div id="slope" class="intro" hidden>
-      <div class="intro-card panel slope-card" role="dialog" aria-modal="true" aria-labelledby="sl-title">
-        <p id="sl-eyebrow" class="intro-eyebrow">New slope</p>
-        <h1 id="sl-title" data-i18n="sl.title">Design the slope</h1>
-        <figure class="sl-side">
-          <canvas id="sl-canvas" aria-label="The slope seen from the side, true to scale, coloured by steepness. Tap a section to pick it." data-i18n-aria="sl.canvas"></canvas>
-          <dl class="sl-read">
-            <div><dt data-i18n="sl.length">Length</dt><dd id="sl-len">0 m</dd></div>
-            <div><dt data-i18n="sl.drop">Drop</dt><dd id="sl-drop">0 m</dd></div>
-            <div><dt data-i18n="sl.avg">Average</dt><dd id="sl-avg">0°</dd></div>
-            <div><dt data-i18n="sl.max">Steepest</dt><dd id="sl-max">0°</dd></div>
-          </dl>
-        </figure>
-        <div id="sl-templates" class="sl-templates" role="group" aria-label="Start from" data-i18n-aria="sl.startFrom"></div>
-        <div class="sl-width-row">
-          <span class="ctl-l" data-i18n="sl.width">Width</span>
-          <div id="sl-width" class="seg" role="group" aria-label="Width" data-i18n-aria="sl.width"></div>
+    <!-- the slope editor (slopeMode.js): in the 3D view, with this bar at the bottom -->
+    <section id="slopebar" class="slopebar panel" hidden aria-labelledby="sb-title">
+      <div class="sb-top">
+        <div class="sb-titles">
+          <p id="sb-eyebrow" class="sb-eyebrow">New slope</p>
+          <h2 id="sb-title" class="sb-title" data-i18n="sl.title">Design the slope</h2>
         </div>
-        <div class="sl-head" aria-hidden="true"><span></span><span class="ctl-l" data-i18n="sl.slope">Slope</span><span class="ctl-l" data-i18n="sl.length">Length</span><span></span></div>
-        <ol id="sl-list" class="sl-list" aria-label="Sections, top to bottom" data-i18n-aria="sl.sections"></ol>
-        <button id="sl-add" class="btn sl-add" type="button" data-i18n="sl.add">+ Add a section</button>
-        <label id="sl-keep-row" class="check sl-keep" hidden><input id="sl-keep" type="checkbox" checked /><span id="sl-keep-text">Keep what I built (0 tiles)</span></label>
-        <p id="sl-msg" class="sl-msg" role="status"></p>
-        <div class="res-actions">
-          <button id="sl-cancel" class="btn res-btn" type="button" data-i18n="sl.cancel">Cancel</button>
-          <button id="sl-go" class="send res-retry" type="button" data-i18n="sl.build">Build it</button>
+        <dl class="sb-read">
+          <div><dt data-i18n="sl.length">Length</dt><dd id="sb-len">0 m</dd></div>
+          <div><dt data-i18n="sl.drop">Drop</dt><dd id="sb-drop">0 m</dd></div>
+          <div><dt data-i18n="sl.avg">Average</dt><dd id="sb-avg">0°</dd></div>
+          <div><dt data-i18n="sl.max">Steepest</dt><dd id="sb-max">0°</dd></div>
+        </dl>
+        <button id="sb-side" class="btn sb-side" type="button" data-i18n-title="sb.sideTitle" title="See the slope from the side">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6l7 5 4-2 7 8"/><path d="M3 20h18"/><circle cx="10" cy="11" r="1.6"/><circle cx="14" cy="9" r="1.6"/></svg><span data-i18n="sb.side">Side view</span>
+        </button>
+      </div>
+      <div class="sb-row sb-start">
+        <div id="sb-templates" class="sb-templates" role="group" aria-label="Start from" data-i18n-aria="sl.startFrom"></div>
+        <div id="sb-width" class="seg sb-width" role="group" aria-label="Width" data-i18n-aria="sl.width"></div>
+      </div>
+      <div id="sb-section" class="sb-row sb-section"></div>
+      <div class="sb-row sb-foot">
+        <label id="sb-keep-row" class="check sb-keep" hidden><input id="sb-keep" type="checkbox" checked /><span id="sb-keep-text">Keep what I built</span></label>
+        <p id="sb-msg" class="sb-msg" role="status"></p>
+        <div class="sb-go">
+          <button id="sb-cancel" class="btn res-btn" type="button" data-i18n="sl.cancel">Cancel</button>
+          <button id="sb-go" class="send res-retry" type="button" data-i18n="sl.build">Build it</button>
         </div>
+      </div>
+    </section>
+
+    <!-- projects (projectsDialog.js): save as, open -->
+    <div id="projects" class="intro" hidden>
+      <div class="intro-card panel proj-card" role="dialog" aria-modal="true" aria-labelledby="pj-title">
+        <p class="intro-eyebrow" data-i18n="pj.eyebrow">Your slopes</p>
+        <h1 id="pj-title">Projects</h1>
+        <form id="pj-save" class="pj-save">
+          <label for="pj-name" class="ctl-l" data-i18n="pj.saveAs">Save as</label>
+          <div class="pj-save-row">
+            <input id="pj-name" type="text" maxlength="40" autocomplete="off" spellcheck="false" placeholder="My slope" data-i18n-attr="placeholder:pj.namePh" />
+            <button type="submit" class="send pj-save-btn" data-i18n="pj.save">Save</button>
+          </div>
+          <p id="pj-msg" class="pj-msg" role="status"></p>
+        </form>
+        <ol id="pj-list" class="pj-list"></ol>
+        <p id="pj-empty" class="pj-empty" hidden></p>
+        <div class="res-actions"><button id="pj-close" class="btn res-btn" type="button" data-i18n="pj.close">Close</button></div>
       </div>
     </div>
 

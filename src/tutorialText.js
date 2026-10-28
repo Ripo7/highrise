@@ -28,6 +28,7 @@ const EN = {
   'tut.select.pick': 'Select the 7 marked tiles: with the M brush, tap (or click) the one in the middle.',
   'tut.select.clear': 'Clear the selection: tap ✕ on the tile counter (or press Esc).',
   'tut.select.big': 'Switch to the L brush and select the 19 marked tiles. Drag to paint; drag from a selected tile to take tiles off.',
+  'tut.select.piece': 'Double-tap (or double-click) the marked hill: it selects all of what was built there, and only that.',
 
   'tut.raise': 'Raise and lower',
   'tut.raise.lede': 'Each tap lifts or digs the snow 1.5 m. Tiles side by side melt into one hill.',
@@ -119,6 +120,7 @@ const FR = {
   'tut.select.pick': 'Choisis les 7 tuiles marquées : avec le pinceau M, touche (ou clique) celle du milieu.',
   'tut.select.clear': 'Vide la sélection : touche le ✕ du compteur de tuiles (ou Échap).',
   'tut.select.big': 'Passe au pinceau L et choisis les 19 tuiles marquées. Glisse pour peindre ; glisse depuis une tuile choisie pour en retirer.',
+  'tut.select.piece': 'Touche deux fois (ou double-clique) la bosse marquée : ça choisit tout ce qui a été construit là, et seulement ça.',
 
   'tut.raise': 'Monter et creuser',
   'tut.raise.lede': 'Chaque appui monte ou creuse la neige de 1,5 m. Les tuiles voisines se fondent en une seule bosse.',

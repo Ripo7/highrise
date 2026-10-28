@@ -14,11 +14,11 @@ import { Skier, PHYS } from './core/skier.js';
 import { ScoreKeeper, SPEED_BONUS_KMH, speedRate } from './core/score.js';
 import { PropSet, TREE, propHeight } from './core/props.js';
 import { SurfaceMap } from './core/surface.js';
-import { buildSlope, templateDesign, normalizeDesign, designFromWild, designStats, widthOf, cloneDesign } from './core/slopes.js';
+import { buildSlope, templateDesign, normalizeDesign, designFromWild, designStats, widthOf, cloneDesign, sameDesign, moveJoint, sectionAt, oldTop, designLength, TOP } from './core/slopes.js';
 import { hexCols } from './core/hex.js';
 import { buildWorld, fallLine, defaultStart } from './core/world.js';
 import { HEX_R, gridCols, gridRows, tileOf, tileCenter, brushTiles, lineTiles, squaresToHexes } from './core/terrain.js';
-import { applyAction, describe, copyTiles, rotateCopy, pasteCells, pasteTiles, trimTiles, packTiles, unpackTiles, unpackPieces, fromPieces, tileKey } from './core/tiles.js';
+import { TABS, applyAction, describe, copyTiles, rotateCopy, pasteCells, pasteTiles, trimTiles, packTiles, unpackTiles, unpackPieces, fromPieces, tileKey } from './core/tiles.js';
 import { PropMeshes } from './render/propMeshes.js';
 import { Tracks } from './render/tracks.js';
 import { Decor } from './render/decor.js';
@@ -34,7 +34,12 @@ import { GateMeshes } from './render/gates.js';
 import { RideControls } from './rideControls.js';
 import { createUI } from './ui.js';
 import { createBuildBar } from './buildBar.js';
-import { createSlopeEditor, fmtLen } from './slopeEditor.js';
+import { createSlopeMode, fmtLen } from './slopeMode.js';
+import { SlopeGuides, sectionTexture } from './render/slopeGuides.js';
+import { createGizmo, viewDirection } from './viewGizmo.js';
+import { createProjectsDialog } from './projectsDialog.js';
+import { listProjects, saveProject, loadProject, deleteProject, findByName } from './projects.js';
+import { pieceLayers, allBuilt } from './core/pieces.js';
 import { CATEGORY_COLORS } from './pieceIcons.js';
 import { THEME, SUN_DIR } from './render/theme.js';
 import { createDebugOverlay } from './debugOverlay.js';
@@ -42,7 +47,8 @@ import { createDebugOverlay } from './debugOverlay.js';
 // ---------- state ----------
 const COARSE = window.matchMedia('(pointer: coarse)').matches;
 let altHeld = false; // Alt/Option held: left button orbits
-const SAVE_KEY = 'highrise.ski.v3'; // v11: the slope you designed, the tiles and their actions (gates too), the start gate, the records
+const SAVE_KEY = 'highrise.ski.v3'; // v12: the slope you designed, the tiles and their actions (gates too), the start gate, the records, the project it's saved as
+const SAVE_VERSIONS = [7, 8, 9, 10, 11, 12]; // the saves that can still be read
 const INTRO_KEY = 'highrise.intro.v8'; // v8: gates
 const TRACKS_KEY = 'highrise.tracks.v1';
 const BACKUP_KEY = 'highrise.ski.backup';
@@ -73,7 +79,9 @@ const state = {
   bestTime: null, // the fastest valid run: { time, score, splits: [time at each gate] }
   bestTimePath: null, // its path: the ghost when there are gates to race through
   course: '', // the course the records were set on (courseKey of its gates)
+  project: null, // the project this slope is saved as: { id, name }
 };
+let dirty = false; // changed since it was last saved as (or opened from) a project
 let gates = []; // the course: the gates on the tiles (core/course.js)
 let booted = false; // the UI is up (a course change can say so)
 let base = null; // the bare slope before any tile
@@ -90,6 +98,8 @@ let lastStatus = null;
 let lastEventCount = 0;
 let lastFeedCount = 0;
 let viewAnim = null; // the edit camera gliding to a new view
+let orbitAnim = null; // ... or swinging round its target to look along an axis (the gizmo)
+let slope = null; // the slope editor, while it's open: { orig, origCols, built (the design on the snow), first, timer, dragging }
 
 function makeSlope(design) {
   base = buildSlope(hf, surf, design);
@@ -244,6 +254,11 @@ const pointers = new Map();
 const hover = { valid: false, x: 0, y: 0, z: 0 };
 let paint = null; // a selection stroke: { pointerId, mode: add | remove, tile }; or placing a paste: { pointerId, paste: true, tile }
 let moving = null; // dragging the start gate: { pointerId, snap }
+let slopeDrag = null; // the slope editor: dragging the bottom of section k: { pointerId, k }
+let slopeTap = null; // ... or a tap that may pick a section: { pointerId, x, y }
+let lastTap = null; // the last tap with Select, for a double tap: { time, i, j, before }
+let pieceCycle = null; // the last piece a double tap picked: { i, j, index, sig }
+let twist = null; // two fingers: the angle between them, to turn the view
 let aimField = null; // the snow as it was when a drag began (aim at it, not at the preview)
 let shownH = null; // the heights the terrain mesh shows (to upload only what changed)
 let saveTimer = 0;
@@ -359,7 +374,7 @@ const controls = new OrbitControls(camera, canvas);
 controls.target.copy(HOME_TARGET);
 controls.enableDamping = true;
 controls.dampingFactor = 0.08;
-controls.maxPolarAngle = Math.PI * 0.47;
+controls.maxPolarAngle = Math.PI * 0.5; // level views along the axes too
 controls.minDistance = 8;
 controls.maxDistance = 14000;
 controls.zoomToCursor = true; // scroll / pinch zooms towards what you point at
@@ -397,18 +412,20 @@ const ui = createUI({
   onRelief: (on) => {
     state.relief = on;
     terrain.setRelief(on);
-    scheduleSave();
+    scheduleSave({ prefs: true });
   },
   onMute: (m) => {
     state.muted = m;
     sound.setMuted(m);
-    scheduleSave();
+    scheduleSave({ prefs: true });
   },
   onContours: (v) => {
     state.contours = v;
     terrain.uniforms.uContours.value = v ? 1 : 0;
-    scheduleSave();
+    scheduleSave({ prefs: true });
   },
+  onSaveAs: () => projectsDlg.open('save'),
+  onProjects: () => projectsDlg.open('open'),
   onIntroClosed: () => {
     try {
       localStorage.setItem(INTRO_KEY, '1');
@@ -418,7 +435,7 @@ const ui = createUI({
     // first visit: design your slope
     if (!hadSave && !pickedOnce && !tutOn) {
       pickedOnce = true;
-      slopeEd.open(null, { cancel: false });
+      editSlope({ first: true });
     }
   },
 });
@@ -435,7 +452,7 @@ const bar = createBuildBar({
   onDeselect: () => clearSelection(),
   onSize: (n) => {
     state.brush = n;
-    scheduleSave();
+    scheduleSave({ prefs: true });
   },
 });
 bar.setSize(state.brush);
@@ -529,22 +546,194 @@ function rebuild() {
 }
 
 // ---------- the slope ----------
-const slopeEd = createSlopeEditor({ onBuild: (d, o) => newWorld(d, o) });
-function editSlope() {
+// The slope editor works in the 3D view (slopeMode.js is its bar): the snow is rebuilt as
+// you change the design, with what you built kept on it (counted from the top, centred);
+// Build it keeps the new slope, Cancel puts the old one back as it was.
+const guides = new SlopeGuides(hf);
+scene.add(guides.group);
+const slopeUI = createSlopeMode({
+  change: () => slopeChanged(),
+  pick: () => showSlopeGuides(),
+  done: (d, o) => leaveSlope(true, d, o),
+  cancel: () => leaveSlope(false),
+  side: () => sideView(),
+  projects: () => projectsDlg.open('open'),
+});
+
+// first: a first slope (nothing to cancel back to)
+function editSlope({ first = false } = {}) {
   if (tutOn) return ui.toast(tx('tut.noEdit'));
-  if (riding) pauseRide();
+  if (slope) return;
+  if (riding) exitRide();
+  endRun();
+  ui.hideResults();
   ui.closeMenu();
-  slopeEd.open(state.design, { cancel: true, tiles: state.tiles.length });
+  if (paint) cancelPaint();
+  if (moving) endMove(false);
+  selection.clear();
+  setGhost();
+  slope = {
+    orig: {
+      design: cloneDesign(state.design),
+      tiles: state.tiles,
+      start: { x: state.start.x, u: state.start.z - hf.startZ },
+      best: state.best,
+      bestPath: state.bestPath,
+      bestTime: state.bestTime,
+      bestTimePath: state.bestTimePath,
+      course: state.course,
+    },
+    origCols: cols(),
+    built: cloneDesign(state.design),
+    first,
+    timer: 0,
+    dragging: false,
+  };
+  document.body.classList.add('slope-mode');
+  slopeUI.open(first ? null : state.design, { cancel: !first, tiles: state.tiles.length });
+  applyViewOffset();
+  ui.setHint(tx(COARSE ? 'hint.slope.touch' : 'hint.slope'));
+  applyControlScheme();
+  refreshBar();
+  showSlopeGuides();
+  if (first) resetView();
+  else sideView(camera.aspect < 1 ? 1 : 0.85);
+}
+
+onLang(() => slope && showSlopeGuides());
+function showSlopeGuides() {
+  if (!slope) return;
+  guides.visible = true;
+  guides.set(slopeUI.design, slopeUI.picked);
+  terrain.setSections(sectionTexture(slope.built, sameDesign(slope.built, slopeUI.design) ? slopeUI.picked : -1));
+}
+
+// the design changed: the labels and handles now, the snow a moment later (while a handle
+// is dragged, a few times a second)
+function slopeChanged() {
+  if (!slope) return;
+  showSlopeGuides();
+  if (slope.dragging) {
+    if (!slope.timer) slope.timer = setTimeout(rebuildSlope, 260);
+  } else {
+    clearTimeout(slope.timer);
+    slope.timer = setTimeout(rebuildSlope, 90);
+  }
+}
+
+// the snow for the design as it is now, what you built on it as it was on the old one
+function rebuildSlope() {
+  if (!slope) return;
+  slope.timer = 0;
+  const d = slopeUI.design;
+  if (sameDesign(d, slope.built)) return showSlopeGuides();
+  const z0 = hf.startZ;
+  makeSlope(d);
+  const o = slope.orig;
+  const di = Math.round((cols() - slope.origCols) / 2);
+  state.tiles = trimTiles(
+    o.tiles.map((t) => ({ ...t, i: t.i + di })),
+    cols(),
+    rows()
+  );
+  state.start = clampStart({ x: o.start.x, z: hf.startZ + o.start.u });
+  generate();
+  rebuildTerrain();
+  propMeshes.rebuild();
+  tracks.clear();
+  refreshScene();
+  slope.built = cloneDesign(d);
+  // the slope grows and shrinks about its middle: move the camera with its top
+  const dz = hf.startZ - z0;
+  camera.position.z += dz;
+  controls.target.z += dz;
+  if (orbitAnim) orbitAnim.target.z += dz;
+  computeHome();
+  showSlopeGuides();
+}
+
+// Build it (commit) or Cancel
+function leaveSlope(commit, design, { keep = true, changed = false } = {}) {
+  if (!slope) return;
+  clearTimeout(slope.timer);
+  if (slopeDrag) slopeDrag = null;
+  const { orig: o, origCols, first } = slope;
+  slope = null;
+  document.body.classList.remove('slope-mode');
+  applyViewOffset();
+  guides.visible = false;
+  terrain.setSections(null);
+  // back to where the editor started from
+  state.tiles = o.tiles;
+  state.start = { x: o.start.x, z: hf.startZ + o.start.u };
+  if (commit && (changed || !keep || first)) {
+    newWorld(design, { keep, changed: true, fromCols: origCols, quiet: false });
+    if (first) pickedOnce = true;
+  } else {
+    // as it was: the old slope, its tiles and its records
+    makeSlope(o.design);
+    state.tiles = o.tiles;
+    state.start = clampStart({ x: o.start.x, z: hf.startZ + o.start.u });
+    generate();
+    Object.assign(state, { best: o.best, bestPath: o.bestPath, bestTime: o.bestTime, bestTimePath: o.bestTimePath, course: o.course });
+    rebuildTerrain();
+    propMeshes.rebuild();
+    reloadTracks();
+    refreshScene();
+    computeHome();
+    ui.setBest(state.best, state.bestTime);
+    setTool(state.tool === 'view' ? 'view' : 'select');
+  }
+  applyControlScheme();
+  refreshBar();
+}
+
+function reloadTracks() {
+  tracks.clear();
+  try {
+    const saved = localStorage.getItem(TRACKS_KEY);
+    if (saved) tracks.unpack(saved);
+  } catch {
+    /* no tracks */
+  }
+}
+
+// the slope from the side (the -X view), all of it in view above the editor's bar: k
+// shrinks or grows the fit
+function sideView(k = 1) {
+  const L = hf.finishZ - hf.startZ;
+  const ys = hf.heightAt(0, hf.startZ);
+  const yf = hf.heightAt(0, hf.finishZ);
+  const target = new THREE.Vector3(0, (ys + yf) / 2, (hf.startZ + hf.finishZ) / 2);
+  const tan = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
+  const H = Math.max(1, canvas.clientHeight);
+  const free = Math.max(0.35, (H - 2 * viewOffsetY()) / H); // the share of the height above the bar
+  const d = Math.max(L / (2 * tan * camera.aspect), Math.abs(ys - yf) / (2 * tan * free)) * (camera.aspect < 1 ? 1.3 : 1.12) * k + hf.halfX;
+  viewFrom(new THREE.Vector3(-1, 0.18, 0).normalize(), d, target);
+}
+
+// While the slope editor is open its bar covers the bottom of the screen: the view is
+// centred on what's above it (the picture slides up, the camera stays)
+function viewOffsetY() {
+  if (!slope) return 0;
+  const bar = document.getElementById('slopebar').getBoundingClientRect();
+  return Math.max(0, canvas.clientHeight - bar.top + 8) / 2;
+}
+function applyViewOffset() {
+  const off = viewOffsetY();
+  if (off > 0) camera.setViewOffset(canvas.clientWidth, canvas.clientHeight, 0, off, canvas.clientWidth, canvas.clientHeight);
+  else camera.clearViewOffset();
 }
 
 // Build a (new) slope. keep: what you built stays where it was (tiles are counted from the
-// top line, and stay centred if the width changes), and so does the start gate.
-function newWorld(design, { keep = false, changed = true, quiet = false } = {}) {
+// top line, and stay centred if the width changes), and so does the start gate. fromCols:
+// how many columns the tiles were laid out on (the slope they were built on)
+function newWorld(design, { keep = false, changed = true, quiet = false, fromCols = null } = {}) {
   if (keep && !changed) return;
   if (riding) exitRide();
   endRun();
-  const oldCols = cols();
-  const oldStart = state.start;
+  const oldCols = fromCols ?? cols();
+  const oldU = state.start ? state.start.z - hf.startZ : null;
   makeSlope(design);
   selection.clear();
   if (keep) {
@@ -554,7 +743,7 @@ function newWorld(design, { keep = false, changed = true, quiet = false } = {}) 
       cols(),
       rows()
     );
-    state.start = oldStart ? clampStart(oldStart) : defaultStart(hf, base);
+    state.start = oldU !== null ? clampStart({ x: state.start.x, z: hf.startZ + oldU }) : defaultStart(hf, base);
   } else {
     state.tiles = [];
     state.start = defaultStart(hf, base);
@@ -649,7 +838,7 @@ const tutorial = createTutorial({
     // first visit, straight into the tutorial: now design your own slope
     if (!hadSave && !pickedOnce) {
       pickedOnce = true;
-      slopeEd.open(null, { cancel: false });
+      editSlope({ first: true });
     }
   },
   load(level) {
@@ -671,6 +860,10 @@ const tutorial = createTutorial({
 });
 
 function startTutorial() {
+  if (slope) {
+    slopeUI.close();
+    leaveSlope(false);
+  }
   try {
     localStorage.setItem(INTRO_KEY, '1');
   } catch {
@@ -694,6 +887,7 @@ function viewOf(x, u) {
   return { pos, target };
 }
 function frameAt(x, u) {
+  orbitAnim = null;
   const v = viewOf(x, u);
   camera.position.copy(v.pos);
   controls.target.copy(v.target);
@@ -752,7 +946,7 @@ function refreshBar() {
 }
 // the grid shows while selecting or pasting, and whenever something is selected
 function gridShown() {
-  return !riding && (state.tool === 'select' || state.tool === 'paste' || selection.size > 0);
+  return !riding && !slope && (state.tool === 'select' || state.tool === 'paste' || selection.size > 0);
 }
 
 // the way a new jump or drop faces: down the fall line under the selection
@@ -789,9 +983,10 @@ const ACT_DONE = {
   erase: () => tx('done.erase'),
 };
 
-// Do an action to the selected tiles (the buttons, the keys)
+// Do an action to the selected tiles (the buttons, the keys). . does the last one again.
+let lastAction = null;
 function act(name) {
-  if (riding || ui.blocking) return;
+  if (riding || ui.blocking || slope) return;
   if (paint) return;
   if (name === 'copy') {
     if (!selection.size) return ui.toast(tx('toast.copyFirst'));
@@ -819,6 +1014,7 @@ function act(name) {
   }
   history.push(snapshot());
   state.tiles = next;
+  lastAction = name;
   sound.stamp();
   rebuild();
   ui.toast(ACT_DONE[name](describe(state.tiles, sel)));
@@ -848,6 +1044,95 @@ function cancelPaint() {
     refreshBar();
   }
   setGhost();
+}
+
+// keep a pointer's events on the canvas while it drags (a pointer that's already gone
+// can't be captured: then it just isn't)
+function capturePointer(id) {
+  try {
+    canvas.setPointerCapture(id);
+  } catch {
+    /* not a live pointer */
+  }
+}
+
+// the angle between the two fingers on the screen
+function twistAngle() {
+  const [a, b] = [...pointers.values()];
+  return a && b ? Math.atan2(b.clientY - a.clientY, b.clientX - a.clientX) : null;
+}
+// turn the view about the upright through its target
+function turnView(a) {
+  const off = camera.position.clone().sub(controls.target).applyAxisAngle(new THREE.Vector3(0, 1, 0), a);
+  camera.position.copy(controls.target).add(off);
+}
+
+// Select a piece of what you built (core/pieces.js) on tile t: the most likely one first,
+// the next one at the next double tap there. add: keep what was selected too
+function selectPiece(t, add = false) {
+  const layers = pieceLayers(state.tiles, t.i, t.j);
+  if (!layers.length) {
+    writeTiles();
+    refreshBar();
+    return ui.toast(tx('sel.nothing'));
+  }
+  const sig = () => [...selection].sort().join(' ');
+  const again = pieceCycle && pieceCycle.i === t.i && pieceCycle.j === t.j && pieceCycle.sig === sig();
+  const index = again ? (pieceCycle.index + 1) % layers.length : 0;
+  const L = layers[index];
+  if (!add) selection.clear();
+  for (const [i, j] of L.tiles) if (onGrid([i, j])) selection.add(tileKey(i, j));
+  pieceCycle = { i: t.i, j: t.j, index, sig: sig() };
+  writeTiles();
+  refreshBar();
+  const more = layers.length > 1 ? ` ${tx('sel.again', { what: tx(`piece.${layers[(index + 1) % layers.length].kind}`) })}` : '';
+  ui.toast(`${tx('sel.piece', { what: tx(`piece.${L.kind}`), n: L.tiles.length })}${more}`);
+}
+
+// everything you built
+function selectAllBuilt() {
+  const all = allBuilt(state.tiles).filter(onGrid);
+  if (!all.length) return ui.toast(tx('sel.nothingBuilt'));
+  selection.clear();
+  for (const [i, j] of all) selection.add(tileKey(i, j));
+  writeTiles();
+  refreshBar();
+  ui.toast(tx('sel.all', { n: all.length }));
+}
+
+// the slope editor: the dot of section k follows the pointer, in the upright plane down the
+// middle of the slope (seen from the side, straight), or along the snow seen from above
+function dragJoint(e) {
+  const r = canvas.getBoundingClientRect();
+  ndc.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
+  ray.setFromCamera(ndc, camera);
+  const o = ray.ray.origin;
+  const d = ray.ray.direction;
+  let u;
+  let el = null;
+  if (Math.abs(d.x) > 0.12) {
+    const k = -o.x / d.x;
+    if (k <= 0) return;
+    u = o.z + d.z * k - hf.startZ;
+    el = o.y + d.y * k - TOP;
+  } else {
+    // looking along the slope or down on it: the length only
+    const h = guides.handles[slopeDrag.k]?.position;
+    if (!h || Math.abs(d.y) < 0.05) return;
+    const k = (h.y - o.y) / d.y;
+    if (k <= 0) return;
+    u = o.z + d.z * k - hf.startZ;
+  }
+  const next = moveJoint(slopeUI.design, slopeDrag.k, u, el);
+  if (!sameDesign(next, slopeUI.design)) slopeUI.drag(next, slopeDrag.k);
+}
+function endSlopeDrag() {
+  slopeDrag = null;
+  if (!slope) return;
+  slope.dragging = false;
+  clearTimeout(slope.timer);
+  slope.timer = 0;
+  rebuildSlope();
 }
 
 // desktop: show where the brush (or the paste) will go before you click
@@ -883,9 +1168,32 @@ window.addEventListener(
     if (pointers.size > 1) {
       if (paint) cancelPaint();
       if (moving) endMove(false);
+      if (slopeDrag) endSlopeDrag();
+      slopeTap = null;
+      lastTap = null;
+      twist = twistAngle();
       return;
     }
     if (e.button !== 0 || altHeld || e.altKey) return;
+    // the slope editor: drag a section's dot, tap its label or the snow to pick it; else
+    // the view turns
+    if (slope) {
+      const r = canvas.getBoundingClientRect();
+      const hit = guides.pick(camera, e.clientX - r.left, e.clientY - r.top, r.width, r.height, COARSE ? 34 : 24);
+      if (hit) {
+        slopeUI.pick(hit.section);
+        if (hit.kind === 'handle') {
+          slopeDrag = { pointerId: e.pointerId, k: hit.section };
+          slope.dragging = true;
+          slopeUI.beginDrag();
+          capturePointer(e.pointerId);
+        }
+        e.stopImmediatePropagation();
+        return;
+      }
+      slopeTap = { pointerId: e.pointerId, x: e.clientX, y: e.clientY };
+      return;
+    }
     updateHover(e);
     if (!hover.valid) return;
 
@@ -895,19 +1203,28 @@ window.addEventListener(
       aimField.h.set(hf.h);
       moveStart(hover.x, hover.z);
       e.stopImmediatePropagation();
-      canvas.setPointerCapture(e.pointerId);
+      capturePointer(e.pointerId);
       return;
     }
 
     if (state.tool === 'select') {
       const t = hoverTile();
+      // a double tap on what you built selects it again, a piece at a time
+      if (lastTap && performance.now() - lastTap.time < 500 && lastTap.i === t.i && lastTap.j === t.j && pieceLayers(state.tiles, t.i, t.j).length) {
+        selection.clear();
+        for (const k of lastTap.before) selection.add(k);
+        lastTap = null;
+        selectPiece(t, e.shiftKey);
+        e.stopImmediatePropagation();
+        return;
+      }
       // starting on a selected tile, the stroke takes tiles away; anywhere else it adds
       const mode = selection.has(tileKey(t.i, t.j)) ? 'remove' : 'add';
-      paint = { pointerId: e.pointerId, mode, tile: t, before: new Set(selection) };
+      paint = { pointerId: e.pointerId, mode, tile: t, first: t, moved: false, before: new Set(selection) };
       strokeSelect([[t.i, t.j]], mode);
       setGhost();
       e.stopImmediatePropagation();
-      canvas.setPointerCapture(e.pointerId);
+      capturePointer(e.pointerId);
       return;
     }
 
@@ -916,7 +1233,7 @@ window.addEventListener(
       paint = { pointerId: e.pointerId, paste: true, tile: t };
       setGhost(pasteCells(clip, t.i, t.j));
       e.stopImmediatePropagation();
-      canvas.setPointerCapture(e.pointerId);
+      capturePointer(e.pointerId);
     }
   },
   { capture: true }
@@ -938,6 +1255,27 @@ function endMove(commit) {
 canvas.addEventListener('pointermove', (e) => {
   if (pointers.has(e.pointerId)) pointers.set(e.pointerId, e);
   if (riding) return;
+  // two fingers twisting turn the view, like a map
+  if (pointers.size === 2 && twist !== null) {
+    const a = twistAngle();
+    let d = a - twist;
+    if (d > Math.PI) d -= 2 * Math.PI;
+    if (d < -Math.PI) d += 2 * Math.PI;
+    twist = a;
+    if (Math.abs(d) < 0.3) turnView(d);
+  }
+  if (slopeDrag && e.pointerId === slopeDrag.pointerId) {
+    dragJoint(e);
+    return;
+  }
+  if (slope) {
+    if (e.pointerType === 'mouse' && pointers.size === 0) {
+      const r = canvas.getBoundingClientRect();
+      const hit = guides.pick(camera, e.clientX - r.left, e.clientY - r.top, r.width, r.height);
+      document.body.classList.toggle('slope-grab', hit?.kind === 'handle');
+    }
+    return;
+  }
   if (moving && e.pointerId === moving.pointerId) {
     updateHover(e, aimField || hf);
     if (hover.valid) moveStart(hover.x, hover.z);
@@ -951,6 +1289,7 @@ canvas.addEventListener('pointermove', (e) => {
       if (paint.paste) setGhost(pasteCells(clip, t.i, t.j));
       else strokeSelect(lineTiles(paint.tile, t).slice(1), paint.mode);
       paint.tile = t;
+      paint.moved = true;
     }
     return;
   }
@@ -962,6 +1301,17 @@ canvas.addEventListener('pointermove', (e) => {
 
 const endPointer = (e) => {
   pointers.delete(e.pointerId);
+  if (pointers.size < 2) twist = null;
+  if (slopeDrag && slopeDrag.pointerId === e.pointerId) endSlopeDrag();
+  if (slopeTap && slopeTap.pointerId === e.pointerId) {
+    const tap = slopeTap;
+    slopeTap = null;
+    // a tap (not a turn of the view): the section there
+    if (slope && e.type === 'pointerup' && Math.hypot(e.clientX - tap.x, e.clientY - tap.y) < 6) {
+      updateHover(e);
+      if (hover.valid) slopeUI.pick(sectionAt(slope.built, hover.z - hf.startZ));
+    }
+  }
   if (moving && moving.pointerId === e.pointerId) endMove(e.type !== 'pointercancel');
   if (paint && paint.pointerId === e.pointerId) {
     if (e.type === 'pointercancel') cancelPaint();
@@ -972,6 +1322,8 @@ const endPointer = (e) => {
       else {
         setGhost();
         refreshBar();
+        // a tap on one tile: the first half of a double tap, maybe
+        lastTap = p.moved ? null : { time: performance.now(), i: p.first.i, j: p.first.j, before: p.before };
       }
     }
   }
@@ -1033,6 +1385,7 @@ function updateHover(e, field = hf) {
 
 // ---------- history / save ----------
 function undo() {
+  if (slope) return slopeUI.undo();
   if (paint || moving) return;
   const prev = history.undo(snapshot());
   if (!prev) return;
@@ -1042,6 +1395,7 @@ function undo() {
 }
 
 function redo() {
+  if (slope) return slopeUI.redo();
   if (paint || moving) return;
   const next = history.redo(snapshot());
   if (!next) return;
@@ -1055,30 +1409,35 @@ function refreshHistoryButtons() {
 }
 
 const r1 = (v) => Math.round(v * 10) / 10;
-function scheduleSave() {
-  if (tutOn) return;
+// everything a save (and a project) keeps
+function savePayload() {
+  return {
+    v: 12,
+    design: state.design,
+    tiles: packTiles(state.tiles),
+    start: { x: r1(state.start.x), u: r1(state.start.z - hf.startZ) },
+    brush: state.brush,
+    best: state.best,
+    bestPath: state.bestPath,
+    bestTime: state.bestTime,
+    bestTimePath: state.bestTimePath,
+    course: state.course,
+    project: state.project,
+    dirty,
+    rideCam: state.rideCam,
+    relief: state.relief,
+    contours: state.contours,
+    muted: state.muted,
+  };
+}
+// prefs: only a setting changed (sound, contours...), not the slope
+function scheduleSave({ prefs = false } = {}) {
+  if (tutOn || slope) return;
+  if (!prefs) dirty = true;
   clearTimeout(saveTimer);
   saveTimer = setTimeout(() => {
     try {
-      localStorage.setItem(
-        SAVE_KEY,
-        JSON.stringify({
-          v: 11,
-          design: state.design,
-          tiles: packTiles(state.tiles),
-          start: { x: r1(state.start.x), u: r1(state.start.z - hf.startZ) },
-          brush: state.brush,
-          best: state.best,
-          bestPath: state.bestPath,
-          bestTime: state.bestTime,
-          bestTimePath: state.bestTimePath,
-          course: state.course,
-          rideCam: state.rideCam,
-          relief: state.relief,
-          contours: state.contours,
-          muted: state.muted,
-        })
-      );
+      localStorage.setItem(SAVE_KEY, JSON.stringify(savePayload()));
       saveFailed = false;
     } catch {
       // storage full or blocked: the session still works, but say so once
@@ -1087,6 +1446,99 @@ function scheduleSave() {
     }
   }, 400);
 }
+
+// the autosave, now (a project was just saved or opened)
+function writeSaveNow() {
+  if (tutOn || slope) return;
+  clearTimeout(saveTimer);
+  try {
+    localStorage.setItem(SAVE_KEY, JSON.stringify(savePayload()));
+  } catch {
+    /* the next autosave says so */
+  }
+}
+
+// ---------- projects ----------
+function projectSummary() {
+  return { length: designLength(state.design), width: state.design.width, tiles: state.tiles.length, gates: courseTotal(), bestTime: state.bestTime ? state.bestTime.time : null, best: state.best ? state.best.score : null };
+}
+// Save as: under name (another project of that name only once replace says so)
+function saveAs(name, { replace = false } = {}) {
+  const same = findByName(name);
+  if (same && !replace && !(state.project && same.id === state.project.id)) return { exists: true };
+  try {
+    const r = saveProject(name, { ...savePayload(), project: null, dirty: false }, projectSummary());
+    state.project = r;
+    dirty = false;
+    writeSaveNow();
+    ui.setProject(r.name);
+    ui.toast(tx('pj.saved', { name: r.name }));
+    return { ok: true };
+  } catch {
+    return { ok: false };
+  }
+}
+// Ctrl+S: the project it is, or Save as for a first time
+function quickSave() {
+  if (slope || tutOn) return;
+  if (state.project) saveAs(state.project.name, { replace: true });
+  else projectsDlg.open('save');
+}
+// Open a project: it takes the place of this slope (the autosave follows)
+function openProject(id) {
+  const rec = loadProject(id);
+  if (!rec) return ui.toast(tx('pj.gone'));
+  if (slope) {
+    slopeUI.close();
+    leaveSlope(false);
+  }
+  if (tutOn) tutorial.stop();
+  if (riding) exitRide();
+  endRun();
+  ui.hideResults();
+  try {
+    readSave(rec.data);
+  } catch {
+    return ui.toast(tx('toast.unreadable'), 'bad');
+  }
+  state.project = { id: rec.id, name: rec.name };
+  history.clear();
+  selection.clear();
+  clip = null;
+  rebuildTerrain();
+  propMeshes.rebuild();
+  tracks.clear();
+  saveTracks();
+  trail.clear();
+  ui.setBest(state.best, state.bestTime);
+  ui.setStatus('idle');
+  ui.clearStats();
+  refreshHistoryButtons();
+  refreshScene();
+  computeHome();
+  frameTop();
+  setTool('select');
+  pickedOnce = true;
+  dirty = false;
+  writeSaveNow();
+  ui.setProject(rec.name);
+  ui.toast(tx('pj.opened', { name: rec.name }));
+}
+const projectsDlg = createProjectsDialog({
+  list: () => listProjects(),
+  save: (name, o) => saveAs(name, o),
+  open: (id) => openProject(id),
+  remove: (id) => {
+    deleteProject(id);
+    if (state.project && state.project.id === id) {
+      state.project = null;
+      ui.setProject(null);
+      writeSaveNow();
+    }
+  },
+  current: () => state.project,
+  dirty: () => dirty && (state.tiles.length > 0 || !!state.project),
+});
 
 // A save that can't be read (or comes from before wild mountains) is kept under BACKUP_KEY,
 // never silently overwritten. Saves with painted pieces keep their mountain, and the pieces
@@ -1097,11 +1549,32 @@ function loadSave() {
     raw = localStorage.getItem(SAVE_KEY);
     if (!raw) return false;
     const data = JSON.parse(raw);
-    if (![7, 8, 9, 10, 11].includes(data.v)) {
+    if (!SAVE_VERSIONS.includes(data.v)) {
       backupSave(raw);
       loadNote = 'toast.oldRun';
       return false;
     }
+    const { wild } = readSave(data);
+    state.relief = !!data.relief;
+    state.contours = !!data.contours;
+    state.muted = !!data.muted;
+    if (data.rideCam === 'helmet' || data.rideCam === 'chase') state.rideCam = data.rideCam;
+    if (wild) loadNote = 'toast.fromWild';
+    dirty = !!state.project && !!data.dirty;
+    return true;
+  } catch {
+    if (raw) {
+      backupSave(raw);
+      loadNote = 'toast.unreadable';
+    }
+    return false;
+  }
+}
+
+// Put a save (or a project) in place: the slope, its tiles, the start, the records. Throws
+// on one that can't be read.
+function readSave(data) {
+  {
     // v10 saves the slope you designed; before, a wild mountain (size, steepness, seed): it
     // becomes sections of about the same length, width and steepness
     const wild = data.v < 10;
@@ -1123,30 +1596,27 @@ function loadSave() {
     const st = data.start;
     state.start = st && Number.isFinite(st.x) && Number.isFinite(st.u) ? clampStart({ x: st.x, z: hf.startZ + st.u }) : defaultStart(hf, base);
     if ([1, 2, 3].includes(data.brush)) state.brush = data.brush;
+    state.best = null;
+    state.bestPath = null;
+    state.bestTime = null;
+    state.bestTimePath = null;
     generate();
-    state.relief = !!data.relief;
-    state.contours = !!data.contours;
-    state.muted = !!data.muted;
-    // the records, if they were set on this course
+    // the records, if they were set on this course; ghosts from before TOP move up with it
     if (data.v >= 10 && (data.course || '') === state.course) {
+      const lift = data.v < 12 ? TOP - oldTop(state.design) : 0;
+      const up = (path) => (Array.isArray(path) ? (lift ? path.map((v, k) => (k % 3 === 1 ? Math.round((v + lift) * 10) / 10 : v)) : path) : null);
       if (data.best && typeof data.best.score === 'number') {
         state.best = data.best;
-        state.bestPath = Array.isArray(data.bestPath) ? data.bestPath : null;
+        state.bestPath = up(data.bestPath);
       }
       if (data.bestTime && typeof data.bestTime.time === 'number') {
         state.bestTime = { time: data.bestTime.time, score: data.bestTime.score || 0, splits: Array.isArray(data.bestTime.splits) ? data.bestTime.splits : [] };
-        state.bestTimePath = Array.isArray(data.bestTimePath) ? data.bestTimePath : null;
+        state.bestTimePath = up(data.bestTimePath);
       }
     }
-    if (data.rideCam === 'helmet' || data.rideCam === 'chase') state.rideCam = data.rideCam;
-    if (wild) loadNote = 'toast.fromWild';
-    return true;
-  } catch {
-    if (raw) {
-      backupSave(raw);
-      loadNote = 'toast.unreadable';
-    }
-    return false;
+    const pj = data.project;
+    state.project = pj && typeof pj.id === 'string' && typeof pj.name === 'string' ? { id: pj.id, name: pj.name } : null;
+    return { wild };
   }
 }
 
@@ -1162,7 +1632,7 @@ function backupSave(raw) {
 // Look: one finger or the left button turns the view. Select, Paste and Start: one finger or
 // the left button uses the tool, the right button orbits. Two fingers always move and zoom.
 function applyControlScheme() {
-  const t = state.tool;
+  const t = slope ? 'view' : state.tool;
   const camOnly = t === 'view' || altHeld;
   controls.mouseButtons = {
     LEFT: camOnly ? THREE.MOUSE.ROTATE : null,
@@ -1197,13 +1667,13 @@ const rig = { pos: new THREE.Vector3(), look: new THREE.Vector3(), snap: true, s
 
 // Ride: carry on with the paused run, or start one at the gate
 function ride() {
-  if (ui.blocking) return;
+  if (ui.blocking || slope) return;
   if (paused && skier && skier.status === 'running') resumeRide();
   else startRun();
 }
 
 function startRun() {
-  if (ui.blocking) return;
+  if (ui.blocking || slope) return;
   sound.unlock();
   if (paint) cancelPaint();
   if (moving) endMove(true);
@@ -1404,7 +1874,7 @@ function toggleRideCam() {
   ui.setRideCam(state.rideCam);
   skierMesh.setFirstPerson(riding && state.rideCam === 'helmet');
   rig.snap = true;
-  scheduleSave();
+  scheduleSave({ prefs: true });
 }
 
 // Is the skier (chest height) visible from the camera, or does the snow get in the way?
@@ -1608,6 +2078,7 @@ function drainFeed() {
 // Near the top of the slope, looking down it from above the start: close enough to see the
 // tiles, which is where you begin building (R goes back to the whole mountain)
 function frameTop() {
+  orbitAnim = null;
   const portrait = camera.aspect < 1;
   const L = hf.finishZ - hf.startZ;
   const u = Math.min(portrait ? 110 : 140, L * 0.35);
@@ -1624,6 +2095,7 @@ function frameTop() {
 function resetView() {
   if (riding) return;
   computeHome();
+  orbitAnim = null;
   viewAnim = {
     t: 0,
     fromPos: camera.position.clone(),
@@ -1632,6 +2104,74 @@ function resetView() {
     toTarget: HOME_TARGET.clone(),
   };
 }
+
+// ---------- views along the axes (the gizmo, the numpad) ----------
+// Swing round to look from dir (towards the target): the same distance unless one's given,
+// the same target unless one's given
+const _q = new THREE.Quaternion();
+const _q1 = new THREE.Quaternion();
+function viewFrom(dir, dist = null, target = null) {
+  if (riding) return;
+  const t0 = controls.target.clone();
+  const from = camera.position.clone().sub(t0);
+  const d0 = from.length();
+  viewAnim = null;
+  orbitAnim = { t: 0, from: from.normalize(), to: dir.clone().normalize(), d0, d1: dist ?? d0, t0, t1: target ? target.clone() : t0.clone(), target: t0.clone() };
+}
+function stepOrbitAnim(dt) {
+  const a = orbitAnim;
+  a.t = Math.min(1, a.t + dt * 2.4);
+  const e = 1 - Math.pow(1 - a.t, 3);
+  _q.setFromUnitVectors(a.from, a.to);
+  _q1.identity().slerp(_q, e);
+  a.target.lerpVectors(a.t0, a.t1, e);
+  controls.target.copy(a.target);
+  camera.position
+    .copy(a.from)
+    .applyQuaternion(_q1)
+    .multiplyScalar(a.d0 + (a.d1 - a.d0) * e)
+    .add(a.target);
+  if (a.t >= 1) orbitAnim = null;
+}
+// turn the view by a drag on the gizmo (pixels)
+const _sph = new THREE.Spherical();
+function orbitBy(dx, dy) {
+  if (riding) return;
+  orbitAnim = null;
+  viewAnim = null;
+  const off = camera.position.clone().sub(controls.target);
+  _sph.setFromVector3(off);
+  _sph.theta -= dx * 0.012;
+  _sph.phi = THREE.MathUtils.clamp(_sph.phi - dy * 0.012, 0.0015, controls.maxPolarAngle);
+  camera.position.setFromSpherical(_sph).add(controls.target);
+}
+// the selection in the middle of the view, close enough to work on it (Blender: View Selected)
+function frameSelection() {
+  const sel = selList();
+  if (!sel.length) return;
+  let x = 0;
+  let z = 0;
+  let r = 0;
+  for (const [i, j] of sel) {
+    const c = tileCenter(hf, i, j);
+    x += c.x;
+    z += c.z;
+  }
+  x /= sel.length;
+  z /= sel.length;
+  for (const [i, j] of sel) {
+    const c = tileCenter(hf, i, j);
+    r = Math.max(r, Math.hypot(c.x - x, c.z - z));
+  }
+  const target = new THREE.Vector3(x, hf.heightAt(x, z), z);
+  const dir = camera.position.clone().sub(controls.target).normalize();
+  viewFrom(dir, Math.max(40, (r + 12) * 3.2), target);
+}
+const gizmo = createGizmo({
+  onView: (id) => viewFrom(viewDirection(id)),
+  onOrbit: (dx, dy) => orbitBy(dx, dy),
+  onHome: () => resetView(),
+});
 
 // The skis write into the snow: two carved grooves on packed snow, a trench in powder, a
 // smear where they skid. Not while really in the air (a bump the legs soak up keeps drawing).
@@ -1672,6 +2212,7 @@ function resize() {
     const wasPortrait = camera.aspect < 1;
     renderer.setSize(w, h, false);
     camera.aspect = w / h;
+    applyViewOffset();
     if (!riding) camera.fov = w / h < 1 ? 58 : 40;
     camera.updateProjectionMatrix();
     if (wasPortrait !== camera.aspect < 1 && w > 0 && h > 0 && !riding) resetView();
@@ -1705,11 +2246,13 @@ function frame() {
     controls.target.lerpVectors(viewAnim.fromTarget, viewAnim.toTarget, e);
     if (viewAnim.t >= 1) viewAnim = null;
   }
+  if (orbitAnim && !riding) stepOrbitAnim(dt);
 
   if (!riding) {
     controls.update();
+    gizmo.update(camera);
     // never let the orbit camera sink into a steep slope
-    if (!viewAnim) {
+    if (!viewAnim && !orbitAnim) {
       const g = hf.inside(camera.position.x, camera.position.z) ? hf.heightAt(camera.position.x, camera.position.z) : -Infinity;
       if (camera.position.y < g + 4) camera.position.y = g + 4;
     }
@@ -1787,6 +2330,31 @@ window.addEventListener('keydown', (e) => {
   if (ui.blocking) return;
   const key = e.key.toLowerCase();
   const mod = e.ctrlKey || e.metaKey;
+  // views along the axes, Blender's numpad: 7 above, 1 front (from the bottom), 3 the side;
+  // with Ctrl the other way; . the selection
+  if (!riding && e.code.startsWith('Numpad')) {
+    const VIEWS = { Numpad7: ['+z', '-z'], Numpad1: ['-y', '+y'], Numpad3: ['+x', '-x'] };
+    if (VIEWS[e.code]) {
+      e.preventDefault();
+      viewFrom(viewDirection(VIEWS[e.code][mod ? 1 : 0]));
+      return;
+    }
+    if (e.code === 'NumpadDecimal') {
+      e.preventDefault();
+      frameSelection();
+      return;
+    }
+  }
+  if (slope) {
+    if (slopeUI.key(e)) e.preventDefault();
+    else if (key === 'r' && !mod) resetView();
+    return;
+  }
+  if (mod && key === 's') {
+    e.preventDefault();
+    quickSave();
+    return;
+  }
   if (riding && !mod) {
     if (ui.resultsOpen) {
       if (key === 'r' || e.key === 'Enter' || e.code === 'Space') {
@@ -1853,8 +2421,19 @@ window.addEventListener('keydown', (e) => {
   else if (key === 't') ui.toggleRelief();
   else if (key === 'n') editSlope();
   else if (key === 'm') ui.toggleMute();
-  else if (key === 'r') resetView();
-  else if (e.key === '[' || e.key === ']') {
+  else if (key === 'r' || e.key === 'Home') resetView();
+  else if (key === 'a') selectAllBuilt();
+  else if (e.key === '.' && lastAction) act(lastAction);
+  else if (/^Digit[1-9]$/.test(e.code)) {
+    // 1-9 the actions of the tab on show, Shift+1-4 the tabs
+    const n = +e.code.slice(5) - 1;
+    if (e.shiftKey) {
+      if (TABS[n]) bar.showTab(TABS[n].id);
+    } else {
+      const id = bar.actions[n];
+      if (id) act(id);
+    }
+  } else if (e.key === '[' || e.key === ']') {
     state.brush = Math.max(1, Math.min(3, state.brush + (e.key === ']' ? 1 : -1)));
     bar.setSize(state.brush);
   }
@@ -1886,8 +2465,9 @@ if (!hadSave) document.getElementById('intro-go').dataset.i18n = 'intro.goFirst'
 applyDom();
 onLang(() => setTool(state.tool));
 if (!seenIntro) ui.openIntro();
-else if (!hadSave) setTimeout(() => slopeEd.open(null, { cancel: false }), 0);
+else if (!hadSave) setTimeout(() => editSlope({ first: true }), 0);
 ui.setBest(state.best, state.bestTime);
+ui.setProject(state.project ? state.project.name : null);
 if (loadNote) ui.toast(tx(loadNote), 'bad');
 setTool(state.tool);
 refreshScene();
@@ -1929,6 +2509,34 @@ window.__highrise = {
   snapCamera: () => (rig.snap = true),
   // rebuild the snow after changing state.tiles / state.start by hand (tests)
   rebuild: () => rebuild(),
+  // the slope editor's snow, rebuilt now (tests, timing)
+  rebuildSlopeNow() {
+    if (!slope) return;
+    slope.built = null;
+    rebuildSlope();
+  },
+  get slopeDesign() {
+    return slope ? slopeUI.design : null;
+  },
+  tileCenter: (i, j) => tileCenter(hf, i, j),
+  // the camera gliding or swinging to a new view
+  get viewMoving() {
+    return !!(orbitAnim || viewAnim);
+  },
+  // where world (x, z) on the snow is on the screen (CSS pixels)
+  screenOf(x, z) {
+    const v = new THREE.Vector3(x, hf.heightAt(x, z), z).project(camera);
+    const r = canvas.getBoundingClientRect();
+    return { x: r.left + ((v.x + 1) / 2) * r.width, y: r.top + ((1 - v.y) / 2) * r.height };
+  },
+  // where section k's dot is on the screen (CSS pixels from the canvas corner)
+  slopeHandle(k) {
+    const hnd = guides.handles[k];
+    if (!hnd) return null;
+    const v = hnd.position.clone().project(camera);
+    const r = canvas.getBoundingClientRect();
+    return { x: r.left + ((v.x + 1) / 2) * r.width, y: r.top + ((1 - v.y) / 2) * r.height };
+  },
   // is the camera inside a tree crown right now (tests)
   cameraInTree: () => !!treeAt(camera.position, 0),
   // select the brush's tiles around world (x, z) (tests; add: false takes them away)

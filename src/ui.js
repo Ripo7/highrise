@@ -1,5 +1,5 @@
 // DOM overlay: run HUD, trick pop-ups, results, dialogs, toasts, menu. (The slope editor
-// is its own module: slopeEditor.js.) Every word goes through i18n.js.
+// is its own module: slopeMode.js; the projects, projectsDialog.js.) Every word goes through i18n.js.
 import { t, num, dec, getLang, setLang, onLang } from './i18n.js';
 
 const fmt = (n) => num(Math.round(n), 0);
@@ -33,13 +33,21 @@ export function createUI(opts) {
     setMenu(false);
     opts.onTutorial();
   });
+  $('#save-btn').addEventListener('click', () => {
+    setMenu(false);
+    opts.onSaveAs();
+  });
+  $('#projects-btn').addEventListener('click', () => {
+    setMenu(false);
+    opts.onProjects();
+  });
   $('#lang-btn').addEventListener('click', () => {
     setMenu(false);
     setLang(getLang() === 'fr' ? 'en' : 'fr');
   });
 
-  // the slope editor (slopeEditor.js) is a dialog too
-  const slopeDlg = $('#slope');
+  // the projects (projectsDialog.js) are a dialog too
+  const projDlg = $('#projects');
 
   const toggle = (sel, initial, cb) => {
     const btn = $(sel);
@@ -146,12 +154,13 @@ export function createUI(opts) {
   let lastScoreText = '';
 
   // what's on show, to put it in the other language when that changes
-  const shown = { status: 'idle', paused: false, cam: 'chase', best: [null, null] };
+  const shown = { status: 'idle', paused: false, cam: 'chase', best: [null, null], project: null };
   onLang(() => {
     api.setStatus(shown.status);
     api.setPaused(shown.paused);
     api.setRideCam(shown.cam);
     api.setBest(...shown.best);
+    api.setProject(shown.project);
     showMute(muteBtn.getAttribute('aria-pressed') === 'true');
     // the time and air readouts: just the decimal mark
     for (const el of [stat.time, stat.air]) el.textContent = getLang() === 'fr' ? el.textContent.replace('.', ',') : el.textContent.replace(',', '.');
@@ -160,7 +169,7 @@ export function createUI(opts) {
   const api = {
     openIntro,
     get blocking() {
-      return !intro.hidden || !slopeDlg.hidden;
+      return !intro.hidden || !projDlg.hidden;
     },
     closeMenu: () => setMenu(false),
     get resultsOpen() {
@@ -228,6 +237,14 @@ export function createUI(opts) {
       streakEl.hidden = true;
       stat.speed.classList.remove('fast');
       progressFill.style.transform = 'scaleX(0)';
+    },
+    // the project this slope is saved as, by the title (null: none)
+    setProject(name) {
+      shown.project = name;
+      const sub = document.querySelector('.brand-sub');
+      sub.textContent = name || t('brand.sub');
+      sub.classList.toggle('is-project', !!name);
+      document.title = name ? `${name} · Highrise` : 'Highrise';
     },
     // the records: the best score, and the best time when there is one
     setBest(best, bestTime = null) {

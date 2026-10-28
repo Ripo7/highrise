@@ -21,6 +21,10 @@ export const MAX_LENGTH = 3000;
 export const MIN_DROP = 20;
 const VERTEX_BUDGET = 430000; // keep the terrain mesh light enough for phones
 const EASE = 9; // metres either side of a joint
+// The start line's height, whatever the slope: editing a section moves what's below it,
+// never the top. High enough for the longest, steepest slope to stay above MIN_H, low
+// enough for the longest climb to stay under MAX_H (heightfield.js).
+export const TOP = 3800;
 
 export const WIDTHS = [
   { id: 'narrow', label: 'Narrow', W: 360 },
@@ -178,13 +182,51 @@ export function buildSlope(hf, surf, design) {
   hf.resize(dims.sizeX, dims.sizeZ, dims.cell);
   if (surf) surf.resize(hf);
   const p = profile(d);
-  const top = 200 + Math.max(0, -p.e[p.L]); // keep every height comfortably above zero
   for (let j = 0; j < hf.nz; j++) {
     const u = j * hf.cell - hf.halfZ - hf.startZ;
-    const y = top + elevationAt(p, u, d);
+    const y = TOP + elevationAt(p, u, d);
     hf.h.fill(y, j * hf.nx, (j + 1) * hf.nx);
   }
   return { design: d, W: dims.sizeX, L: p.L, h: hf.copy(), rock: new Uint8Array(hf.nx * hf.nz), forest: [] };
+}
+
+// Where the start line was before TOP (saves up to v11): ghosts saved then are moved by
+// TOP minus this to stay on the snow
+export const oldTop = (d) => {
+  const p = profile(normalizeDesign(d));
+  return 200 + Math.max(0, -p.e[p.L]);
+};
+
+// the section at u metres down from the top line (the last one past the bottom)
+export function sectionAt(d, u) {
+  const starts = sectionStarts(d);
+  let i = 0;
+  while (i < starts.length - 1 && u >= starts[i + 1]) i++;
+  return i;
+}
+
+/**
+ * Drag the bottom of section k to (u, e): u metres down from the top line, e its height
+ * (0 at the top, negative below), or null to keep its pitch. Section k gets the length and
+ * pitch that reach there, on its steps and inside its limits; the sections below keep
+ * theirs. Returns a new design.
+ */
+export function moveJoint(d, k, u, e = null) {
+  const starts = sectionStarts(d);
+  const p = profile(d);
+  const u0 = starts[k];
+  const e0 = elevationAt(p, u0, d);
+  const others = designLength(d) - d.sections[k].length;
+  const L = LIMITS.length;
+  const room = Math.min(L.max, MAX_LENGTH - others);
+  const length = clamp(Math.round((u - u0) / L.step) * L.step, L.min, room - (room % L.step));
+  const S = LIMITS.slope;
+  // no height (seen from above): the pitch stays
+  const deg = e === null ? d.sections[k].slope : (Math.atan2(e0 - e, length) * 180) / Math.PI;
+  const slope = clamp(Math.round(deg / S.step) * S.step, S.min, S.max);
+  const out = cloneDesign(d);
+  out.sections[k] = { slope, length };
+  return out;
 }
 
 // Saves from the wild mountains (size, steepness, seed): about the same length, width and

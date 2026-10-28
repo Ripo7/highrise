@@ -21,6 +21,9 @@ const browser = await chromium.launch({
 const errors = [];
 try {
   const page = await browser.newPage({ viewport: { width: 1100, height: 800 } });
+  // a software renderer on a small CI machine can take seconds a frame: clicks wait for the
+  // page to settle across frames
+  page.setDefaultTimeout(120000);
   page.on('pageerror', (e) => errors.push(e.message));
   // block third-party requests (fonts): the game must not depend on them
   await page.route(/^https?:\/\/(?!localhost)/, (r) => r.abort());
@@ -220,7 +223,8 @@ try {
 } catch (err) {
   // on CI, say what failed where it shows on the run's page too (an annotation), with a
   // screenshot of the moment in the artifacts
-  console.log(`::error title=Smoke test::${String(err.message || err).split('\n')[0]}`);
+  const msg = String(err.message || err).split('\n').slice(0, 12).join(' | ').replace(/[\r\n%]/g, ' ');
+  console.log(`::error title=Smoke test::${msg}`);
   for (const p of browser.contexts().flatMap((c) => c.pages())) await p.screenshot({ path: `${OUT}/failed.png` }).catch(() => {});
   throw err;
 } finally {

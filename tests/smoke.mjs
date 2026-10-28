@@ -198,13 +198,21 @@ try {
       return Math.atan2(d.x, d.z);
     });
   const az0 = await camDir();
+  const pressed = (id) => page.getAttribute(`#viewbtns [data-view="${id}"]`, 'aria-pressed');
+  assert.equal(await pressed('select'), 'true', 'Select is on');
   await page.click('#viewbtns [data-view="rotate"]');
-  assert.equal(await page.getAttribute('#viewbtns [data-view="rotate"]', 'aria-pressed'), 'true');
+  assert.deepEqual([await pressed('rotate'), await pressed('select')], ['true', 'false']);
   await drag([0, 140], [60, 140]);
   assert.ok(Math.abs((await camDir()) - az0) > 0.05, 'the drag turned the view');
   assert.equal(await get(() => window.__highrise.selection.length), 0, 'and selected nothing');
   await page.click('#viewbtns [data-view="rotate"]');
-  assert.equal(await page.getAttribute('#viewbtns [data-view="rotate"]', 'aria-pressed'), 'false');
+  assert.deepEqual([await pressed('rotate'), await pressed('select')], ['false', 'true'], 'tapped again: back to Select');
+  // Select, from Move: drags select tiles again
+  await page.click('#viewbtns [data-view="pan"]');
+  assert.equal(await pressed('pan'), 'true');
+  await page.click('#viewbtns [data-view="select"]');
+  assert.deepEqual([await pressed('pan'), await pressed('select')], ['false', 'true'], 'Select');
+  assert.equal(await get(() => window.__highrise.state.tool), 'select');
   {
     const t0 = await get(() => window.__highrise.controls.target.clone());
     const b = await page.locator('#viewbtns [data-view="pan"]').boundingBox();
@@ -225,11 +233,13 @@ try {
   assert.ok(down > 0.99, `from above (${down.toFixed(3)})`);
   await page.screenshot({ path: `${OUT}/2-top.png` });
 
-  // edit the slope (••• menu), in 3D: drag the dot at the bottom of section 2, undo that,
-  // then a steeper top, keeping what's built
-  await page.click('#more');
-  await page.click('#reset');
+  // edit the slope (the Slope button over the view), in 3D: drag the dot at the bottom of
+  // section 2, undo that, then a steeper top, keeping what's built (the Slope button again)
+  assert.equal(await pressed('slope'), 'false');
+  await page.click('#viewbtns [data-view="slope"]');
   await page.waitForSelector('#slopebar:not([hidden])');
+  assert.equal(await pressed('slope'), 'true', 'Slope shows the editor open');
+  assert.equal(await page.isVisible('#viewbtns [data-view="select"]'), false, 'no tiles to select in the editor');
   assert.ok(await page.isVisible('#sb-keep-row'), 'it offers to keep the tiles');
   await page.click('#viewbtns [data-view="side"]');
   await page.waitForFunction(() => !window.__highrise.viewMoving);
@@ -251,8 +261,9 @@ try {
   await page.click('#sb-section [data-act="prev"]');
   assert.equal((await page.textContent('#sb-section .sb-num')).trim(), 'Section 1/4');
   await page.click('#sb-section [data-key="slope"] [data-step="1"]');
-  await page.click('#sb-go');
+  await page.click('#viewbtns [data-view="slope"]');
   await page.waitForSelector('#slopebar', { state: 'hidden' });
+  assert.equal(await pressed('slope'), 'false');
   assert.equal(await get(() => window.__highrise.state.design.sections[0].slope), 13, 'the new slope');
   assert.equal(await get(() => window.__highrise.state.tiles.length), tileCount, 'the tiles are kept');
 
@@ -463,7 +474,7 @@ try {
 
   assert.deepEqual(errors, [], 'no page errors');
   console.log(
-    `smoke test passed: a slope of 4 sections designed (and edited, tiles kept), start gate moved, ${picked} tiles selected and raised, undo/redo, a jump turned, copied and pasted (${tileCount} tiles), ride at ${(ride.speed * 3.6).toFixed(0)} km/h, pause and build, ride on at ${resumed.time.toFixed(1)} s, from the start; in French; a tutorial level done and left, your slope back; a course of gates raced in ${bestTime.toFixed(2)} s, a missed gate; the 3D slope editor (side view, a dot dragged, undone), the view buttons (rotate, move, top), a double click on a piece; saved as a project, opened again, reloaded`
+    `smoke test passed: a slope of 4 sections designed (and edited, tiles kept), start gate moved, ${picked} tiles selected and raised, undo/redo, a jump turned, copied and pasted (${tileCount} tiles), ride at ${(ride.speed * 3.6).toFixed(0)} km/h, pause and build, ride on at ${resumed.time.toFixed(1)} s, from the start; in French; a tutorial level done and left, your slope back; a course of gates raced in ${bestTime.toFixed(2)} s, a missed gate; the 3D slope editor (side view, a dot dragged, undone), the view buttons (select, rotate, move, top, slope), a double click on a piece; saved as a project, opened again, reloaded`
   );
 } catch (err) {
   // on CI, say what failed where it shows on the run's page too (an annotation), with a

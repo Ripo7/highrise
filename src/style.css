@@ -3094,8 +3094,7 @@ body.slope-mode .extras {
 }
 body.slope-mode #save-btn,
 body.slope-mode #tutorial-btn,
-body.slope-mode #fresh-snow,
-body.slope-mode #reset {
+body.slope-mode #fresh-snow {
   display: none;
 }
 
@@ -3161,11 +3160,18 @@ body.slope-mode #reset {
 .viewbtns.is-dragging .vb {
   cursor: grabbing;
 }
-/* the top pair (how a drag moves the view) apart from the views */
-.vb[data-view='top'] {
+/* in groups: what a drag does, the views, the slope */
+.vb[data-view='top'],
+.vb[data-view='slope'] {
   margin-top: 6px;
 }
-body.riding .viewbtns {
+/* the slope editor open: the button builds it (Build it's orange) */
+.vb[data-view='slope'][aria-pressed='true'] {
+  background: var(--signal);
+  color: #fff;
+}
+body.riding .viewbtns,
+body.slope-mode .vb[data-view='select'] {
   display: none;
 }
 body[data-view='pan'] #scene {
@@ -3181,9 +3187,19 @@ body.slope-mode .viewbtns {
     gap: 5px;
   }
   .vb {
-    width: 52px;
-    min-height: 48px;
-    font-size: 9.5px;
+    width: 50px;
+    min-height: 44px;
+    gap: 2px;
+    padding: 4px 2px 3px;
+    font-size: 9px;
+  }
+  .vb svg {
+    width: 20px;
+    height: 20px;
+  }
+  .vb[data-view='top'],
+  .vb[data-view='slope'] {
+    margin-top: 4px;
   }
   body.slope-mode .viewbtns {
     top: calc(var(--gut) + 56px + var(--safe-t));

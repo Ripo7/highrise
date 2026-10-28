@@ -21,10 +21,6 @@ export function createUI(opts) {
   $('#reset-view').addEventListener('click', () => opts.onResetView());
 
   // menu
-  $('#reset').addEventListener('click', () => {
-    setMenu(false);
-    opts.onEditSlope();
-  });
   $('#fresh-snow').addEventListener('click', () => {
     setMenu(false);
     opts.onFreshSnow();

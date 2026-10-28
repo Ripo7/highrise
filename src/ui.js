@@ -1,17 +1,15 @@
 // DOM overlay: run HUD, trick pop-ups, results, dialogs, toasts, menu. (The slope editor
-// is its own module: slopeEditor.js.)
+// is its own module: slopeEditor.js.) Every word goes through i18n.js.
+import { t, num, dec, getLang, setLang, onLang } from './i18n.js';
 
-const STATUS_LABEL = {
-  idle: 'Ready',
-  running: 'On the slope',
-  finished: 'Finished',
-  stuck: 'Stopped',
-  timeout: 'Too slow',
-  aborted: 'Ready',
-  paused: 'Paused',
+const fmt = (n) => num(Math.round(n), 0);
+// a feed item's words: its i18n keys when it has them (vars may hold { key } to translate)
+const tr = (spec, fallback) => {
+  if (!spec) return fallback;
+  const vars = {};
+  for (const [k, v] of Object.entries(spec[1] || {})) vars[k] = v && typeof v === 'object' && v.key ? t(v.key) : v;
+  return t(spec[0], vars);
 };
-
-const fmt = (n) => Math.round(n).toLocaleString('en-US');
 
 export function createUI(opts) {
   const $ = (s) => document.querySelector(s);
@@ -31,6 +29,14 @@ export function createUI(opts) {
     setMenu(false);
     opts.onFreshSnow();
   });
+  $('#tutorial-btn').addEventListener('click', () => {
+    setMenu(false);
+    opts.onTutorial();
+  });
+  $('#lang-btn').addEventListener('click', () => {
+    setMenu(false);
+    setLang(getLang() === 'fr' ? 'en' : 'fr');
+  });
 
   // the slope editor (slopeEditor.js) is a dialog too
   const slopeDlg = $('#slope');
@@ -48,7 +54,7 @@ export function createUI(opts) {
   const reliefBtn = toggle('#relief', opts.initial.relief, opts.onRelief);
   const muteBtn = $('#mute');
   const showMute = (m) => {
-    muteBtn.textContent = m ? 'Sound off' : 'Sound on';
+    muteBtn.textContent = m ? t('menu.soundOff') : t('menu.soundOn');
     muteBtn.setAttribute('aria-pressed', String(m));
   };
   showMute(opts.initial.muted);
@@ -88,6 +94,10 @@ export function createUI(opts) {
   };
   $('#help').addEventListener('click', openIntro);
   $('#intro-go').addEventListener('click', closeIntro);
+  $('#intro-tutorial').addEventListener('click', () => {
+    intro.hidden = true;
+    opts.onTutorial();
+  });
   intro.addEventListener('click', (e) => {
     if (e.target === intro) closeIntro();
   });
@@ -135,7 +145,18 @@ export function createUI(opts) {
   let toastTimer = 0;
   let lastScoreText = '';
 
-  return {
+  // what's on show, to put it in the other language when that changes
+  const shown = { status: 'idle', paused: false, cam: 'chase' };
+  onLang(() => {
+    api.setStatus(shown.status);
+    api.setPaused(shown.paused);
+    api.setRideCam(shown.cam);
+    showMute(muteBtn.getAttribute('aria-pressed') === 'true');
+    // the time and air readouts: just the decimal mark
+    for (const el of [stat.time, stat.air]) el.textContent = getLang() === 'fr' ? el.textContent.replace('.', ',') : el.textContent.replace(',', '.');
+  });
+
+  const api = {
     openIntro,
     get blocking() {
       return !intro.hidden || !slopeDlg.hidden;
@@ -149,8 +170,9 @@ export function createUI(opts) {
     },
     // a run is waiting while you build: Ride picks it up, From the start goes back to the gate
     setPaused(on) {
-      $('#send-label').textContent = on ? 'Ride on' : 'Ride';
-      $('#send').title = on ? 'Ride on from where you stopped (Space)' : 'Ride from the start gate (Space)';
+      shown.paused = on;
+      $('#send-label').textContent = on ? t('run.rideOn') : t('run.ride');
+      $('#send').title = on ? t('run.rideOn.title') : t('run.ride.title');
       $('#restart').hidden = !on;
       document.body.classList.toggle('paused', on);
     },
@@ -163,14 +185,15 @@ export function createUI(opts) {
       $('#redo').disabled = !canRedo;
     },
     setStatus(s) {
-      statusEl.textContent = STATUS_LABEL[s] || s;
+      shown.status = s;
+      statusEl.textContent = t(`status.${s}`);
       statusEl.dataset.status = s;
     },
     setStats(sk, progress, score) {
       progressFill.style.transform = `scaleX(${Math.min(1, Math.max(0, progress)).toFixed(3)})`;
-      stat.time.textContent = sk.time.toFixed(1);
+      stat.time.textContent = dec(sk.time);
       stat.speed.textContent = Math.round(sk.speed * 3.6);
-      stat.air.textContent = (sk.airTime + (sk.grounded ? 0 : sk.curAir)).toFixed(1);
+      stat.air.textContent = dec(sk.airTime + (sk.grounded ? 0 : sk.curAir));
       const txt = fmt(score.total);
       if (txt !== lastScoreText) {
         lastScoreText = txt;
@@ -197,9 +220,9 @@ export function createUI(opts) {
     clearStats() {
       lastScoreText = '';
       stat.score.textContent = '0';
-      stat.time.textContent = '0.0';
+      stat.time.textContent = dec(0);
       stat.speed.textContent = '0';
-      stat.air.textContent = '0.0';
+      stat.air.textContent = dec(0);
       comboEl.hidden = true;
       streakEl.hidden = true;
       stat.speed.classList.remove('fast');
@@ -212,9 +235,9 @@ export function createUI(opts) {
     trick(item) {
       const el = document.createElement('div');
       el.className = `trick trick-${item.kind}`;
-      el.innerHTML = `<b>${item.text}</b>${item.points ? `<em>+${fmt(item.points)}</em>` : ''}${
-        item.sub ? `<small>${item.sub}</small>` : ''
-      }`;
+      const text = tr(item.i18n?.text, item.text);
+      const sub = tr(item.i18n?.sub, item.sub);
+      el.innerHTML = `<b>${text}</b>${item.points ? `<em>+${fmt(item.points)}</em>` : ''}${sub ? `<small>${sub}</small>` : ''}`;
       tricksEl.prepend(el);
       while (tricksEl.children.length > 3) tricksEl.lastChild.remove();
       setTimeout(() => el.classList.add('out'), 1500);
@@ -224,10 +247,10 @@ export function createUI(opts) {
       tricksEl.innerHTML = '';
     },
     showResults(r) {
-      $('#res-eyebrow').textContent = r.eyebrow;
+      $('#res-eyebrow').textContent = t(r.eyebrow);
       $('#res-score').textContent = fmt(r.score);
       $('#res-best').hidden = !r.isBest;
-      $('#res-time').textContent = `${r.time.toFixed(1)} s`;
+      $('#res-time').textContent = `${num(r.time, 1)} s`;
       $('#res-top').textContent = `${Math.round(r.top)} km/h`;
       $('#res-tricks').textContent = r.tricks;
       $('#res-wipeouts').textContent = r.wipeouts;
@@ -264,7 +287,8 @@ export function createUI(opts) {
       if (!on) results.hidden = true;
     },
     setRideCam(mode) {
-      $('#ride-cam-label').textContent = mode === 'helmet' ? 'Helmet cam' : 'Chase cam';
+      shown.cam = mode;
+      $('#ride-cam-label').textContent = mode === 'helmet' ? t('ride.helmetCam') : t('ride.chaseCam');
     },
     toggleRelief() {
       reliefBtn.click();
@@ -277,4 +301,5 @@ export function createUI(opts) {
       contours.dispatchEvent(new Event('change'));
     },
   };
+  return api;
 }

@@ -25,10 +25,10 @@ import {
   profile,
   difficulty,
 } from './core/slopes.js';
+import { t, num, onLang } from './i18n.js';
 
 export const DIFF_COLORS = { green: '#22a35a', blue: '#2f6fd6', red: '#e0412f', black: '#3b2a55', up: '#8a6fd8' };
-const DIFF_NAMES = { green: 'Green', blue: 'Blue', red: 'Red', black: 'Black', up: 'Climb' };
-const fmtLen = (m) => (m >= 1000 ? `${(m / 1000).toFixed(2).replace(/\.?0+$/, '')} km` : `${Math.round(m)} m`);
+export const fmtLen = (m) => (m >= 1000 ? `${num(Math.round(m / 10) / 100)} km` : `${Math.round(m)} m`);
 const fmtSlope = (v) => (v < 0 ? `↑ ${-v}°` : `${v}°`);
 
 export function createSlopeEditor({ onBuild }) {
@@ -52,6 +52,20 @@ export function createSlopeEditor({ onBuild }) {
   let hold = null;
   let canCancel = false;
   let layout = { ox: 0, k: 1 }; // the side view's scale, for taps on it
+  let keepTiles = 0;
+  let isNew = true;
+  // the words that aren't plain page text
+  const labels = () => {
+    $('sl-keep-text').textContent = t('sl.keep', { n: keepTiles });
+    $('sl-eyebrow').textContent = isNew ? t('sl.new') : t('sl.yours');
+  };
+  onLang(() => {
+    labels();
+    if (root.hidden) return;
+    renderWidth();
+    renderList();
+    refresh();
+  });
 
   // ---------- drawing ----------
 
@@ -127,35 +141,36 @@ export function createSlopeEditor({ onBuild }) {
 
   function renderTemplates() {
     tpl.innerHTML =
-      '<span class="ctl-l">Start from</span>' +
-      TEMPLATES.map((t) => {
-        const on = sameDesign({ ...templateDesign(t.id, design.width) }, design);
-        return `<button type="button" class="sl-tpl" data-tpl="${t.id}" aria-pressed="${on}" title="${t.blurb}"><b>${t.name}</b><small>${t.blurb}</small></button>`;
+      `<span class="ctl-l">${t('sl.startFrom')}</span>` +
+      TEMPLATES.map((x) => {
+        const on = sameDesign({ ...templateDesign(x.id, design.width) }, design);
+        const blurb = t(`tpl.${x.id}.blurb`);
+        return `<button type="button" class="sl-tpl" data-tpl="${x.id}" aria-pressed="${on}" title="${blurb}"><b>${t(`tpl.${x.id}`)}</b><small>${blurb}</small></button>`;
       }).join('');
   }
 
   function renderWidth() {
-    widthSeg.innerHTML = WIDTHS.map((w) => `<button type="button" data-width="${w.id}" aria-pressed="${w.id === design.width}">${w.label}<small>${w.W} m</small></button>`).join('');
+    widthSeg.innerHTML = WIDTHS.map((w) => `<button type="button" data-width="${w.id}" aria-pressed="${w.id === design.width}">${t(`width.${w.id}`)}<small>${w.W} m</small></button>`).join('');
   }
 
   const stepper = (i, key, v) => {
     const lim = LIMITS[key];
-    const label = key === 'slope' ? 'slope' : 'length';
+    const label = (key === 'slope' ? t('sl.slope') : t('sl.length')).toLowerCase();
     const tooLong = key === 'length' && designLength(design) + lim.step > MAX_LENGTH;
     return `<div class="sl-ctl" data-key="${key}">
-      <button type="button" class="step" data-step="-1" aria-label="Section ${i + 1}: less ${label}" ${v <= lim.min ? 'disabled' : ''}>−</button>
+      <button type="button" class="step" data-step="-1" aria-label="${t('sl.less', { i: i + 1, what: label })}" ${v <= lim.min ? 'disabled' : ''}>−</button>
       <output>${key === 'slope' ? fmtSlope(v) : `${v} m`}</output>
-      <button type="button" class="step" data-step="1" aria-label="Section ${i + 1}: more ${label}" ${v >= lim.max || tooLong ? 'disabled' : ''}>+</button>
+      <button type="button" class="step" data-step="1" aria-label="${t('sl.more', { i: i + 1, what: label })}" ${v >= lim.max || tooLong ? 'disabled' : ''}>+</button>
     </div>`;
   };
 
   function rowHTML(i) {
     const s = design.sections[i];
     const d = difficulty(s.slope);
-    return `<span class="sl-num" style="--d:${DIFF_COLORS[d]}" title="${DIFF_NAMES[d]}">${i + 1}</span>
+    return `<span class="sl-num" style="--d:${DIFF_COLORS[d]}" title="${t(`diff.${d}`)}">${i + 1}</span>
       ${stepper(i, 'slope', s.slope)}
       ${stepper(i, 'length', s.length)}
-      <button type="button" class="sl-del" data-act="del" aria-label="Remove section ${i + 1}" title="Remove this section" ${design.sections.length <= 1 ? 'disabled' : ''}>
+      <button type="button" class="sl-del" data-act="del" aria-label="${t('sl.remove', { i: i + 1 })}" title="${t('sl.removeTitle')}" ${design.sections.length <= 1 ? 'disabled' : ''}>
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>
       </button>`;
   }
@@ -178,7 +193,7 @@ export function createSlopeEditor({ onBuild }) {
     read.avg.textContent = `${Math.round(st.avgDeg)}°`;
     read.max.innerHTML = `<i class="diff" data-d="${difficulty(st.maxDeg)}"></i>${Math.round(st.maxDeg)}°`;
     goBtn.disabled = !st.ok;
-    msg.textContent = st.ok ? `${design.sections.length} section${design.sections.length > 1 ? 's' : ''}` : st.reason;
+    msg.textContent = st.ok ? t('sl.count', { n: design.sections.length }) : t(st.why[0], st.why[1]);
     msg.dataset.bad = st.ok ? '' : '1';
     addBtn.disabled = design.sections.length >= MAX_SECTIONS || designLength(design) + LIMITS.length.min > MAX_LENGTH;
     // the other rows' + length buttons depend on the total
@@ -334,8 +349,9 @@ export function createSlopeEditor({ onBuild }) {
       cancelBtn.hidden = !cancel;
       keepRow.hidden = !(current && tiles > 0);
       keepBox.checked = true;
-      $('sl-keep-n').textContent = String(tiles);
-      $('sl-eyebrow').textContent = current ? 'Your slope' : 'New slope';
+      keepTiles = tiles;
+      isNew = !current;
+      labels();
       renderWidth();
       renderList();
       root.hidden = false;

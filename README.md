@@ -18,6 +18,16 @@ A side view of the whole slope, true to scale, is coloured like piste markers (g
 
 The slope is bare snow, the same all the way across: no rolls, forest or rock but what you add with the tiles. **Edit the slope** (`N`, ••• menu) opens it again; **Keep what I built** leaves your tiles where they were (counted from the top, centred if the width changes) and the start gate too.
 
+### Learn: the tutorial
+
+**Twelve short levels**, one action (or two) at a time: Select (and the brush sizes), Raise and lower, Flatten, Smooth, Steepen and ease, Jump (with the start gate, and a second in the air), Drop, Rocks, Trees and clearings, Powder and ice, Copy / paste / rotate, Erase. Each level is a small slope of its own; its card (top left, or under the scoreboard on a phone) lists the steps, the tiles to work on are **marked on the snow** (a pink outline), and the tab and the button to press pulse in the bar. A step is ticked as soon as it's done, including the ones you ride. Restart, skip or pick any level from the list; progress is kept.
+
+Start it from the welcome card or the ••• menu (**Tutorial**). Your own slope is put aside meanwhile (nothing is saved during the tutorial) and comes back as it was when you leave (✕).
+
+### English and French
+
+The whole game is in **English and French** (`src/i18n.js`, `src/tutorialText.js`): it follows the browser's language, and the ••• menu switches (**Français** / **English**), remembered in the browser. Numbers are written the French way too (1,5 m).
+
 ### Start anywhere, pause, ride on
 
 1. **Start** (`G`): tap or drag on the snow to put the start gate anywhere. It faces down the fall line, and the trees around it make room.
@@ -47,7 +57,9 @@ Then act on the selection. Actions stay on the tiles, so they stack (tap again f
 | | **Rotate** (`Q`) | Turns the selected jumps and drops a twelfth of a turn; while pasting, turns the copy a sixth of a turn. |
 | | **Erase** (`X`, `Delete`) | Back to the bare slope on these tiles. |
 
-**Everything merges.** Nothing is stamped tile by tile: the tiles of one action make one mask, blurred into a smooth field that shapes the snow, so neighbours are one shape with no seam, step or hexagon corner, and raised beside lowered rolls into one shape. On the snow, changed tiles are tinted by what changed (blue shape, green nature, orange features) and the selection is outlined in amber.
+**Everything merges.** Nothing is stamped tile by tile: the tiles of one action make one mask, blurred into a smooth field that shapes the snow, so neighbours are one shape with no seam, step or hexagon corner, and raised beside lowered rolls into one shape. Jumps made one after the other side by side become one wide kicker (one lip, the same height all along); a terrace is cut and filled with banks the snow can hold (30° to 40°, never a cliff) whatever the pitch, its edge round rather than hexagonal; a big raise or dig spreads its flanks (a hill and a bowl, not a tower and a pit). On the snow, changed tiles are tinted by what changed (blue shape, green nature, orange features) and the selection is outlined in amber.
+
+**The light follows the snow**: the shading uses a normal per pixel (a half-float normal map from the heightfield), so banks, rolls and kickers shade smoothly with no facets or stair steps; ice is glassy blue with streaks and a sheen, powder soft and pillowy.
 
 ### Snow
 
@@ -120,9 +132,9 @@ Hand it to a few people. Do they say "one more tweak" and keep going? If not, fi
 ```bash
 npm install
 npm run dev      # local dev server
-npm test         # physics, scoring, slope design, the hexagon grid, tile actions and jumps (Node, no browser needed)
+npm test         # physics, scoring, slope design, the hexagon grid, tile actions and jumps, the translation, the tutorial levels (Node, no browser needed)
 npm run build    # production build into dist/
-npm run smoke    # browser smoke test on the build: design a slope, move the start, select tiles, raise, undo, a jump, rotate, copy and paste, edit the slope keeping the tiles, ride, pause and act, ride on, start again (needs Chromium: npx playwright install chromium)
+npm run smoke    # browser smoke test on the build: design a slope, move the start, select tiles, raise, undo, a jump, rotate, copy and paste, edit the slope keeping the tiles, ride, pause and act, ride on, start again, switch to French, play a tutorial level and leave it (needs Chromium: npx playwright install chromium)
 ```
 
 Add `?debug` to the URL for a frame-cost readout (fps, worst frame, draw calls, triangles). CI (`.github/workflows/ci.yml`) runs the tests, the build and the smoke test on every pull request.
@@ -133,9 +145,11 @@ Stack: [Vite](https://vite.dev) + [Three.js](https://threejs.org). The simulatio
 
 ```
 src/
-  core/        heightfield, slope design, hexagon grid, tiles and actions, terrain, skier physics, scoring (pure JS)
+  core/        heightfield, slope design, hexagon grid, tiles and actions, terrain, skier physics, scoring, tutorial levels (pure JS)
   render/      terrain mesh + shader, trees and rocks, start gate, skier, spray, ski tracks
   buildBar.js  the build bar
+  i18n.js      English and French, the language switch
+  tutorial.js  the tutorial card (tutorialText.js: its words)
   ui.js        overlay controls
   main.js      scene, input, game loop
 tests/         node:test suites

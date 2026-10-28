@@ -1150,9 +1150,9 @@ body.riding .build-kinds {
   transform: scale(0.93);
   background: #e64a12;
 }
-/* in the air the button is for absorbing the landing */
+/* in the air the button is for absorbing the landing (its words come from the page) */
 .jump-btn.air .jump-sub::before {
-  content: 'land: hold';
+  content: attr(data-air);
 }
 .jump-btn.air .jump-sub {
   font-size: 0;
@@ -2523,5 +2523,326 @@ body.paused .status {
   }
   .slope-card h1 {
     font-size: 26px;
+  }
+}
+
+/* the help card's buttons: the tutorial beside Got it */
+/* side by side when there's room; on a phone the main button goes on top */
+.intro-actions {
+  display: flex;
+  flex-wrap: wrap-reverse;
+  gap: 10px;
+  margin-top: 4px;
+}
+.intro-actions .intro-go {
+  flex: 1 1 230px;
+  width: auto;
+  min-width: 0;
+  white-space: normal;
+}
+.intro-tut {
+  flex: 1 1 150px;
+  min-height: 52px;
+  padding: 0 16px;
+  font-size: 15px;
+  white-space: normal;
+}
+
+/* the tutorial points at what to press */
+.bb-pulse,
+#send.tut-pulse {
+  animation: bb-pulse 1.1s ease-in-out infinite;
+}
+.bb-piece.bb-pulse,
+.bb-fixed.bb-pulse {
+  border-color: #e0338f;
+}
+.bb-size.bb-pulse,
+.bb-chip.bb-pulse,
+#send.tut-pulse {
+  outline: 3px solid #e0338f;
+  outline-offset: 2px;
+}
+@keyframes bb-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(224, 51, 143, 0.85);
+  }
+  50% {
+    box-shadow: 0 0 0 7px rgba(224, 51, 143, 0);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .bb-pulse,
+  #send.tut-pulse {
+    animation: none;
+    box-shadow: 0 0 0 3px #e0338f;
+  }
+}
+
+/* ---------- tutorial ---------- */
+.tut {
+  position: fixed;
+  z-index: 15;
+  top: calc(var(--gut) + 122px + var(--safe-t));
+  left: max(var(--gut), var(--safe-l));
+  width: 350px;
+  max-height: calc(100dvh - 122px - 170px - var(--safe-t));
+  display: flex;
+  flex-direction: column;
+  padding: 10px 12px 12px;
+  background: var(--panel-solid);
+  color: var(--ink);
+  touch-action: pan-y;
+}
+.tut[hidden],
+body.riding .tut {
+  display: none;
+}
+.tut-head {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.tut-fold {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  grid-template-rows: auto auto;
+  align-items: center;
+  column-gap: 6px;
+  padding: 2px 2px 4px;
+  border: 0;
+  background: none;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.tut-eyebrow {
+  grid-column: 1;
+  font: 700 11px/1.2 var(--display);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #e0338f;
+}
+.tut-title {
+  grid-column: 1;
+  font: 700 20px/1.15 var(--display);
+  letter-spacing: 0.02em;
+}
+.tut-chev {
+  grid-column: 2;
+  grid-row: 1 / 3;
+  width: 20px;
+  height: 20px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  transition: transform 0.15s ease;
+}
+.tut.is-folded .tut-chev {
+  transform: rotate(-90deg);
+}
+.tut-icon {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border: 1px solid var(--panel-line);
+  border-radius: 10px;
+  background: #fff;
+  color: var(--ink);
+  cursor: pointer;
+}
+.tut-icon svg {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.4;
+  stroke-linecap: round;
+}
+.tut-body {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.tut.is-folded .tut-body,
+.tut.is-folded .tut-list {
+  display: none;
+}
+.tut-lede {
+  margin: 4px 0 8px;
+  font-size: 13px;
+  line-height: 1.4;
+  color: #5b4a78;
+}
+.tut-steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+.tut-steps li {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  padding: 7px 8px;
+  border-radius: 10px;
+  font-size: 13.5px;
+  line-height: 1.35;
+  color: #7a6a95;
+}
+.tut-steps i {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 2px solid currentColor;
+  font: 700 12px/1 var(--display);
+  font-style: normal;
+}
+.tut-steps li.is-now {
+  background: #fff;
+  color: var(--ink);
+  box-shadow: inset 0 0 0 2px #e0338f;
+  animation: tut-in 0.35s ease-out;
+}
+.tut-steps li.is-now i {
+  border-color: #e0338f;
+  background: #e0338f;
+  color: #fff;
+}
+.tut-steps li.is-done {
+  color: #2f9e86;
+}
+.tut-steps li.is-done span {
+  color: #6b8f86;
+}
+.tut-steps li.is-done i {
+  background: #2f9e86;
+  border-color: #2f9e86;
+  color: #fff;
+}
+@keyframes tut-in {
+  from {
+    transform: translateX(-6px);
+    opacity: 0.4;
+  }
+}
+.tut-done {
+  margin: 10px 0 0;
+  font: 700 16px/1.3 var(--display);
+  color: #2f9e86;
+}
+.tut-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+.tut-btn {
+  min-height: 38px;
+  padding: 0 12px;
+  font-size: 13px;
+}
+.tut-next {
+  flex: 1 1 auto;
+  min-height: 42px;
+  padding: 8px 14px;
+  font-size: 16px;
+  white-space: normal;
+}
+.tut-list {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--panel-line);
+}
+.tut-list[hidden] {
+  display: none;
+}
+.tut-list button {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 34px;
+  padding: 4px 6px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: none;
+  color: var(--ink);
+  font: 600 12.5px/1.15 var(--display);
+  text-align: left;
+  cursor: pointer;
+}
+.tut-list button[aria-current='true'] {
+  border-color: #e0338f;
+  background: #fff;
+}
+.tut-list i {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--panel-line);
+  font: 700 11px/1 var(--display);
+  font-style: normal;
+}
+.tut-list .is-done i {
+  background: #2f9e86;
+  color: #fff;
+}
+@media (max-width: 720px) {
+  .tut {
+    top: calc(var(--gut) + 104px + var(--safe-t));
+    left: max(var(--gut), var(--safe-l));
+    right: max(var(--gut), var(--safe-r));
+    width: auto;
+    max-height: 36dvh;
+    padding: 8px 10px 10px;
+  }
+  .tut-title {
+    font-size: 17px;
+  }
+  .tut-lede {
+    display: none;
+  }
+  .tut-steps li {
+    padding: 5px 6px;
+    font-size: 13px;
+  }
+  /* on a phone only the step to do now, and what's done shrinks to its tick */
+  .tut-steps li:not(.is-now) span {
+    display: none;
+  }
+  .tut-steps {
+    display: flex;
+    flex-wrap: wrap;
+  }
+  .tut-steps li.is-now {
+    flex: 1 1 100%;
+    order: -1;
+  }
+  .tut-steps li:not(.is-now) {
+    padding: 0;
+  }
+  .tut-actions {
+    margin-top: 8px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .tut-steps li.is-now {
+    animation: none;
   }
 }

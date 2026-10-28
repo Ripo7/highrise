@@ -2,7 +2,8 @@
 // a slope section by section, put the start gate anywhere, select hexagon tiles and act on
 // them: raise, undo and redo, a jump, rotate, copy and paste, deselect; edit the slope and
 // keep the tiles; ride, pause to build, ride on from where the skier was, start again from
-// the gate) and fails on any page error. Run after `npm run build`:
+// the gate; switch to French; play the first tutorial level and leave it) and fails on any
+// page error. Run after `npm run build`:
 //   npm run smoke      (SMOKE_OUT=dir keeps screenshots; defaults to smoke-shots/)
 import { preview } from 'vite';
 import { chromium } from 'playwright';
@@ -248,9 +249,47 @@ try {
   });
   assert.ok(again.time < 1 && again.d < 6 && !again.paused, `a new run from the gate (${again.time.toFixed(2)} s, ${again.d.toFixed(1)} m)`);
 
+  // French: the menu switches the language, and the page follows
+  await page.click('#ride-exit');
+  await page.waitForFunction(() => !window.__highrise.riding, null, { timeout: 60000 });
+  const mine = await page.evaluate(() => JSON.stringify({ d: window.__highrise.state.design, n: window.__highrise.state.tiles.length }));
+  await page.click('#more');
+  await page.click('#lang-btn');
+  assert.equal(await page.evaluate(() => document.documentElement.lang), 'fr');
+  assert.equal((await page.textContent('#buildbar [data-tab="shape"]')).trim(), 'Forme', 'the build bar in French');
+  assert.equal((await page.textContent('#send-label')).trim(), 'Reprendre', 'Ride on in French');
+  await page.screenshot({ path: `${OUT}/7-francais.png` });
+
+  // the tutorial (••• menu), in French: level 1, select the marked tiles, clear, then the
+  // L brush; next level; leave, and your own slope is back as it was
+  await page.click('#more');
+  await page.click('#tutorial-btn');
+  await page.waitForFunction(() => window.__highrise.tutorial.active && window.__highrise.tutorial.level === 'select');
+  assert.ok(await page.isVisible('#tut'), 'the tutorial card');
+  assert.equal((await page.textContent('#tut .tut-title')).trim(), 'Choisir');
+  await page.screenshot({ path: `${OUT}/8-tutorial.png` });
+  await page.evaluate(() => window.__highrise.selectAt(0, window.__highrise.hf.startZ + 70, 2));
+  await page.waitForFunction(() => window.__highrise.tutorial.step === 'clear');
+  await page.click('#buildbar .bb-chip');
+  await page.waitForFunction(() => window.__highrise.tutorial.step === 'big');
+  await page.click('#buildbar [data-size="3"]');
+  await page.evaluate(() => window.__highrise.selectAt(-30, window.__highrise.hf.startZ + 110));
+  await page.waitForFunction(() => window.__highrise.tutorial.complete);
+  await page.click('#tut [data-tut="next"]');
+  await page.waitForFunction(() => window.__highrise.tutorial.level === 'raise');
+  await page.click('#tut [data-tut="exit"]');
+  await page.waitForFunction(() => !window.__highrise.tutorial.active);
+  const back = await page.evaluate(() => JSON.stringify({ d: window.__highrise.state.design, n: window.__highrise.state.tiles.length }));
+  assert.equal(back, mine, 'your own slope and tiles are back');
+  const saved = await page.evaluate(() => JSON.parse(localStorage.getItem('highrise.ski.v3')).design);
+  assert.equal(JSON.stringify(saved), JSON.stringify(JSON.parse(mine).d), 'the tutorial never saved over it');
+  await page.click('#more');
+  await page.click('#lang-btn');
+  assert.equal(await page.evaluate(() => document.documentElement.lang), 'en');
+
   assert.deepEqual(errors, [], 'no page errors');
   console.log(
-    `smoke test passed: a slope of 4 sections designed (and edited, tiles kept), start gate moved, ${picked} tiles selected and raised, undo/redo, a jump turned, copied and pasted (${tileCount} tiles), ride at ${(ride.speed * 3.6).toFixed(0)} km/h, pause and build, ride on at ${resumed.time.toFixed(1)} s, from the start`
+    `smoke test passed: a slope of 4 sections designed (and edited, tiles kept), start gate moved, ${picked} tiles selected and raised, undo/redo, a jump turned, copied and pasted (${tileCount} tiles), ride at ${(ride.speed * 3.6).toFixed(0)} km/h, pause and build, ride on at ${resumed.time.toFixed(1)} s, from the start; in French; a tutorial level done and left, your slope back`
   );
 } catch (err) {
   // on CI, say what failed where it shows on the run's page too (an annotation), with a

@@ -77,13 +77,16 @@ const frag = /* glsl */ `
   uniform vec3 uIceLit;
   uniform vec3 uIceShadow;
   // the build grid of hexagons (see core/hex.js), one texel per tile (see writeTiles in
-  // main.js): R = the ghost (where the brush or a paste would go), G = changed, B = selected,
+  // main.js): R = the ghost (where the brush or a paste would go: 1) and the tutorial's goal
+  // tiles (0.38; 0.88 under the ghost), G = changed, B = selected,
   // A = what changed (1 shape, 2 nature, 3 a feature) + 4 × (the way a jump faces + 1)
   uniform sampler2D uTiles;
   uniform vec4 uTileInfo; // x of the left edge, z of the start line, hexagon radius, rows
   uniform float uTileCols;
   uniform float uTileOn;
   uniform vec3 uGhost; // the selection's colour
+  uniform vec3 uGoal; // the tutorial's goal tiles
+  uniform float uTime;
   uniform vec3 uCatCol[6]; // tint of changed tiles, by what changed (A channel)
 
   // Manual bilinear lookup: iPhones can't filter float textures in hardware (they read
@@ -381,6 +384,19 @@ const frag = /* glsl */ `
           float nbSel = nbIn ? texture2D(uTiles, (nb + 0.5) / vec2(uTileCols, uTileInfo.w)).b : 0.0;
           col = mix(col, uGhost * 0.82, edge * (nbSel > 0.5 ? 0.0 : 0.95));
         }
+        // the tutorial's goal: a tint and a marching dashed outline round the group
+        bool goal = (tv.r > 0.2 && tv.r < 0.5) || (tv.r > 0.8 && tv.r < 0.95);
+        if (goal) {
+          vec2 nb = hexNeighbour(gp, hx, uTileInfo.z);
+          bool nbIn = nb.x >= 0.0 && nb.y >= 0.0 && nb.x < uTileCols && nb.y < uTileInfo.w;
+          float nr = nbIn ? texture2D(uTiles, (nb + 0.5) / vec2(uTileCols, uTileInfo.w)).r : 0.0;
+          bool nbGoal = (nr > 0.2 && nr < 0.5) || (nr > 0.8 && nr < 0.95);
+          vec2 l = gp - hexCentre(hx.xy, uTileInfo.z);
+          float dash = fract(atan(l.y, l.x) * 2.8647890 - uTime * 0.8); // 18 dashes a tile
+          float on = smoothstep(0.2, 0.3, dash) * (1.0 - smoothstep(0.7, 0.8, dash));
+          col = mix(col, uGoal, 0.14 + 0.06 * sin(uTime * 3.0));
+          col = mix(col, uGoal, edge * (nbGoal ? 0.0 : 0.95) * (0.35 + 0.65 * on));
+        }
         // the ghost: where the brush (or a paste) would go
         if (tv.r > 0.5) col = mix(col, uGhost, 0.12 + 0.55 * edge);
       }
@@ -540,6 +556,8 @@ export class TerrainMesh {
       uTileCols: { value: 1 },
       uTileOn: { value: 0 },
       uGhost: { value: c('#ffb020') },
+      uGoal: { value: c('#e0338f') },
+      uTime: { value: 0 },
       uCatCol: { value: ['#4f7be8', '#ff7a45', '#2f9e86', '#8a6fd8', '#b9855d', '#8a7aa3'].map(c) },
     };
     this.setTileGrid(1, 1, -240, 10);

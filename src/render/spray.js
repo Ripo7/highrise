@@ -35,6 +35,7 @@ const frag = /* glsl */ `
     if (d > 0.5) discard;
     float a = smoothstep(0.5, 0.1, d) * vLife * 0.85 * vNear;
     gl_FragColor = vec4(vec3(0.97, 0.98, 1.0), a);
+    #include <colorspace_fragment>
   }
 `;
 

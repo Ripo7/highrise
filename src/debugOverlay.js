@@ -1,6 +1,7 @@
 // ?debug in the URL: a small readout of what each frame costs, to measure optimisations
 // before and after on real devices. Updated four times a second.
-export function createDebugOverlay(renderer) {
+// gfx: () => the picture quality ({ setting, tier, post, scale })
+export function createDebugOverlay(renderer, gfx = null) {
   if (!new URLSearchParams(window.location.search).has('debug')) return null;
   const el = document.createElement('pre');
   el.className = 'debug-overlay';
@@ -26,7 +27,10 @@ export function createDebugOverlay(renderer) {
         `${(info.render.triangles / 1e6).toFixed(2)} M triangles`,
         `${info.memory.geometries} geometries · ${info.memory.textures} textures`,
         `pixel ratio ${renderer.getPixelRatio().toFixed(2)}`,
-      ].join('\n');
+        gfx ? `graphics ${gfx().setting} -> ${gfx().tier}${gfx().post ? ' + post' : ''} · scale ${gfx().scale.toFixed(2)}` : '',
+      ]
+        .filter(Boolean)
+        .join('\n');
       frames = 0;
       worst = 0;
       last = now;

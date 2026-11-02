@@ -43,6 +43,8 @@ import { pieceLayers, allBuilt } from './core/pieces.js';
 import { CATEGORY_COLORS } from './pieceIcons.js';
 import { THEME, SUN_DIR } from './render/theme.js';
 import { createDebugOverlay } from './debugOverlay.js';
+import { TIERS, TIER_ORDER, SETTINGS, readSetting, tierFor, pixelRatio, createGovernor } from './render/quality.js';
+import { createPost, floatTargets, skyTexture } from './render/post.js';
 
 // ---------- state ----------
 const COARSE = window.matchMedia('(pointer: coarse)').matches;
@@ -172,9 +174,9 @@ function showFatal(msg) {
   el.textContent = msg;
   document.body.append(el);
 }
-// phones: cap resolution a little to keep editing smooth
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, COARSE ? 1.75 : 2));
 renderer.outputColorSpace = THREE.SRGBColorSpace;
+// the debug readout counts every pass of a frame, not just the last
+renderer.info.autoReset = false;
 
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(42, 1, 1, 40000);
@@ -205,9 +207,11 @@ function computeHome() {
 computeHome();
 camera.position.copy(HOME_CAM);
 
-// the sky behind the canvas comes from the theme
+// the sky comes from the theme: in the scene (so the post-processing grades it too), and
+// behind the canvas until the first frame
 document.documentElement.style.setProperty('--sky-top', THEME.sky.top);
 document.documentElement.style.setProperty('--sky-low', THEME.sky.horizon);
+scene.background = skyTexture(THEME.sky.top, THEME.sky.horizon);
 scene.add(new THREE.HemisphereLight(THEME.sky.top, THEME.sky.horizon, 1.4));
 const sun = new THREE.DirectionalLight(THEME.sun.color, 2.4);
 sun.position.set(...SUN_DIR).multiplyScalar(200);
@@ -217,7 +221,7 @@ scene.add(sun, sun.target);
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFShadowMap;
 sun.castShadow = true;
-sun.shadow.mapSize.setScalar(COARSE ? 1024 : 2048);
+sun.shadow.mapSize.setScalar(1024); // set by the picture quality (applyQuality)
 sun.shadow.bias = -0.0004;
 sun.shadow.normalBias = 0.6;
 const SUN_V = new THREE.Vector3(...SUN_DIR).normalize();
@@ -248,6 +252,85 @@ function updateSun() {
   }
   sun.target.position.copy(_sunC);
   sun.position.copy(_sunC).addScaledVector(SUN_V, 3000);
+}
+
+// ---------- picture quality (render/quality.js, render/post.js) ----------
+// Auto, Low, Medium or High, from the ••• menu (kept in the browser; ?gfx=low|medium|high
+// in the URL for this visit only). Auto picks a tier for the device and, when frames come
+// too slowly, draws at a lower resolution, then drops a tier (and remembers it).
+const GFX_KEY = 'highrise.gfx';
+const GFX_AUTO_KEY = 'highrise.gfx.auto';
+const store = {
+  get: (k) => {
+    try {
+      return localStorage.getItem(k);
+    } catch {
+      return null;
+    }
+  },
+  set: (k, v) => {
+    try {
+      localStorage.setItem(k, v);
+    } catch {
+      /* private mode: this visit only */
+    }
+  },
+};
+const post = createPost(renderer, scene, camera);
+const DEVICE = {
+  coarse: COARSE,
+  dpr: window.devicePixelRatio || 1,
+  memory: navigator.deviceMemory,
+  cores: navigator.hardwareConcurrency,
+  floatTargets: floatTargets(renderer),
+  remembered: store.get(GFX_AUTO_KEY),
+};
+const gfxUrl = new URLSearchParams(window.location.search).get('gfx');
+let gfxSetting = readSetting(gfxUrl || store.get(GFX_KEY));
+let gfxTier = tierFor(gfxSetting, DEVICE);
+const governor = createGovernor();
+let lastFrameAt = 0;
+let gfxShow = null; // the ••• menu's label, once the UI is there
+function applyQuality() {
+  const t = TIERS[gfxTier];
+  renderer.setPixelRatio(pixelRatio(gfxTier, DEVICE.dpr, gfxSetting === 'auto' ? governor.scale : 1));
+  // phones: a smaller shadow map whatever the tier
+  const s = COARSE ? Math.min(t.shadow, 1024) : t.shadow;
+  if (sun.shadow.mapSize.x !== s) {
+    sun.shadow.mapSize.setScalar(s);
+    sun.shadow.map?.dispose();
+    sun.shadow.map = null;
+  }
+  post.set(t);
+  gfxShow?.(gfxSetting, gfxTier);
+}
+applyQuality();
+// the ••• menu: Auto -> Low -> Medium -> High -> Auto
+function cycleGfx() {
+  gfxSetting = SETTINGS[(SETTINGS.indexOf(gfxSetting) + 1) % SETTINGS.length];
+  store.set(GFX_KEY, gfxSetting);
+  // a manual choice forgets what Auto had learnt
+  if (gfxSetting !== 'auto') store.set(GFX_AUTO_KEY, '');
+  DEVICE.remembered = store.get(GFX_AUTO_KEY);
+  gfxTier = tierFor(gfxSetting, DEVICE);
+  governor.reset();
+  applyQuality();
+}
+// once a frame: Auto watches the frame rate
+function watchFrameRate(now) {
+  const ms = now - lastFrameAt;
+  lastFrameAt = now;
+  if (gfxSetting !== 'auto') return;
+  const r = governor.frame(ms);
+  if (!r) return;
+  if (r.drop) {
+    const k = TIER_ORDER.indexOf(gfxTier);
+    if (k <= 0) return;
+    gfxTier = TIER_ORDER[k - 1];
+    store.set(GFX_AUTO_KEY, gfxTier);
+    governor.reset();
+  }
+  applyQuality();
 }
 
 // ---------- input state ----------
@@ -415,6 +498,7 @@ const ui = createUI({
     terrain.setRelief(on);
     scheduleSave({ prefs: true });
   },
+  onGfx: () => cycleGfx(),
   onMute: (m) => {
     state.muted = m;
     sound.setMuted(m);
@@ -440,6 +524,8 @@ const ui = createUI({
     }
   },
 });
+gfxShow = (setting, tier) => ui.setGfx(setting, tier);
+gfxShow(gfxSetting, gfxTier);
 window.__highriseToast = (msg, kind) => ui.toast(msg, kind);
 booted = true;
 
@@ -2234,7 +2320,7 @@ function progressOf(sk) {
 
 // ---------- loop ----------
 const clock = new THREE.Clock();
-const debug = createDebugOverlay(renderer);
+const debug = createDebugOverlay(renderer, () => ({ setting: gfxSetting, tier: gfxTier, post: post.on, scale: governor.scale }));
 
 function resize() {
   const w = canvas.clientWidth;
@@ -2242,6 +2328,7 @@ function resize() {
   if (canvas.width !== Math.floor(w * renderer.getPixelRatio()) || canvas.height !== Math.floor(h * renderer.getPixelRatio())) {
     const wasPortrait = camera.aspect < 1;
     renderer.setSize(w, h, false);
+    post.resize();
     camera.aspect = w / h;
     applyViewOffset();
     if (!riding) camera.fov = w / h < 1 ? 58 : 40;
@@ -2252,6 +2339,8 @@ function resize() {
 
 function frame() {
   const dt = Math.min(clock.getDelta(), 0.05);
+  renderer.info.reset();
+  watchFrameRate(performance.now());
   resize();
   spray.setScale(renderer.domElement.height / 3);
 
@@ -2294,7 +2383,7 @@ function frame() {
     decor.refresh();
   }
   updateSun();
-  renderer.render(scene, camera);
+  post.render();
   debug?.tick();
   requestAnimationFrame(frame);
 }
@@ -2492,6 +2581,10 @@ refreshHistoryButtons();
 // read-only handle for debugging in the browser console (and the smoke test)
 window.__highrise = {
   renderer,
+  // the picture quality: the setting, the tier it runs at, Auto's resolution scale
+  get gfx() {
+    return { setting: gfxSetting, tier: gfxTier, scale: governor.scale, post: post.on, ratio: renderer.getPixelRatio() };
+  },
   // false while the camera is still gliding to a new view (tests wait for it before aiming)
   get cameraSettled() {
     return !viewAnim;

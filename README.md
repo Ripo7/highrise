@@ -54,7 +54,7 @@ Start it from the welcome card or the ••• menu (**Tutorial**). Your own sl
 | Medium | + post-processing: its own 4x anti-aliasing, a colour grade (gentle contrast, a touch of saturation, cool shadows, warm highlights), a light vignette, dithering | 1.5 |
 | High | the same, sharper | 2 |
 
-Auto starts on High on a computer, Medium on a recent phone and Low on a small one (or wherever it settled last time). It watches the frame rate: when frames come too slowly it draws at a lower resolution (down to 60 %), then drops a tier and remembers that; when they're quick again it tries a step back up. The sky is drawn in the scene, so the grade reaches it too (`src/render/post.js`, `src/render/quality.js`). Bloom is in the pipeline but off until there is light brighter than snow to glow (the sun, sparkles, ice).
+Auto starts on High on a computer, Medium on a recent phone and Low on a small one (or wherever it settled last time). It watches the frame rate: when frames come too slowly it draws at a lower resolution (down to 60 %), then drops a tier and remembers that; when they're quick again it tries a step back up. If a smaller picture doesn't make frames quicker, the frame rate is capped rather than slow (an iPhone in Low Power Mode draws at 30 fps whatever it draws): it puts the resolution back and leaves it. The sky is drawn in the scene, so the grade reaches it too (`src/render/post.js`, `src/render/quality.js`). Bloom is in the pipeline but off until there is light brighter than snow to glow (the sun, sparkles, ice).
 
 ### English and French
 

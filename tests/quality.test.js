@@ -12,7 +12,8 @@ test('Auto picks a tier from the device, never above one it dropped to', () => {
   assert.equal(autoTier(desktop), 'high');
   assert.equal(autoTier(phone), 'medium');
   assert.equal(autoTier(oldPhone), 'low');
-  assert.equal(autoTier({ ...phone, memory: undefined, cores: undefined }), 'medium');
+  assert.equal(autoTier({ ...phone, memory: undefined }), 'medium', 'an iPhone: Safari tells nothing of memory');
+  assert.equal(autoTier({ ...phone, memory: undefined, cores: 2 }), 'medium', 'nor the real core count');
   assert.equal(autoTier({ ...desktop, floatTargets: false }), 'low', 'no half-float targets: no post-processing');
   assert.equal(autoTier({ ...desktop, remembered: 'medium' }), 'medium');
   assert.equal(autoTier({ ...oldPhone, remembered: 'high' }), 'low', 'a remembered tier only lowers');
@@ -35,30 +36,47 @@ test('a setting runs at its tier; unknown settings are Auto', () => {
 const feed = (g, ms, n) => {
   const out = [];
   for (let k = 0; k < n; k++) {
-    const r = g.frame(ms);
+    const r = g.frame(typeof ms === 'function' ? ms(g.scale) : ms);
     if (r) out.push(r);
   }
   return out;
 };
+// a GPU-bound frame: its time goes with the pixels drawn (the scale squared)
+const gpu = (base) => (scale) => base * scale * scale;
 
-test('the governor scales down when slow, then drops a tier; one slow frame is nothing', () => {
+test('the governor scales down when the GPU is slow, then drops a tier; one slow frame is nothing', () => {
   const g = createGovernor({ window: 10, grace: 0 });
   // fast frames with a spike now and then: nothing to do
   for (let k = 0; k < 20; k++) assert.equal(g.frame(k % 10 === 3 ? 80 : 16.7), null);
-  // 30 fps: down step by step to the minimum, then a drop
-  const out = feed(g, 33, 200);
+  // a little too slow: down until it's quick enough, then it stays
+  feed(g, gpu(30), 100);
+  assert.ok(g.scale < 1 && 30 * g.scale * g.scale <= 22, `scaled to ${g.scale}`);
+  // far too slow: down step by step to the minimum, then a drop
+  const g2 = createGovernor({ window: 10, grace: 0 });
+  const out = feed(g2, gpu(90), 200);
   const scales = out.filter((r) => r.scale).map((r) => r.scale);
   assert.ok(scales.length >= 2 && scales.every((s, k) => k === 0 || s < scales[k - 1]), `down: ${scales}`);
   assert.ok(Math.abs(scales.at(-1) - 0.6) < 1e-9, 'not below 60 %');
   assert.ok(out.some((r) => r.drop), 'then the next tier down');
   // a hidden tab (huge gaps) is not slowness
-  const g2 = createGovernor({ window: 10, grace: 0 });
-  assert.deepEqual(feed(g2, 2000, 50), []);
+  const g3 = createGovernor({ window: 10, grace: 0 });
+  assert.deepEqual(feed(g3, 2000, 50), []);
+});
+
+test('a frame-rate cap (Low Power Mode: 30 fps whatever is drawn) is left alone', () => {
+  const g = createGovernor({ window: 10, grace: 0 });
+  const out = feed(g, 33.3, 400);
+  // one step down to see, then straight back, and nothing after that
+  assert.deepEqual(out.map((r) => r.scale ?? 'drop'), [0.85, 1]);
+  assert.equal(g.scale, 1);
+  // but a real slowdown on top of the cap still counts
+  const more = feed(g, gpu(60), 60);
+  assert.ok(more.length > 0 && g.scale < 1, 'much slower than the cap: scales down');
 });
 
 test('the governor tries a bigger scale when fast, and backs off for a while if that is too slow', () => {
   const g = createGovernor({ window: 10, grace: 0 });
-  feed(g, 33, 30);
+  feed(g, gpu(40), 40);
   const low = g.scale;
   assert.ok(low < 1);
   // smooth again: after a few calm windows, one step up

@@ -22,14 +22,15 @@ export const SETTINGS = ['auto', 'low', 'medium', 'high'];
 /**
  * The tier Auto starts on.
  * dev: { coarse (touch screen), dpr, memory (GB, navigator.deviceMemory, may be undefined),
- *        cores, floatTargets (can render to half-float targets: the post-processing needs it),
+ *        floatTargets (can render to half-float targets: the post-processing needs it),
  *        remembered (a tier Auto dropped to before) }
  */
 export function autoTier(dev) {
   if (!dev.floatTargets) return 'low';
   let t;
   if (!dev.coarse) t = 'high';
-  else if ((dev.memory !== undefined && dev.memory < 4) || (dev.cores !== undefined && dev.cores <= 4)) t = 'low';
+  // (the core count isn't a guide: Safari doesn't report the real one)
+  else if (dev.memory !== undefined && dev.memory < 4) t = 'low';
   else t = 'medium';
   if (dev.remembered && TIER_ORDER.includes(dev.remembered) && TIER_ORDER.indexOf(dev.remembered) < TIER_ORDER.indexOf(t)) t = dev.remembered;
   return t;
@@ -58,6 +59,9 @@ export const pixelRatio = (tier, dpr, scale = 1) => Math.max(0.5, Math.min(dpr, 
  *   { drop: true }          even the smallest scale is too slow: the next tier down
  * It tries a bigger scale again after a while at full speed, and if that's too slow, it
  * stays below it for a good while (no flicker between two sizes).
+ * A step down that doesn't make frames quicker means the frame rate isn't the GPU's doing
+ * but a cap (an iPhone in Low Power Mode draws at 30 fps whatever it draws, a 30 Hz
+ * screen) or the processor: it puts the resolution back and leaves that rate alone.
  */
 export function createGovernor({ min = 0.6, slow = 22, fast = 17.8, window = 40, grace = 1 } = {}) {
   let scale = 1;
@@ -67,6 +71,8 @@ export function createGovernor({ min = 0.6, slow = 22, fast = 17.8, window = 40,
   let ceiling = 1; // don't go back above this ...
   let ceilingFor = 0; // ... for this many more windows
   let sinceUp = Infinity; // windows since the last step up
+  let lastDown = null; // the last step down, to see if it helped: { from, to (scales), m: median before }
+  let cap = 0; // a frame time that smaller pictures don't change (ms), or 0
   const median = (a) => {
     const s = [...a].sort((x, y) => x - y);
     return s[s.length >> 1];
@@ -80,17 +86,35 @@ export function createGovernor({ min = 0.6, slow = 22, fast = 17.8, window = 40,
     sinceUp++;
     if (m > slow) {
       calm = 0;
+      if (cap && m <= cap * 1.15) return null;
+      // drawing (to/from)^2 fewer pixels should make a GPU-bound frame about that much
+      // quicker: if it got less than 40 % of that, smaller didn't help
+      const expected = lastDown ? 1 - (lastDown.to / lastDown.from) ** 2 : 0;
+      if (lastDown && m > lastDown.m * (1 - 0.4 * expected)) {
+        // a cap, not the GPU: back to where it was, and leave that frame rate alone
+        cap = lastDown.m;
+        scale = lastDown.from;
+        lastDown = null;
+        skip = grace;
+        return { scale };
+      }
       if (sinceUp <= 8) {
         // slow soon after a step up: that size is too much, stay below it for a good while
         ceiling = scale / 1.12;
         ceilingFor = 40;
       }
       sinceUp = Infinity;
-      if (scale <= min + 1e-6) return { drop: true };
+      if (scale <= min + 1e-6) {
+        lastDown = null;
+        return { drop: true };
+      }
+      const from = scale;
       scale = Math.max(min, scale * 0.85);
+      lastDown = { from, to: scale, m };
       skip = grace;
       return { scale };
     }
+    lastDown = null;
     if (m < fast && scale < 1) {
       calm++;
       const next = Math.min(1, scale * 1.12, ceiling);
@@ -130,6 +154,8 @@ export function createGovernor({ min = 0.6, slow = 22, fast = 17.8, window = 40,
       ceiling = 1;
       ceilingFor = 0;
       sinceUp = Infinity;
+      lastDown = null;
+      cap = 0;
     },
   };
 }

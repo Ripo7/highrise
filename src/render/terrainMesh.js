@@ -66,6 +66,7 @@ const frag = /* glsl */ `
   uniform vec2 uStart;
   uniform float uContours;
   uniform float uRelief;
+  uniform float uPxRatio; // device pixels per CSS pixel: the crest ink is measured in CSS pixels
   uniform sampler2D uLocalMean;
   uniform vec2 uHalf;
   uniform vec2 uLocalSize;
@@ -281,10 +282,13 @@ const frag = /* glsl */ `
     col = mix(col, uSnowShadow, (1.0 - smoothstep(0.0, ge, abs(groomed - 0.5))) * 0.35 * (1.0 - uRelief));
 
     // ink along crests and lips seen edge-on: where the surface turns away from the camera
-    // fast (a kicker lip, the top of a roller), not on broad slopes merely seen at an angle
+    // fast (a kicker lip, the top of a roller), not on broad slopes merely seen at an angle.
+    // "Fast" is per pixel, so it is measured at a fixed 2 pixels per CSS pixel whatever the
+    // resolution: drawn at a lower one, every gentle roll would pass the test, as a dark
+    // line broken into dashes (the derivative is one value per 2x2 pixels)
     vec3 vdir = normalize(cameraPosition - vWorld);
     float nv = dot(n, vdir);
-    float dnv = fwidth(nv);
+    float dnv = fwidth(nv) * uPxRatio * 0.5;
     float crest = (1.0 - smoothstep(dnv * 1.2, dnv * 2.6, nv)) * smoothstep(0.01, 0.03, dnv);
     col = mix(col, uInk, crest * 0.85 * (1.0 - uRelief));
 
@@ -568,6 +572,7 @@ export class TerrainMesh {
       uStart: { value: new THREE.Vector2(start.x, start.z) },
       uContours: { value: 1 },
       uRelief: { value: 0 },
+      uPxRatio: { value: 2 },
       uLocalMean: { value: null },
       uHalf: { value: new THREE.Vector2(hf.halfX, hf.halfZ) },
       uLocalSize: { value: new THREE.Vector2(1, 1) },

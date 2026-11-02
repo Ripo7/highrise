@@ -259,7 +259,8 @@ function updateSun() {
 // in the URL for this visit only). Auto picks a tier for the device and, when frames come
 // too slowly, draws at a lower resolution, then drops a tier (and remembers it).
 const GFX_KEY = 'highrise.gfx';
-const GFX_AUTO_KEY = 'highrise.gfx.auto';
+// (v2: Auto used to mistake an iPhone's Low Power Mode for slowness and drop tiers: forget those)
+const GFX_AUTO_KEY = 'highrise.gfx.auto.v2';
 const store = {
   get: (k) => {
     try {
@@ -281,7 +282,6 @@ const DEVICE = {
   coarse: COARSE,
   dpr: window.devicePixelRatio || 1,
   memory: navigator.deviceMemory,
-  cores: navigator.hardwareConcurrency,
   floatTargets: floatTargets(renderer),
   remembered: store.get(GFX_AUTO_KEY),
 };
@@ -2383,6 +2383,8 @@ function frame() {
     decor.refresh();
   }
   updateSun();
+  // the crest ink is measured in CSS pixels, whatever the resolution (terrainMesh.js)
+  terrain.uniforms.uPxRatio.value = renderer.getPixelRatio();
   post.render();
   debug?.tick();
   requestAnimationFrame(frame);

@@ -68,6 +68,16 @@ export function createUI(opts) {
     opts.onMute(m);
   });
 
+  // picture quality: Auto (and the tier it picked), Low, Medium, High; a tap moves on
+  const gfxBtn = $('#gfx-btn');
+  const gfxShown = { setting: 'auto', tier: 'high' };
+  const showGfx = () => {
+    const { setting, tier } = gfxShown;
+    const q = setting === 'auto' ? t('gfx.autoAs', { tier: t(`gfx.${tier}`) }) : t(`gfx.${setting}`);
+    gfxBtn.textContent = t('menu.gfx', { q });
+  };
+  gfxBtn.addEventListener('click', () => opts.onGfx());
+
   // compact screens: secondary options open from the "more" button
   const moreBtn = $('#more');
   const setMenu = (open) => {
@@ -158,11 +168,18 @@ export function createUI(opts) {
     api.setBest(...shown.best);
     api.setProject(shown.project);
     showMute(muteBtn.getAttribute('aria-pressed') === 'true');
+    showGfx();
     // the time and air readouts: just the decimal mark
     for (const el of [stat.time, stat.air]) el.textContent = getLang() === 'fr' ? el.textContent.replace('.', ',') : el.textContent.replace(',', '.');
   });
 
   const api = {
+    // the picture quality setting and the tier it runs at
+    setGfx(setting, tier) {
+      gfxShown.setting = setting;
+      gfxShown.tier = tier;
+      showGfx();
+    },
     openIntro,
     get blocking() {
       return !intro.hidden || !projDlg.hidden;

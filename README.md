@@ -44,6 +44,18 @@ The mouse still turns with the right button, slides with the middle one and zoom
 
 Start it from the welcome card or the ••• menu (**Tutorial**). Your own slope is put aside meanwhile (nothing is saved during the tutorial) and comes back as it was when you leave (✕).
 
+### Graphics quality
+
+**Graphics** in the ••• menu: **Auto** (the default), **Low**, **Medium** or **High**, kept in the browser (`?gfx=low|medium|high` in the URL for one visit).
+
+| | What it draws | Resolution (pixels per CSS pixel, at most) |
+|---|---|---|
+| Low | the scene straight to the screen, as the game always did | 1 |
+| Medium | + post-processing: its own 4x anti-aliasing, a colour grade (gentle contrast, a touch of saturation, cool shadows, warm highlights), a light vignette, dithering | 1.5 |
+| High | the same, sharper | 2 |
+
+Auto starts on High on a computer, Medium on a recent phone and Low on a small one (or wherever it settled last time). It watches the frame rate: when frames come too slowly it draws at a lower resolution (down to 60 %), then drops a tier and remembers that; when they're quick again it tries a step back up. The sky is drawn in the scene, so the grade reaches it too (`src/render/post.js`, `src/render/quality.js`). Bloom is in the pipeline but off until there is light brighter than snow to glow (the sun, sparkles, ice).
+
 ### English and French
 
 The whole game is in **English and French** (`src/i18n.js`, `src/tutorialText.js`): it follows the browser's language, and the ••• menu switches (**Français** / **English**), remembered in the browser. Numbers are written the French way too (1,5 m).
@@ -168,12 +180,12 @@ Hand it to a few people. Do they say "one more tweak" and keep going? If not, fi
 ```bash
 npm install
 npm run dev      # local dev server
-npm test         # physics, scoring, slope design, the hexagon grid, tile actions and jumps, gates and courses, pieces, joints, projects, the translation, the tutorial levels (Node, no browser needed)
+npm test         # picture quality (Auto's tiers and frame governor), physics, scoring, slope design, the hexagon grid, tile actions and jumps, gates and courses, pieces, joints, projects, the translation, the tutorial levels (Node, no browser needed)
 npm run build    # production build into dist/
-npm run smoke    # browser smoke test on the build: design a slope, move the start, select tiles, raise, undo, a jump, rotate, copy and paste, edit the slope keeping the tiles, ride, pause and act, ride on, start again, switch to French, play a tutorial level and leave it, set a course of gates, race it, miss a gate, the slope editor in 3D (side view, drag a dot, undo), the view buttons (select, rotate, move, top, slope), double click a piece, save as a project, open it again, reload (needs Chromium: npx playwright install chromium)
+npm run smoke    # browser smoke test on the build: design a slope, move the start, select tiles, raise, undo, a jump, rotate, copy and paste, edit the slope keeping the tiles, ride, pause and act, ride on, start again, switch to French, play a tutorial level and leave it, set a course of gates, race it, miss a gate, the picture quality setting, the slope editor in 3D (side view, drag a dot, undo), the view buttons (select, rotate, move, top, slope), double click a piece, save as a project, open it again, reload (needs Chromium: npx playwright install chromium)
 ```
 
-Add `?debug` to the URL for a frame-cost readout (fps, worst frame, draw calls, triangles). CI (`.github/workflows/ci.yml`) runs the tests, the build and the smoke test on every pull request.
+Add `?debug` to the URL for a frame-cost readout (fps, worst frame, draw calls, triangles, the graphics tier and Auto's resolution scale). CI (`.github/workflows/ci.yml`) runs the tests, the build and the smoke test on every pull request.
 
 The physics runs in fixed 1/240 s steps whatever the screen's refresh rate, so a run (and the ghost of your best one) plays out identically at 60 Hz and 165 Hz.
 
@@ -182,7 +194,7 @@ Stack: [Vite](https://vite.dev) + [Three.js](https://threejs.org). The simulatio
 ```
 src/
   core/        heightfield, slope design, hexagon grid, tiles and actions, terrain, skier physics, scoring, tutorial levels (pure JS)
-  render/      terrain mesh + shader, trees and rocks, start gate, skier, spray, ski tracks
+  render/      terrain mesh + shader, trees and rocks, start gate, skier, spray, ski tracks, the post-processing and the picture quality
   buildBar.js  the build bar
   slopeMode.js the slope editor's bar (in the 3D view)
   viewButtons.js the buttons over the view (select, rotate, move, top, side, slope)

@@ -358,6 +358,7 @@ try {
   assert.equal(await page.evaluate(() => document.documentElement.lang), 'fr');
   assert.equal((await page.textContent('#buildbar [data-tab="shape"]')).trim(), 'Forme', 'the build bar in French');
   assert.equal((await page.textContent('#send-label')).trim(), 'Reprendre', 'Ride on in French');
+  assert.equal((await page.textContent('#gfx-btn')).trim(), 'Graphismes : Auto (Élevé)', 'the graphics setting in French');
   await page.screenshot({ path: `${OUT}/7-francais.png` });
 
   // the tutorial (••• menu), in French: level 1, select the marked tiles, clear, then the
@@ -392,6 +393,23 @@ try {
   await page.click('#more');
   await page.click('#lang-btn');
   assert.equal(await page.evaluate(() => document.documentElement.lang), 'en');
+
+  // picture quality (••• menu): Auto picked High here (a desktop), with the post-processing;
+  // a tap moves on to Low (straight to the screen), Medium, High, and back to Auto; each draws
+  const gfx = () => page.evaluate(() => window.__highrise.gfx);
+  const g0 = await gfx();
+  assert.deepEqual([g0.setting, g0.tier, g0.post], ['auto', 'high', true], 'Auto: High here');
+  await page.click('#more');
+  assert.equal((await page.textContent('#gfx-btn')).trim(), 'Graphics: Auto (High)');
+  for (const [label, tier, post] of [['Low', 'low', false], ['Medium', 'medium', true], ['High', 'high', true], ['Auto (High)', 'high', true]]) {
+    await page.click('#gfx-btn');
+    assert.equal((await page.textContent('#gfx-btn')).trim(), `Graphics: ${label}`);
+    const g = await gfx();
+    assert.deepEqual([g.tier, g.post], [tier, post], label);
+    await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
+  }
+  assert.equal(await page.evaluate(() => localStorage.getItem('highrise.gfx')), 'auto', 'the setting is kept');
+  await page.click('#more');
 
   // a course: two gates in the skier's line (Features ▸ Gate), the second two tiles wide;
   // a run through both counts and sets the best time
@@ -474,7 +492,7 @@ try {
 
   assert.deepEqual(errors, [], 'no page errors');
   console.log(
-    `smoke test passed: a slope of 4 sections designed (and edited, tiles kept), start gate moved, ${picked} tiles selected and raised, undo/redo, a jump turned, copied and pasted (${tileCount} tiles), ride at ${(ride.speed * 3.6).toFixed(0)} km/h, pause and build, ride on at ${resumed.time.toFixed(1)} s, from the start; in French; a tutorial level done and left, your slope back; a course of gates raced in ${bestTime.toFixed(2)} s, a missed gate; the 3D slope editor (side view, a dot dragged, undone), the view buttons (select, rotate, move, top, slope), a double click on a piece; saved as a project, opened again, reloaded`
+    `smoke test passed: a slope of 4 sections designed (and edited, tiles kept), start gate moved, ${picked} tiles selected and raised, undo/redo, a jump turned, copied and pasted (${tileCount} tiles), ride at ${(ride.speed * 3.6).toFixed(0)} km/h, pause and build, ride on at ${resumed.time.toFixed(1)} s, from the start; in French; the graphics setting cycled through every tier; a tutorial level done and left, your slope back; a course of gates raced in ${bestTime.toFixed(2)} s, a missed gate; the 3D slope editor (side view, a dot dragged, undone), the view buttons (select, rotate, move, top, slope), a double click on a piece; saved as a project, opened again, reloaded`
   );
 } catch (err) {
   // on CI, say what failed where it shows on the run's page too (an annotation), with a

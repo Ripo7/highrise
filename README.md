@@ -52,9 +52,18 @@ Start it from the welcome card or the ••• menu (**Tutorial**). Your own sl
 |---|---|---|
 | Low | the scene straight to the screen, as the game always did | 1 |
 | Medium | + post-processing: its own 4x anti-aliasing, a colour grade (gentle contrast, a touch of saturation, cool shadows, warm highlights), a light vignette, dithering | 1.5 |
-| High | the same, sharper | 2 |
+| High | the same, sharper, with bloom (the sun's glow) and a bigger shadow map | 2 |
 
-Auto starts on High on a computer, Medium on a recent phone and Low on a small one (or wherever it settled last time). It watches the frame rate: when frames come too slowly it draws at a lower resolution (down to 60 %), then drops a tier and remembers that; when they're quick again it tries a step back up. If a smaller picture doesn't make frames quicker, the frame rate is capped rather than slow (an iPhone in Low Power Mode draws at 30 fps whatever it draws): it puts the resolution back and leaves it. The sky is drawn in the scene, so the grade reaches it too (`src/render/post.js`, `src/render/quality.js`). Bloom is in the pipeline but off until there is light brighter than snow to glow (the sun, sparkles, ice).
+Auto starts on High on a computer, Medium on a recent phone and Low on a small one (or wherever it settled last time). It watches the frame rate: when frames come too slowly it draws at a lower resolution (down to 60 %), then drops a tier and remembers that; when they're quick again it tries a step back up. If a smaller picture doesn't make frames quicker, the frame rate is capped rather than slow (an iPhone in Low Power Mode draws at 30 fps whatever it draws): it puts the resolution back and leaves it. The sky is drawn in the scene, so the grade reaches it too (`src/render/post.js`, `src/render/quality.js`).
+
+### Light and weather
+
+- **The sky** is a dome around the camera (`src/render/sky.js`): the same top-to-horizon colours down the screen as always, and in the world the **sun**, a disc brighter than white (on High the bloom gives it a glow), and **clouds**, soft puffs drifting on the wind, lit at the rims when the sun is behind them.
+- **Cloud shadows**: the snow and the trees take their shadow from the same cloud layer, along the sun's direction, so they drift across the run with the clouds overhead (`src/render/atmosphere.js`).
+- **Contact shadows** darken the snow softly where things meet it: round tree trunks and rocks, in hollows and at the foot of kickers, drops and terraces (`src/core/occlusion.js`, worked out from the heights and the trees whenever they change).
+- **Haze**: riding, distant snow and trees fade a little from a few hundred metres; while building it starts beyond what you're looking at.
+- **Sun shadows** reach further while riding the better the quality (80 m round the rider on Low, 110 on Medium, 150 on High with a sharper map), sit mostly ahead of the rider where the camera looks, and fade out at their edge instead of stopping on a line.
+- **Snow in the air** drifts round the camera, catching the low sun.
 
 ### English and French
 
@@ -180,7 +189,7 @@ Hand it to a few people. Do they say "one more tweak" and keep going? If not, fi
 ```bash
 npm install
 npm run dev      # local dev server
-npm test         # picture quality (Auto's tiers and frame governor), physics, scoring, slope design, the hexagon grid, tile actions and jumps, gates and courses, pieces, joints, projects, the translation, the tutorial levels (Node, no browser needed)
+npm test         # picture quality (Auto's tiers and frame governor), contact shadows, physics, scoring, slope design, the hexagon grid, tile actions and jumps, gates and courses, pieces, joints, projects, the translation, the tutorial levels (Node, no browser needed)
 npm run build    # production build into dist/
 npm run smoke    # browser smoke test on the build: design a slope, move the start, select tiles, raise, undo, a jump, rotate, copy and paste, edit the slope keeping the tiles, ride, pause and act, ride on, start again, switch to French, play a tutorial level and leave it, set a course of gates, race it, miss a gate, the picture quality setting, the slope editor in 3D (side view, drag a dot, undo), the view buttons (select, rotate, move, top, slope), double click a piece, save as a project, open it again, reload (needs Chromium: npx playwright install chromium)
 ```

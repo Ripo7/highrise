@@ -4,6 +4,7 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { TREE } from '../core/props.js';
 import { THEME, SUN_DIR, CUT_SHADOW, CUT_LIT } from './theme.js';
 import { lightUniforms, shadowVertPars, shadowVert, shadowFragPars, outlineMaterial } from './toon.js';
+import { ATMO, cloudPars } from './atmosphere.js';
 
 // Trees and rocks come from the Blender factory (art/export_props.py -> public/models/props.glb):
 // 6 tree and 5 rock variants, each drawn as one instanced mesh. Parts are tagged by material
@@ -37,6 +38,7 @@ const vert = /* glsl */ `
 
 const frag = /* glsl */ `
   ${shadowFragPars}
+  ${cloudPars}
   uniform vec3 uLit[4];
   uniform vec3 uMid[4];
   uniform vec3 uShadow[4];
@@ -60,8 +62,11 @@ const frag = /* glsl */ `
     float ndl = dot(n, normalize(uSunDir));
     float aa = fwidth(ndl) + 0.004;
     float inSun = smoothstep(0.35, 0.65, sunShadow());
-    vec3 col = mix(sh, mix(mid, lit, smoothstep(uCutLit - aa, uCutLit + aa, ndl) * inSun),
+    // under a cloud's shadow the sunlit band drops to the middle one, as on the snow
+    float bright = inSun * (1.0 - cloudShadow(vWorld));
+    vec3 col = mix(sh, mix(mid, lit, smoothstep(uCutLit - aa, uCutLit + aa, ndl) * bright),
                    smoothstep(uCutShadow - aa, uCutShadow + aa, ndl) * inSun);
+    col *= mix(vec3(1.0), vec3(0.88, 0.89, 0.97), cloudShadow(vWorld));
     float dist = length(cameraPosition - vWorld);
     col = mix(col, uFog, smoothstep(uFogNear, uFogFar, dist));
     gl_FragColor = vec4(col, 1.0);
@@ -87,6 +92,7 @@ function toonMaterial() {
       uFog: { value: c(THEME.haze) },
       uFogNear: { value: 1400 },
       uFogFar: { value: 4200 },
+      ...ATMO,
     },
   });
 }

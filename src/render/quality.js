@@ -6,15 +6,18 @@
 //           at most 1 pixel per CSS pixel, small shadow map
 //   Medium  + the post-processing (grading, vignette, dithering, its own 4x anti-aliasing),
 //           up to 1.5 pixels per CSS pixel
-//   High    up to 2 pixels per CSS pixel (and, later, bloom on light brighter than snow)
+//   High    up to 2 pixels per CSS pixel, bloom on light brighter than white (the sun),
+//           a bigger, sharper shadow map that reaches further while riding
 //
 // Auto also scales the resolution (down to 60 % of the tier's) to hold the frame rate, and
 // drops a tier when even that isn't enough; a tier it dropped to is remembered for next time.
 
+// rideShadow: half the side of the ground the sun's shadows cover while riding (m);
+// snow: flakes in the air round the camera
 export const TIERS = {
-  low: { post: false, bloom: false, maxRatio: 1, shadow: 1024 },
-  medium: { post: true, bloom: false, maxRatio: 1.5, shadow: 2048 },
-  high: { post: true, bloom: false, maxRatio: 2, shadow: 2048 }, // bloom: once there is light brighter than snow
+  low: { post: false, bloom: false, maxRatio: 1, shadow: 1024, rideShadow: 80, snow: 250 },
+  medium: { post: true, bloom: false, maxRatio: 1.5, shadow: 2048, rideShadow: 110, snow: 700 },
+  high: { post: true, bloom: true, maxRatio: 2, shadow: 4096, rideShadow: 150, snow: 1400 },
 };
 export const TIER_ORDER = ['low', 'medium', 'high'];
 export const SETTINGS = ['auto', 'low', 'medium', 'high'];

@@ -1,14 +1,12 @@
 // The post-processing (Medium and High, see quality.js): the scene is drawn into a
 // half-float target with its own 4x anti-aliasing, then
-//   bloom          a soft glow around what is brighter than white (off for now: nothing is
-//                  yet; the sun, sparkles and ice will be)
+//   bloom (High)   a soft glow around what is brighter than white: the sun
 //   grade          one pass to the screen: linear to sRGB, a gentle contrast curve, a touch
 //                  of saturation, cool shadows and warm highlights, a light vignette,
 //                  dithering (no banding in the sky)
 // Low skips all of it and draws straight to the screen, as the game always did.
 //
-// The sky is in the scene too (skyTexture), so the grade reaches it; the CSS gradient
-// behind the canvas only shows before the first frame.
+// The sky is in the scene too (sky.js), so the grade reaches it.
 
 import * as THREE from 'three';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
@@ -78,26 +76,6 @@ const GradeShader = {
 export function floatTargets(renderer) {
   const ext = renderer.extensions;
   return !!(ext.has('EXT_color_buffer_float') || ext.has('EXT_color_buffer_half_float'));
-}
-
-// The sky behind everything: the same gradient as the CSS one (top, horizon from 70 % down)
-export function skyTexture(top, horizon) {
-  const c = document.createElement('canvas');
-  c.width = 2;
-  c.height = 512;
-  const g = c.getContext('2d');
-  const grad = g.createLinearGradient(0, 0, 0, c.height);
-  grad.addColorStop(0, top);
-  grad.addColorStop(0.7, horizon);
-  grad.addColorStop(1, horizon);
-  g.fillStyle = grad;
-  g.fillRect(0, 0, c.width, c.height);
-  const tex = new THREE.CanvasTexture(c);
-  tex.colorSpace = THREE.SRGBColorSpace;
-  tex.minFilter = THREE.LinearFilter;
-  tex.magFilter = THREE.LinearFilter;
-  tex.generateMipmaps = false;
-  return tex;
 }
 
 export function createPost(renderer, scene, camera) {

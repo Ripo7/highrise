@@ -32,6 +32,11 @@ export const shadowFragPars = /* glsl */ `
     #if defined( USE_SHADOWMAP ) && NUM_DIR_LIGHT_SHADOWS > 0
       DirectionalLightShadow d = directionalLightShadows[ 0 ];
       s = getShadow( directionalShadowMap[ 0 ], d.shadowMapSize, d.shadowIntensity, d.shadowBias, d.shadowRadius, vDirectionalShadowCoord[ 0 ] );
+      // the shadow map covers a square of ground round the rider (or the view): fade the
+      // shadows out towards its edge rather than have them stop on a line
+      vec3 sc = vDirectionalShadowCoord[ 0 ].xyz / vDirectionalShadowCoord[ 0 ].w;
+      float edge = min(min(sc.x, 1.0 - sc.x), min(sc.y, 1.0 - sc.y));
+      s = mix(1.0, s, smoothstep(0.0, 0.07, edge));
     #endif
     return s;
   }

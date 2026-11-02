@@ -1,6 +1,8 @@
 import * as THREE from 'three';
 import { THEME, SUN_DIR, CUT_SHADOW, CUT_LIT } from './theme.js';
 import { lightUniforms, shadowVertPars, shadowVert, shadowFragPars } from './toon.js';
+import { ATMO, cloudPars } from './atmosphere.js';
+import { occlusion } from '../core/occlusion.js';
 
 const toHalf = THREE.DataUtils.toHalfFloat;
 
@@ -71,6 +73,8 @@ const frag = /* glsl */ `
   uniform vec2 uHalf;
   uniform vec2 uLocalSize;
   uniform sampler2D uSurf;
+  uniform sampler2D uAO; // contact shadows (core/occlusion.js)
+  ${cloudPars}
   uniform vec2 uSurfSize;
   uniform sampler2D uNormTex; // the snow's normals (x, z packed in r, g), filtered
   uniform float uNormOn;
@@ -228,6 +232,9 @@ const frag = /* glsl */ `
     level = min(level, 2.0 * smoothstep(0.02 - aa, 0.02 + aa, ndl));
     // shadows cast by trees, the rider and the terrain drop into the shadow band
     level = clamp(level, 0.0, 2.0) * smoothstep(0.35, 0.65, sunShadow());
+    // a cloud's shadow passing over: the sunlit band drops to the middle one
+    float cloud = cloudShadow(vWorld) * (1.0 - uRelief);
+    level = min(level, 2.0 - cloud);
     vec3 snow = level < 1.0 ? mix(uSnowShadow, uSnowMid, level) : mix(uSnowMid, uSnowLit, level - 1.0);
     vec3 rock = level < 1.0 ? mix(uRockShadow, uRockMid, level) : mix(uRockMid, uRockLit, level - 1.0);
     // what the snow is like: groomed piste, untouched powder, ice, or bare rock
@@ -273,6 +280,11 @@ const frag = /* glsl */ `
     rock *= mix(0.86, 1.0, smoothstep(0.45 - sw, 0.45 + sw, sb));
     rock = mix(rock, uInk, (1.0 - smoothstep(0.0, sw * 1.5, min(sb, 1.0 - sb))) * 0.35 * (1.0 - smoothstep(60.0, 220.0, camDist)));
     vec3 col = mix(snow, rock, rockAmt);
+    // contact shadows: hollows, the feet of kickers and walls, round tree trunks and rocks
+    float ao = texture2D(uAO, suv).r * (1.0 - uRelief);
+    col = mix(col, uSnowShadow * vec3(0.9, 0.9, 0.97), ao * 0.7);
+    // and a passing cloud's shadow cools and dims everything a little, sunlit or not
+    col *= mix(vec3(1.0), vec3(0.88, 0.89, 0.97), cloud);
     col = mix(col, uInk, (1.0 - smoothstep(0.0, aas * 1.6, abs(slope - 0.68))) * 0.55);
     float rb = sf.b * smoothstep(0.05, 0.16, slope);
     float rbw = fwidth(rb) * 1.4 + 0.002;
@@ -577,6 +589,8 @@ export class TerrainMesh {
       uHalf: { value: new THREE.Vector2(hf.halfX, hf.halfZ) },
       uLocalSize: { value: new THREE.Vector2(1, 1) },
       uSurf: { value: null },
+      uAO: { value: null },
+      ...ATMO,
       uNormTex: { value: null },
       uNormOn: { value: 1 },
       uSurfSize: { value: new THREE.Vector2(hf.nx, hf.nz) },
@@ -604,6 +618,16 @@ export class TerrainMesh {
     this.surfTex.generateMipmaps = false;
     this.uniforms.uSurf.value = this.surfTex;
     this.refreshSurface();
+    // contact shadows, one byte a sample (rows not 4-byte aligned: unpack byte by byte)
+    this.aoData = new Uint8Array(n);
+    this.aoTex = new THREE.DataTexture(this.aoData, hf.nx, hf.nz, THREE.RedFormat, THREE.UnsignedByteType);
+    this.aoTex.unpackAlignment = 1;
+    this.aoTex.magFilter = THREE.LinearFilter;
+    this.aoTex.minFilter = THREE.LinearFilter;
+    this.aoTex.generateMipmaps = false;
+    this.aoTex.needsUpdate = true;
+    this.uniforms.uAO.value = this.aoTex;
+    this.aoScratch = {};
     // the normals as a filterable texture: x and z as half floats (8 bits would band the
     // light into fine stripes where it changes slowly)
     this.normData = new Uint16Array(n * 2);
@@ -740,6 +764,12 @@ export class TerrainMesh {
       for (let i = 0; i < d.length; i += 4) d[i] = 255; // no map: groomed everywhere
     }
     this.surfTex.needsUpdate = true;
+  }
+
+  // contact shadows from the heights and these soft discs ([{ x, z, r, a }], world metres)
+  refreshOcclusion(blobs) {
+    occlusion(this.hf, blobs, this.aoData, this.aoScratch);
+    this.aoTex.needsUpdate = true;
   }
 
   setRelief(on) {

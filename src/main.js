@@ -44,7 +44,10 @@ import { CATEGORY_COLORS } from './pieceIcons.js';
 import { THEME, SUN_DIR } from './render/theme.js';
 import { createDebugOverlay } from './debugOverlay.js';
 import { TIERS, TIER_ORDER, SETTINGS, readSetting, tierFor, pixelRatio, createGovernor } from './render/quality.js';
-import { createPost, floatTargets, skyTexture } from './render/post.js';
+import { createPost, floatTargets } from './render/post.js';
+import { Sky } from './render/sky.js';
+import { Snowfall } from './render/snowfall.js';
+import { tickAtmosphere } from './render/atmosphere.js';
 
 // ---------- state ----------
 const COARSE = window.matchMedia('(pointer: coarse)').matches;
@@ -207,11 +210,15 @@ function computeHome() {
 computeHome();
 camera.position.copy(HOME_CAM);
 
-// the sky comes from the theme: in the scene (so the post-processing grades it too), and
-// behind the canvas until the first frame
+// the sky (render/sky.js): a dome with the sun and the clouds; the CSS gradient behind the
+// canvas only shows until the first frame
 document.documentElement.style.setProperty('--sky-top', THEME.sky.top);
 document.documentElement.style.setProperty('--sky-low', THEME.sky.horizon);
-scene.background = skyTexture(THEME.sky.top, THEME.sky.horizon);
+const sky = new Sky();
+scene.add(sky.mesh);
+// snow in the air, round the camera (how much: the picture quality)
+const snowfall = new Snowfall();
+scene.add(snowfall.group);
 scene.add(new THREE.HemisphereLight(THEME.sky.top, THEME.sky.horizon, 1.4));
 const sun = new THREE.DirectionalLight(THEME.sun.color, 2.4);
 sun.position.set(...SUN_DIR).multiplyScalar(200);
@@ -228,12 +235,20 @@ const SUN_V = new THREE.Vector3(...SUN_DIR).normalize();
 const sunRot = new THREE.Matrix4().lookAt(SUN_V, new THREE.Vector3(), new THREE.Vector3(0, 1, 0));
 const sunRotInv = sunRot.clone().invert();
 const _sunC = new THREE.Vector3();
+const _fwd = new THREE.Vector3();
 function updateSun() {
   const riding_ = riding && skier;
-  if (riding_) _sunC.set(skier.pos[0], skier.pos[1], skier.pos[2]);
-  else _sunC.copy(controls.target);
+  // riding: the shadow map covers more ground the better the picture quality, and sits
+  // mostly ahead of the rider, where the camera looks
+  const rideHalf = TIERS[gfxTier].rideShadow;
+  if (riding_) {
+    camera.getWorldDirection(_fwd);
+    _fwd.y = 0;
+    if (_fwd.lengthSq() > 1e-6) _fwd.normalize();
+    _sunC.set(skier.pos[0], skier.pos[1], skier.pos[2]).addScaledVector(_fwd, rideHalf * 0.5);
+  } else _sunC.copy(controls.target);
   const dist = camera.position.distanceTo(_sunC);
-  const half = riding_ ? 80 : THREE.MathUtils.clamp(dist * 0.7, 40, 1400);
+  const half = riding_ ? rideHalf : THREE.MathUtils.clamp(dist * 0.7, 40, 1400);
   // snap to whole shadow-map texels in the light's frame so shadows don't shimmer as we move
   const texel = (2 * half) / sun.shadow.mapSize.x;
   _sunC.applyMatrix4(sunRotInv);
@@ -302,6 +317,7 @@ function applyQuality() {
     sun.shadow.map = null;
   }
   post.set(t);
+  snowfall.setCount(t.snow);
   gfxShow?.(gfxSetting, gfxTier);
 }
 applyQuality();
@@ -419,7 +435,7 @@ function rebuildTerrain() {
   terrain.uniforms.uGhost.value.set(CATEGORY_COLORS.select);
   terrain.uniforms.uTileOn.value = gridShown() ? 1 : 0;
   scene.add(terrain.group);
-  // trees, rocks and the skier fade into the same haze as the snow
+  // trees, rocks and the skier fade into the same haze as the snow (updateHaze moves it)
   scene.fog = new THREE.Fog(THEME.haze, terrain.uniforms.uFogNear.value, terrain.uniforms.uFogFar.value);
   propMeshes.setFog(terrain.uniforms.uFogNear.value, terrain.uniforms.uFogFar.value);
   decor.setFog(terrain.uniforms.uFogNear.value, terrain.uniforms.uFogFar.value);
@@ -2318,6 +2334,45 @@ function progressOf(sk) {
   return (sk.pos[2] - z0) / Math.max(1, hf.finishZ - z0);
 }
 
+// ---------- atmosphere ----------
+// contact shadows (core/occlusion.js): recomputed when the snow or the trees change, at
+// most a few times a second (a big slope with thousands of trees takes ~15 ms)
+let aoKey = '';
+let aoAt = 0;
+let aoTerrain = null;
+function updateOcclusion() {
+  if (aoTerrain !== terrain) {
+    aoTerrain = terrain;
+    aoKey = '';
+  }
+  const key = `${terrain.version}:${props.version}`;
+  const now = performance.now();
+  if (key === aoKey || now - aoAt < 200) return;
+  aoKey = key;
+  aoAt = now;
+  const blobs = props.list.map((p) => (p.k === TREE ? { x: p.x, z: props.worldZ(p), r: 2.6 * p.s, a: 0.5 } : { x: p.x, z: props.worldZ(p), r: 2.3 * p.s, a: 0.45 }));
+  terrain.refreshOcclusion(blobs);
+}
+// the haze: riding, distant snow and trees fade a little from a few hundred metres; while
+// building it starts beyond what you're looking at, so the mountain itself stays clear
+let hazeSet = '';
+let hazeFog = null;
+function updateHaze() {
+  const far = terrain.uniforms.uFogFar.value;
+  const base = Math.max(1400, hf.sizeZ * 1.2);
+  const near = Math.round(Math.min(base, riding ? 420 : Math.max(420, camera.position.distanceTo(controls.target) * 1.15)) / 20) * 20;
+  const key = `${near}:${far}`;
+  if (key === hazeSet && scene.fog === hazeFog) return;
+  hazeFog = scene.fog;
+  hazeSet = key;
+  terrain.uniforms.uFogNear.value = near;
+  scene.fog.near = near;
+  scene.fog.far = far;
+  propMeshes.setFog(near, far);
+  decor.setFog(near, far);
+  tracks.setFog(near, far);
+}
+
 // ---------- loop ----------
 const clock = new THREE.Clock();
 const debug = createDebugOverlay(renderer, () => ({ setting: gfxSetting, tier: gfxTier, post: post.on, scale: governor.scale }));
@@ -2356,6 +2411,10 @@ function frame() {
   if (goalTiles.length) terrain.uniforms.uTime.value = clock.elapsedTime;
 
   spray.update(dt);
+  tickAtmosphere(dt);
+  snowfall.update(dt);
+  updateOcclusion();
+  updateHaze();
   tracks.update(dt);
   sound.update({ skier: riding ? skier : null, sculpt: 0 });
 

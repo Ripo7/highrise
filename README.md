@@ -50,7 +50,7 @@ Start it from the welcome card or the ••• menu (**Tutorial**). Your own sl
 
 | | What it draws | Resolution (pixels per CSS pixel, at most) |
 |---|---|---|
-| Low | the scene straight to the screen, as the game always did | 1 |
+| Low | the scene straight to the screen, as the game always did (the snow's shadows without their glow) | 1 |
 | Medium | + post-processing: its own 4x anti-aliasing, a colour grade (gentle contrast, a touch of saturation, cool shadows, warm highlights), a light vignette, dithering | 1.5 |
 | High | the same, sharper, with bloom (the sun's glow) and a bigger shadow map | 2 |
 

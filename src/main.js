@@ -22,7 +22,7 @@ import { TABS, applyAction, describe, copyTiles, rotateCopy, pasteCells, pasteTi
 import { PropMeshes } from './render/propMeshes.js';
 import { Tracks } from './render/tracks.js';
 import { Decor } from './render/decor.js';
-import { TerrainMesh } from './render/terrainMesh.js';
+import { TerrainMesh, SNOW_FX } from './render/terrainMesh.js';
 import { SkierMesh, Trail } from './render/skierMesh.js';
 import { Spray } from './render/spray.js';
 import { GhostRider, packPath } from './render/ghost.js';
@@ -333,6 +333,7 @@ function applyQuality() {
     sun.shadow.map = null;
   }
   post.set(t);
+  SNOW_FX.uWideShadow.value = t.glow ? 1 : 0;
   // room for the most flakes a light can ask for (overcast); the light says how many show
   snowfall.setCount(t.snow * 3);
   snowfall.show(Math.round(t.snow * (lightNow?.snow1 ?? 1)));

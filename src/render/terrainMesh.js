@@ -13,6 +13,9 @@ const toHalf = THREE.DataUtils.toHalfFloat;
 
 export const THICKNESS = 34;
 
+// set by the picture quality (main.js): the glow inside a shadow's edge, off on Low
+export const SNOW_FX = { uWideShadow: { value: 1 } };
+
 const vert = /* glsl */ `
   ${shadowVertPars}
   varying vec3 vWorld;
@@ -78,6 +81,7 @@ const frag = /* glsl */ `
   uniform float uGlowAmt;
   uniform float uPxRatio; // device pixels per CSS pixel: the crest ink is measured in CSS pixels
   uniform float uShadowTexel; // metres per shadow-map texel (main.js, updateSun)
+  uniform float uWideShadow; // the glow inside a shadow's edge on (1) or off (SNOW_FX)
   uniform sampler2D uLocalMean;
   uniform vec2 uHalf;
   uniform vec2 uLocalSize;
@@ -320,7 +324,7 @@ const frag = /* glsl */ `
     // edge (sunlight a metre or so away gets in under it), and the shadowed snow itself a
     // touch bluer. Only shadowed pixels pay for the wider look at the shadow map
     float snowOnly = (1.0 - rockAmt) * (1.0 - uRelief);
-    if (sunS < 0.97 && uGlowAmt > 0.01 && snowOnly > 0.01) {
+    if (uWideShadow > 0.5 && sunS < 0.97 && uGlowAmt > 0.01 && snowOnly > 0.01) {
       float lightBy = smoothstep(0.0, 0.5, sunShadowWide(1.1)) * (1.0 - sunS);
       col = mix(col, uSnowGlow, lightBy * uGlowAmt * snowOnly * (1.0 - cloud));
     }
@@ -619,6 +623,7 @@ export class TerrainMesh {
     this.uniforms = {
       // the palette and the sun: shared with every material, set by the light (light.js)
       ...LIGHT,
+      ...SNOW_FX,
       uCutShadow: { value: CUT_SHADOW },
       uCutLit: { value: CUT_LIT },
       // fog scales with the run so long runs fade into the distance, not into a wall

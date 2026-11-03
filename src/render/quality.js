@@ -13,11 +13,12 @@
 // drops a tier when even that isn't enough; a tier it dropped to is remembered for next time.
 
 // rideShadow: half the side of the ground the sun's shadows cover while riding (m);
-// snow: flakes in the air round the camera
+// snow: flakes in the air round the camera; glow: the snow's glow inside a shadow's edge
+// (a second, wider look at the shadow map in shadowed pixels: not on Low)
 export const TIERS = {
-  low: { post: false, bloom: false, maxRatio: 1, shadow: 1024, rideShadow: 80, snow: 250 },
-  medium: { post: true, bloom: false, maxRatio: 1.5, shadow: 2048, rideShadow: 110, snow: 700 },
-  high: { post: true, bloom: true, maxRatio: 2, shadow: 4096, rideShadow: 150, snow: 1400 },
+  low: { post: false, bloom: false, maxRatio: 1, shadow: 1024, rideShadow: 80, snow: 250, glow: false },
+  medium: { post: true, bloom: false, maxRatio: 1.5, shadow: 2048, rideShadow: 110, snow: 700, glow: true },
+  high: { post: true, bloom: true, maxRatio: 2, shadow: 4096, rideShadow: 150, snow: 1400, glow: true },
 };
 export const TIER_ORDER = ['low', 'medium', 'high'];
 export const SETTINGS = ['auto', 'low', 'medium', 'high'];

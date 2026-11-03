@@ -68,6 +68,14 @@ export function createUI(opts) {
     opts.onMute(m);
   });
 
+  // the light on the mountain: golden hour, morning, overcast; a tap moves on
+  const lightBtn = $('#light-btn');
+  let lightShown = 'golden';
+  const showLight = () => {
+    lightBtn.textContent = t('menu.light', { l: t(`light.${lightShown}`) });
+  };
+  lightBtn.addEventListener('click', () => opts.onLight());
+
   // picture quality: Auto (and the tier it picked), Low, Medium, High; a tap moves on
   const gfxBtn = $('#gfx-btn');
   const gfxShown = { setting: 'auto', tier: 'high' };
@@ -169,11 +177,17 @@ export function createUI(opts) {
     api.setProject(shown.project);
     showMute(muteBtn.getAttribute('aria-pressed') === 'true');
     showGfx();
+    showLight();
     // the time and air readouts: just the decimal mark
     for (const el of [stat.time, stat.air]) el.textContent = getLang() === 'fr' ? el.textContent.replace('.', ',') : el.textContent.replace(',', '.');
   });
 
   const api = {
+    // the light preset's name
+    setLight(name) {
+      lightShown = name;
+      showLight();
+    },
     // the picture quality setting and the tier it runs at
     setGfx(setting, tier) {
       gfxShown.setting = setting;

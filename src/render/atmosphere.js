@@ -6,16 +6,15 @@
 
 import * as THREE from 'three';
 import { TOP } from '../core/slopes.js';
-import { THEME, SUN_DIR } from './theme.js';
-
-const SUN = new THREE.Vector3(...SUN_DIR).normalize();
+import { THEME } from './theme.js';
+import { LIGHT } from './light.js';
 
 export const ATMO = {
   uCloudOff: { value: new THREE.Vector2(0, 0) }, // how far the wind has carried the layer (m)
   uCloudCover: { value: 0.36 }, // 0 clear .. 1 overcast
   uCloudAlt: { value: TOP + 1700 }, // the layer's height (m)
   uCloudShade: { value: 0.85 }, // how much a cloud's shadow takes from the sunlight
-  uAtmoSun: { value: SUN.clone() },
+  uAtmoSun: LIGHT.uSunDir, // the same object: the light moves the sun
 };
 
 // wind in m/s across the layer

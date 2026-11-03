@@ -97,6 +97,14 @@ export class Snowfall {
     this.points.frustumCulled = false;
     this.points.renderOrder = 10;
     this.group.add(this.points);
+    if (this.shown !== undefined) this.show(this.shown);
+  }
+
+  // how many of them show (up to setCount's)
+  show(n) {
+    this.shown = n;
+    if (this.points) this.points.geometry.setDrawRange(0, Math.min(n, this.count));
+    if (this.points) this.points.visible = n > 0;
   }
 
   update(dt) {

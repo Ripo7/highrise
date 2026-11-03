@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { THEME } from './theme.js';
+import { LIGHT } from './light.js';
 
 // Shared pieces of the cartoon look: sun shadows sampled inside our own shaders, ink
 // outlines drawn as an inverted hull, and a 3-step ramp for three's toon material.
@@ -90,8 +90,8 @@ export function outlineMaterial({ instanced = false, skinned = false, width = 1.
     side: THREE.BackSide,
     uniforms: {
       uWidth: { value: width },
-      uInk: { value: new THREE.Color(THEME.ink) },
-      uFog: { value: new THREE.Color(THEME.haze) },
+      uInk: LIGHT.uInk,
+      uFog: LIGHT.uFog,
       uFogNear: { value: 1400 },
       uFogFar: { value: 4200 },
       uFade: { value: fade },

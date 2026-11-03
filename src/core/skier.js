@@ -40,8 +40,10 @@ export const PHYS = {
   push: 3.5, // m/s out of the start gate (a skating push)
   liftoffGap: 0.004, // metres above the surface before the skis leave it
   legReach: 0.18, // metres of snow falling away the legs can follow before he flies
-  sketchyImpact: 15, // m/s into the slope: sketchy landing
-  crashImpact: 23, // m/s into the slope: wipeout
+  // m/s into the slope for a sketchy landing, and for a wipeout (they'd be 15 and 23 with
+  // real gravity in the air: its 1.4 g lands harder)
+  sketchyImpact: 17.5,
+  crashImpact: 27,
   absorb: 3, // extra m/s of tolerance when crouching into the landing
   minJumpAir: 0.25, // seconds of air to count as a jump
   stuckSpeed: 0.6,
@@ -49,7 +51,8 @@ export const PHYS = {
   maxTime: 600, // seconds of riding before a run times out
   edgeMargin: 3,
   // carving and skidding
-  gripG: 2.3, // lateral acceleration the edges hold on packed snow, in g
+  gripG: 2.6, // lateral acceleration the edges hold on packed snow, in g (a little more than
+  //   a real racer's 2.3: turns bite at speed)
   flatGrip: 0.12, // ... with the skis flat (not steering): they sideslip, and drift to the fall line
   skidG: 2.0, // sideways sliding resistance once the edges let go, in g (less the more across:
   skidAcross: 1.25, //   about 1.6 g slipping 20°, 0.8 g right across in a hockey stop)
@@ -62,7 +65,7 @@ export const PHYS = {
   skidSlip: 0.35, // rad: how far across an over-steered (skidded) turn throws the skis
   followRate: 1.6, // rad/s the skis line up with the direction of travel (no input)
   fallRate: 1.2, // hands off, flat skis drift round to the fall line (rad/s on a vertical wall)
-  tuckTurn: 0.6, // a tuck turns this much less
+  tuckTurn: 0.7, // a tuck turns this much less
   tuckDrag: 0.42, // drag multiplier while tucked (CdA about 0.23 m²)
   brakeDrag: 1.25, // standing tall and wide while braking
   plowSpeed: 4, // below this, braking is a snowplough
@@ -74,9 +77,11 @@ export const PHYS = {
   popMax: 6.2, // ... by a fully loaded crouch (big tricks need a kicker)
   chargeTime: 0.45, // seconds of crouch for a full load
   coyote: 0.16, // seconds after leaving the ground you can still pop
+  airGravity: 1.4, // gravity in the air, × g: snappier jumps than real ones (a real 2.8 s
+  //   flight off a big kicker is a long wait in a game); the rotation rates make up for it
   // tricks
-  spinRate: 7.0, // rad/s yaw while steering in the air
-  flipRate: 6.2, // rad/s pitch while flipping
+  spinRate: 8.4, // rad/s yaw while steering in the air
+  flipRate: 7.4, // rad/s pitch while flipping
   spinResponse: 14, // how quickly rotation speed follows the input
   airGrace: 0.2, // s: input held over a lip starts rotating only after this long in the air
   // landing tolerances (radians)
@@ -268,8 +273,9 @@ export class Skier {
     if (!inp.crouch) this.crouchTime = 0;
     this._wasCrouching = inp.crouch;
 
-    // forces: gravity, air drag (quadratic), ploughing through powder (linear)
-    vel[1] -= P.g * dt;
+    // forces: gravity (stronger in the air: see airGravity), air drag (quadratic), ploughing
+    // through powder (linear)
+    vel[1] -= P.g * (this.grounded ? 1 : P.airGravity ?? 1) * dt;
     const dragMul = braking ? 1 + (P.brakeDrag - 1) * brakeAmt : tuck ? P.tuckDrag : 1;
     const plough = this.grounded ? P.powderPlough * this.powder * dt : 0;
     const dragK = P.drag * dragMul * speed0 * dt + plough;
@@ -813,7 +819,7 @@ export class Skier {
     const cap = Math.min(1 / P.minRadius, Math.max(0.5, 0.9 * hold - P.g * Math.sqrt(1 - ny * ny)) / Math.max(1, speed * speed));
     const clean = Math.min(1, as / P.cleanStick);
     const target = braking ? 0 : sgn * Math.pow(clean, 1.15) * cap * agility;
-    const roll = Math.min(1, dt / (P.edgeTime * (1 + speed / 40)));
+    const roll = Math.min(1, dt / (P.edgeTime * (1 + speed / 70)));
     this.kappa += (target - this.kappa) * roll;
     this.edge += ((braking ? 0 : sgn * clean) - this.edge) * roll;
     let omega = speed * this.kappa;

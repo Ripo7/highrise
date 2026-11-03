@@ -4,6 +4,10 @@
 
 const STICK_RADIUS = 56; // px of thumb travel for full input
 const DEAD = 0.12;
+// a thumb sweeping sideways arcs up or down a little: only a drag that's mostly up or down
+// tucks or brakes (or flips), so steering never turns into a hockey stop by accident. Up
+// and down count fully from about 60° off the horizontal, not at all below about 30°.
+const UPRIGHT = [0.5, 0.86]; // |dy| / the drag's length: none .. full
 
 export class RideControls {
   constructor({ onPress } = {}) {
@@ -94,7 +98,9 @@ export class RideControls {
       return a < DEAD ? 0 : Math.sign(v) * Math.min(1, (a - DEAD) / (1 - DEAD));
     };
     this.stickVal.x = shape(dx / STICK_RADIUS);
-    this.stickVal.y = shape(-dy / STICK_RADIUS); // up is +
+    const up = d > 1e-6 ? Math.abs(dy) / d : 0;
+    const t = Math.max(0, Math.min(1, (up - UPRIGHT[0]) / (UPRIGHT[1] - UPRIGHT[0])));
+    this.stickVal.y = shape(-dy / STICK_RADIUS) * t * t * (3 - 2 * t); // up is +
   }
 
   // keyboard (called from the page's key handlers); returns true when used

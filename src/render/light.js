@@ -37,6 +37,13 @@ export const LIGHT = {
   uMid: { value: [THEME.snow, THEME.needles, THEME.bark, THEME.rock].map((b) => c(b[1])) },
   uShadow: { value: [THEME.snow, THEME.needles, THEME.bark, THEME.rock].map((b) => c(b[2])) },
   uShadowAmt: { value: 1 }, // how much a cast shadow darkens (soft light: less)
+  // the snow's own light (terrainMesh.js, tracks.js, spray.js)
+  uSunCol: { value: c(THEME.sun.color) },
+  uSkyTop: { value: c(THEME.sky.top) }, // what ice mirrors
+  uSkyHorizon: { value: c(THEME.sky.horizon) },
+  uGlint: { value: 1 }, // glitter in the sun (0: none, overcast)
+  uSnowGlow: { value: c('#c2e0ff') }, // the cool glow inside a shadow's edge
+  uGlowAmt: { value: 0.5 },
 };
 
 // colour shifts, on THREE.Color (linear)
@@ -89,6 +96,9 @@ export function lightPreset(name, theme = THEME) {
       snow: 1,
       flake: 0.08,
       hazeNear: 1,
+      glint: 1,
+      glow: '#c2e0ff',
+      glowAmt: 0.5,
       grade: { contrast: 0.14, saturation: 1.06, shadows: [-0.012, -0.008, 0.022], highlights: [0.014, 0.006, -0.012] },
     },
     morning: {
@@ -109,6 +119,9 @@ export function lightPreset(name, theme = THEME) {
       snow: 0,
       flake: 0.08,
       hazeNear: 1.2,
+      glint: 1,
+      glow: '#c8e4ff',
+      glowAmt: 0.45,
       grade: { contrast: 0.12, saturation: 1.05, shadows: [-0.014, -0.004, 0.026], highlights: [0.004, 0.004, 0.002] },
     },
     overcast: {
@@ -129,6 +142,9 @@ export function lightPreset(name, theme = THEME) {
       snow: 3,
       flake: 0.14,
       hazeNear: 0.55,
+      glint: 0.12,
+      glow: '#bcc5e6',
+      glowAmt: 0.12,
       grade: { contrast: 0.06, saturation: 0.92, shadows: [-0.006, -0.004, 0.012], highlights: [0, 0, 0] },
     },
   }[name] || null;
@@ -158,6 +174,9 @@ export function lightPreset(name, theme = THEME) {
     shadowAmt: p.shadowAmt,
     snow1: p.snow,
     flake: p.flake,
+    glint: p.glint,
+    glow: c(p.glow),
+    glowAmt: p.glowAmt,
     hazeNear: p.hazeNear,
     grade: p.grade,
   };
@@ -198,4 +217,10 @@ export function setLightUniforms(p) {
     U.uShadow.value[k].copy(bands[k][2]);
   }
   U.uShadowAmt.value = p.shadowAmt;
+  U.uSunCol.value.copy(p.sunColor);
+  U.uSkyTop.value.copy(p.skyTop);
+  U.uSkyHorizon.value.copy(p.skyHorizon);
+  U.uGlint.value = p.glint;
+  U.uSnowGlow.value.copy(p.glow);
+  U.uGlowAmt.value = p.glowAmt;
 }

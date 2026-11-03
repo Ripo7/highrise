@@ -114,7 +114,7 @@ Then act on the selection. Actions stay on the tiles, so they stack (tap again f
 
 **Everything merges.** Nothing is stamped tile by tile: the tiles of one action make one mask, blurred into a smooth field that shapes the snow, so neighbours are one shape with no seam, step or hexagon corner, and raised beside lowered rolls into one shape. Jumps made one after the other side by side become one wide kicker (one lip, the same height all along); a terrace is cut and filled with banks the snow can hold (30° to 40°, never a cliff) whatever the pitch, its edge round rather than hexagonal; a big raise or dig spreads its flanks (a hill and a bowl, not a tower and a pit). On the snow, changed tiles are tinted by what changed (blue shape, green nature, orange features) and the selection is outlined in amber.
 
-**The light follows the snow**: the shading uses a normal per pixel (a half-float normal map from the heightfield), so banks, rolls and kickers shade smoothly with no facets or stair steps; ice is glassy blue with streaks and a sheen, powder soft and pillowy.
+**The light follows the snow**: the shading uses a normal per pixel (a half-float normal map from the heightfield), so banks, rolls and kickers shade smoothly with no facets or stair steps; ice is glassy blue with streaks, mirroring the sky, powder soft and pillowy.
 
 ### Snow
 
@@ -122,7 +122,14 @@ Then act on the selection. Actions stay on the tiles, so they stack (tap again f
 - **Powder** where you put it: slower (the skis plough), they sink, turns are softer and skid more, landings are more forgiving and the spray turns into clouds.
 - **Ice** where you put it: less than half the friction and well under half the grip, so you go faster and every turn is wider.
 - **Bare rock** on cliffs, rock bands and any face too steep to hold snow (about 45°; a kicker's back stays snow) rides like hard snow.
-- **Ski tracks stay in the snow** run after run: two thin grooves when you carve, a trench in powder, a wide smear where you skid. They start right at the skis. **Fresh snow** (••• menu) covers them. They're saved in the browser.
+- **Ski tracks stay in the snow** run after run: two grooves cut into it when you carve (the wall facing the sun lit, the other in shadow, a lip of thrown snow along each), a deep trench in powder (its walls and rims lit the same way), a wide smear where you skid. They start right at the skis. **Fresh snow** (••• menu) covers them. They're saved in the browser.
+- **Spray** is lit like the snow it came from (a lit side and a cool shaded side, so it shows against white snow, glowing when the sun is behind it). In powder it billows off the tails into a cloud that hangs behind you.
+- **The snow in the light** (`src/render/terrainMesh.js`):
+  - it **glitters** where the sun hits it: crystals each turned their own way, flashing as you move (brighter than white, so they glow on High), kept a pixel or two on screen at any distance so they twinkle without shimmering;
+  - untouched snow off the piste carries faint **wind ripples**, in patches, their crests wandering and breaking off, shaded by the sun;
+  - inside a shadow's edge it **glows a cool blue** (sunlight a metre away gets in under the shadow), and shadowed snow is a touch bluer;
+  - **ice** is polished: it mirrors the sky (more at grazing angles) and breaks the sun into a streaky glint along its scrapes.
+  - Under an overcast sky there's no glitter and hardly any glow.
 
 ### The camera (drone view)
 

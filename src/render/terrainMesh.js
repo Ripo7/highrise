@@ -70,7 +70,14 @@ const frag = /* glsl */ `
   uniform float uContours;
   uniform float uRelief;
   uniform float uShadowAmt; // how much a cast shadow darkens (the light preset)
+  uniform vec3 uSunCol;
+  uniform vec3 uSkyTop; // what ice mirrors
+  uniform vec3 uSkyHorizon;
+  uniform float uGlint; // glitter in the sun
+  uniform vec3 uSnowGlow; // the cool glow at a shadow's edge
+  uniform float uGlowAmt;
   uniform float uPxRatio; // device pixels per CSS pixel: the crest ink is measured in CSS pixels
+  uniform float uShadowTexel; // metres per shadow-map texel (main.js, updateSun)
   uniform sampler2D uLocalMean;
   uniform vec2 uHalf;
   uniform vec2 uLocalSize;
@@ -99,6 +106,18 @@ const frag = /* glsl */ `
   uniform sampler2D uSecTex;
   uniform vec3 uSecInfo; // z of the top line, z of the bottom, on (1) / off (0)
   uniform vec3 uCatCol[6]; // tint of changed tiles, by what changed (A channel)
+
+  // the sun's shadow blurred over about r metres: how much sunlight there is nearby (for the
+  // glow inside a shadow's edge)
+  float sunShadowWide(float r) {
+    float s = 1.0;
+    #if defined( USE_SHADOWMAP ) && NUM_DIR_LIGHT_SHADOWS > 0
+      DirectionalLightShadow d = directionalLightShadows[ 0 ];
+      float texels = clamp(r / max(uShadowTexel, 1e-3), 1.0, 24.0);
+      s = getShadow( directionalShadowMap[ 0 ], d.shadowMapSize, d.shadowIntensity, d.shadowBias, texels, vDirectionalShadowCoord[ 0 ] );
+    #endif
+    return s;
+  }
 
   // Manual bilinear lookup: iPhones can't filter float textures in hardware (they read
   // back as zero with linear filtering), so the texture uses nearest and we blend here.
@@ -233,7 +252,8 @@ const frag = /* glsl */ `
     // faces turned right away from the sun are always in shadow
     level = min(level, 2.0 * smoothstep(0.02 - aa, 0.02 + aa, ndl));
     // shadows cast by trees, the rider and the terrain drop into the shadow band
-    level = clamp(level, 0.0, 2.0) * mix(1.0, smoothstep(0.35, 0.65, sunShadow()), uShadowAmt);
+    float sunS = sunShadow();
+    level = clamp(level, 0.0, 2.0) * mix(1.0, smoothstep(0.35, 0.65, sunS), uShadowAmt);
     // a cloud's shadow passing over: the sunlit band drops to the middle one
     float cloud = cloudShadow(vWorld) * (1.0 - uRelief);
     level = min(level, 2.0 - cloud);
@@ -269,11 +289,20 @@ const frag = /* glsl */ `
       // scraped streaks down the fall line, and a polished sheen of sky at grazing angles
       float streak = vnoise(vec2(vWorld.x * 0.45, vWorld.z * 0.08)) * 0.7 + vnoise(vec2(vWorld.x * 1.7, vWorld.z * 0.3)) * 0.3;
       iceCol *= 0.9 + 0.16 * streak;
+      // polished: it mirrors the sky, more of it at grazing angles (cooled, so it still
+      // reads as ice when the horizon is warm)
       vec3 vd = normalize(cameraPosition - vWorld);
       float fres = pow(1.0 - max(0.0, dot(n, vd)), 3.0);
-      iceCol = mix(iceCol, vec3(0.62, 0.72, 0.96), fres * 0.35);
-      float glint = pow(max(0.0, dot(reflect(-L, n), vd)), 60.0) * smoothstep(0.35, 0.65, sunShadow());
-      snow = mix(snow, iceCol + glint * 0.6, smoothstep(0.05, 0.6, ice));
+      vec3 rv = reflect(-vd, n);
+      vec3 skyR = mix(mix(uSkyHorizon, uSkyTop, smoothstep(0.0, 0.3, rv.y)), uIceLit, 0.4);
+      iceCol = mix(iceCol, skyR, 0.1 + fres * 0.45);
+      // and the sun: a tight glint brighter than white, broken up along the scrapes (each
+      // one tilts the surface a little), over a faint broader sheen
+      vec3 ns = normalize(n + vec3(streak - 0.5, 0.0, vnoise(vec2(vWorld.x * 2.3, vWorld.z * 0.5)) - 0.5) * 0.1);
+      float spec = max(0.0, dot(reflect(-L, ns), vd));
+      float sunOn = smoothstep(0.35, 0.65, sunS) * uGlint;
+      vec3 shine = uSunCol * (pow(spec, 700.0) * 3.0 + pow(spec, 60.0) * 0.18) * sunOn;
+      snow = mix(snow, iceCol + shine, smoothstep(0.05, 0.6, ice));
     }
     // rock faces: layered strata, a little broken up, darker in the cracks
     float strata = vWorld.y / 2.4 + 0.6 * vnoise(vWorld.xz * 0.12) + 0.25 * vnoise(vWorld.xz * 0.5);
@@ -287,6 +316,15 @@ const frag = /* glsl */ `
     col = mix(col, uSnowShadow * vec3(0.9, 0.9, 0.97), ao * 0.7);
     // and a passing cloud's shadow cools and dims everything a little, sunlit or not
     col *= mix(vec3(1.0), vec3(0.88, 0.89, 0.97), cloud);
+    // light scattered through the snow: a cool glow inside a shadow, strongest along its
+    // edge (sunlight a metre or so away gets in under it), and the shadowed snow itself a
+    // touch bluer. Only shadowed pixels pay for the wider look at the shadow map
+    float snowOnly = (1.0 - rockAmt) * (1.0 - uRelief);
+    if (sunS < 0.97 && uGlowAmt > 0.01 && snowOnly > 0.01) {
+      float lightBy = smoothstep(0.0, 0.5, sunShadowWide(1.1)) * (1.0 - sunS);
+      col = mix(col, uSnowGlow, lightBy * uGlowAmt * snowOnly * (1.0 - cloud));
+    }
+    col = mix(col, col * vec3(0.9, 0.95, 1.06), (1.0 - smoothstep(0.0, 1.0, level)) * uGlowAmt * 0.3 * snowOnly);
     col = mix(col, uInk, (1.0 - smoothstep(0.0, aas * 1.6, abs(slope - 0.68))) * 0.55);
     float rb = sf.b * smoothstep(0.05, 0.16, slope);
     float rbw = fwidth(rb) * 1.4 + 0.002;
@@ -446,12 +484,35 @@ const frag = /* glsl */ `
       // fine grain fades out before it gets small enough on screen to shimmer
       float fine = 1.0 - smoothstep(0.15, 0.5, length(fwidth(vWorld.xz * 5.3)));
       float grain = vnoise(vWorld.xz * 1.7) * 0.6 + (vnoise(vWorld.xz * 5.3) - 0.5) * 0.4 * fine + 0.2;
-      float ripple = vnoise(vec2(vWorld.x * 0.35 + vWorld.z * 0.12, vWorld.z * 2.2));
-      col *= 1.0 + near * ((grain - 0.5) * 0.05 + (ripple - 0.5) * 0.04);
-      // tiny sparkles, only right by the camera (larger ones read as road markings)
-      vec2 sc = vWorld.xz * 18.0;
-      float spark = step(0.992, hash2(floor(sc))) * (1.0 - smoothstep(0.15, 0.45, length(fract(sc) - 0.5)));
-      col += spark * max(0.0, ndl) * 0.3 * (1.0 - smoothstep(6.0, 30.0, dist));
+      col *= 1.0 + near * (grain - 0.5) * 0.05;
+    }
+    if (uRelief < 0.5) {
+      // wind ripples on snow the groomer hasn't touched: low waves across the wind, in
+      // patches, their crests wandering and breaking off; a long gentle windward face and
+      // a short steep lee, shaded by the sun (so they read as relief, not stripes). Gone
+      // before they get small enough on screen to shimmer
+      vec2 wd = vec2(0.8, 0.6);
+      float across = dot(vWorld.xz, wd) + vnoise(vWorld.xz * 0.04) * 7.0 + vnoise(vWorld.xz * 0.23) * 1.3;
+      float ph = across * 2.2;
+      float crestAmt = smoothstep(0.2, 0.7, vnoise(vec2(dot(vWorld.xz, vec2(-wd.y, wd.x)) * 0.09, across * 0.35) + 11.0));
+      float rpatch = smoothstep(0.35, 0.75, vnoise(vWorld.xz * 0.018 + 3.0));
+      float ramt = (1.0 - groomed) * (1.0 - powder) * (1.0 - ice) * rpatch * crestAmt * snowOnly * (1.0 - smoothstep(0.25, 0.7, fwidth(ph)));
+      vec3 rn = normalize(n + vec3(wd.x, 0.0, wd.y) * (cos(ph) + 0.5 * cos(2.0 * ph)) * 0.13);
+      col *= 1.0 + (dot(rn, L) - dot(n, L)) * 0.9 * ramt * mix(0.4, 1.0, sunS);
+      // glitter: flat crystals each turned its own way, flashing when one mirrors the sun
+      // into the eye, so the snow twinkles as you move. The cells grow with distance so a
+      // flash stays a pixel or two (smaller would shimmer); brighter than white (bloom)
+      vec3 vdg = normalize(cameraPosition - vWorld);
+      float gpx = length(fwidth(vWorld.xz));
+      float gcs = exp2(ceil(log2(max(0.045, gpx * 2.4))));
+      vec2 gg = vWorld.xz / gcs;
+      vec2 gi = floor(gg);
+      vec3 facet = normalize(n + vec3(hash2(gi) - 0.5, 0.0, hash2(gi + 17.31) - 0.5) * 0.9);
+      float mirror = pow(max(0.0, dot(reflect(-L, facet), vdg)), 300.0);
+      float gdot = 1.0 - smoothstep(0.12, 0.38, length(fract(gg) - 0.5));
+      float sunlit = mix(0.25, 1.0, smoothstep(1.2, 1.8, level)) * smoothstep(0.5, 0.8, sunS) * (1.0 - cloud);
+      float glit = step(0.55, hash2(gi + 41.73)) * gdot * mirror * sunlit * uGlint * snowOnly * (1.0 - ice) * (1.0 - smoothstep(80.0, 600.0, dist));
+      col += uSunCol * glit * 5.0;
     }
 
     float fog = smoothstep(uFogNear, uFogFar, dist);
@@ -574,6 +635,7 @@ export class TerrainMesh {
       uContours: { value: 1 },
       uRelief: { value: 0 },
       uPxRatio: { value: 2 },
+      uShadowTexel: { value: 0.1 },
       uLocalMean: { value: null },
       uHalf: { value: new THREE.Vector2(hf.halfX, hf.halfZ) },
       uLocalSize: { value: new THREE.Vector2(1, 1) },

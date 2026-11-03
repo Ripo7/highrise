@@ -46,6 +46,19 @@ test('overcast flattens the light; morning cools the whites', () => {
   assert.ok(warmth(m.snow[0]) < warmth(g.snow[0]), 'whiter whites in the morning');
 });
 
+test('the snow sparkles and glows in sunlight, hardly at all under cloud', () => {
+  for (const name of ['golden', 'morning']) {
+    const p = lightPreset(name, T);
+    assert.equal(p.glint, 1, `${name}: glitter on`);
+    assert.ok(p.glowAmt >= 0.4 && p.glow.b > p.glow.r, `${name}: a cool glow in the shadows`);
+  }
+  const o = lightPreset('overcast', T);
+  assert.ok(o.glint < 0.2 && o.glowAmt < 0.2, 'no sun to sparkle or glow');
+  // the crossfade carries them too
+  const mid = mixLight(lightPreset('golden', T), o, 0.5);
+  assert.ok(mid.glint < 1 && mid.glint > o.glint);
+});
+
 test('a crossfade starts on one light and ends on the other', () => {
   const a = lightPreset('golden', T);
   const b = lightPreset('overcast', T);

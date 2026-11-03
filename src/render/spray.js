@@ -1,11 +1,12 @@
 import * as THREE from 'three';
+import { LIGHT } from './light.js';
 
 // Snow spray kicked up by the skis: a pooled point cloud with soft round sprites.
 // A little dust off the tails as you go, a fan of snow thrown out of the turn when the
 // edges bite or the skis skid (a wall of it in a hockey stop), clouds in powder, and a
 // burst on landing. Thrown from behind the boots, so it never hides the skier.
 
-const MAX = 1600;
+const MAX = 2600;
 
 // Point size is in device pixels: scale it with the drawing-buffer height (a third of it,
 // which keeps the look tuned on a 900 px screen) so spray looks the same at any resolution, cap it so a flake right
@@ -16,25 +17,62 @@ const vert = /* glsl */ `
   uniform float uScale;
   varying float vLife;
   varying float vNear;
+  varying float vPuff;
+  varying float vRand;
+  varying vec3 vWorld;
   void main() {
     vLife = aLife;
+    vPuff = smoothstep(1.5, 3.0, aSize);
+    vRand = fract(sin(float(gl_VertexID) * 12.9898) * 43758.5453);
+    vWorld = position;
     vec4 mv = modelViewMatrix * vec4(position, 1.0);
+    float z0 = -mv.z;
+    // a puff is a ball, not a flat card: drawn a radius nearer the camera, so the snow it
+    // sits in doesn't cut it off along a straight line
+    mv.xyz *= max(0.2, 1.0 - aSize * 0.17 * vPuff / max(length(mv.xyz), 1e-3));
     gl_Position = projectionMatrix * mv;
-    float px = aSize * (uScale / -mv.z) * (0.6 + 0.4 * aLife);
-    gl_PointSize = min(px, uScale * 0.12);
-    vNear = smoothstep(0.8, 3.0, -mv.z);
+    float px = aSize * (uScale / z0) * (0.6 + 0.4 * aLife);
+    // (a powder puff can be bigger: a cloud is half a metre or more from a few metres away)
+    gl_PointSize = min(px, uScale * mix(0.12, 0.45, vPuff));
+    vNear = smoothstep(0.8, 3.0, z0);
   }
 `;
 
+// Lit like the snow it came from: each sprite shaded as a soft little ball (a lit side and
+// a cool shaded side, in the snow's own colours), so a cloud of it reads against white
+// snow; and a
+// flake glows when the sun is behind it (light scattered forward through the powder,
+// brighter than white for the bloom).
 const frag = /* glsl */ `
+  uniform vec3 uSunDir;
+  uniform vec3 uSunCol;
+  uniform vec3 uLit;
+  uniform vec3 uMid;
+  uniform vec3 uShade;
+  uniform float uGlint;
   varying float vLife;
   varying float vNear;
+  varying float vPuff;
+  varying float vRand;
+  varying vec3 vWorld;
   void main() {
     vec2 c = gl_PointCoord - 0.5;
     float d = length(c);
     if (d > 0.5) discard;
-    float a = smoothstep(0.5, 0.1, d) * vLife * 0.85 * vNear;
-    gl_FragColor = vec4(vec3(0.97, 0.98, 1.0), a);
+    // big powder puffs are thinner, each a little different (a cloud, not a smear), and
+    // they thicken only once they've drifted off the skis, so the skier still shows
+    float a = smoothstep(0.5, 0.1, d) * vLife * 0.85 * vNear * mix(1.0, (0.45 + 0.35 * vRand) * smoothstep(1.0, 0.75, vLife), vPuff);
+    vec3 L = normalize(uSunDir);
+    // the ball's normal, from the view into the world
+    vec3 nv = vec3(c.x * 2.0, -c.y * 2.0, 0.0);
+    nv.z = sqrt(max(0.0, 1.0 - dot(nv.xy, nv.xy)));
+    vec3 nw = normalize((vec4(nv, 0.0) * viewMatrix).xyz);
+    float lit = smoothstep(-0.3, 0.45, dot(nw, L));
+    vec3 col = mix(mix(uShade, uMid, 0.5), uLit, lit) * (0.96 + 0.08 * vRand);
+    vec3 view = normalize(vWorld - cameraPosition);
+    float back = pow(max(0.0, dot(view, L)), 6.0) * uGlint;
+    col += uSunCol * back * 1.6;
+    gl_FragColor = vec4(col, a);
     #include <colorspace_fragment>
   }
 `;
@@ -57,7 +95,7 @@ export class Spray {
     this.points = new THREE.Points(
       geo,
       new THREE.ShaderMaterial({
-        uniforms: { uScale: { value: 300 } },
+        uniforms: { uScale: { value: 300 }, uSunDir: LIGHT.uSunDir, uSunCol: LIGHT.uSunCol, uLit: LIGHT.uSnowLit, uMid: LIGHT.uSnowMid, uShade: LIGHT.uSnowShadow, uGlint: LIGHT.uGlint },
         vertexShader: vert,
         fragmentShader: frag,
         transparent: true,
@@ -102,7 +140,7 @@ export class Spray {
     const carve = bite * 0.6 + skid * 1.6;
     // deep powder: much more of it, and it hangs in the air as a cloud
     const pw = skier.powder || 0;
-    const rate = (sp * 1.2 + carve * sp * 6) * (1 + 1.4 * pw);
+    const rate = (sp * 1.2 + carve * sp * 6) * (1 + 4 * pw);
     this.carry += rate * dt;
     // spray goes to the outside of the turn (away from the side the body leans to)
     const t = skier.tilt || n;
@@ -121,11 +159,15 @@ export class Spray {
         skier.pos[1] + 0.08,
         skier.pos[2] - (v[2] / vl) * tail + rz * side * 0.2 + (Math.random() - 0.5) * 0.3,
       ];
-      const puff = pw > 0.3 && Math.random() < 0.3 * pw;
+      // in powder: more of it hangs as big puffs that keep up with the skis a while (a
+      // cloud billowing off the tails), and it's thrown higher (a rooster tail)
+      const puff = pw > 0.3 && Math.random() < 0.6 * pw;
+      const lift = 1 + pw * 0.9;
+      const carry = puff ? 0.35 + Math.random() * 0.3 : back;
       this.emitOne(
         p,
-        [v[0] * back + rx * lat + n[0] * up * (1 + pw * 0.4), v[1] * back + ry * lat + n[1] * up * (1 + pw * 0.4), v[2] * back + rz * lat + n[2] * up * (1 + pw * 0.4)],
-        (0.35 + Math.random() * 0.45 + carve * 0.3) * (puff ? 2.2 + Math.random() * 1.2 : 1 + 0.3 * pw),
+        [v[0] * carry + rx * lat + n[0] * up * lift, v[1] * carry + ry * lat + n[1] * up * lift, v[2] * carry + rz * lat + n[2] * up * lift],
+        (0.35 + Math.random() * 0.45 + carve * 0.3) * (puff ? 4 + Math.random() * 2.5 : 1 + 0.3 * pw),
         (0.35 + Math.random() * 0.4) * (puff ? 2.4 : 1 + 0.6 * pw),
         puff ? 0.9 : 6 - 3 * pw
       );

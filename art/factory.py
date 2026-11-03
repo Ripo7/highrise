@@ -1,4 +1,4 @@
-"""Highrise prop factory: Geometry Nodes generators for trees and rocks.
+"""Peakmaker prop factory: Geometry Nodes generators for trees and rocks.
 
 tree_factory / rock_factory build node groups ("TreeFactory", "RockFactory") whose inputs
 (Seed, Height, Layers, Width, Snow, Puff...) are what you tweak in Blender. make_variants

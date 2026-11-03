@@ -1,6 +1,8 @@
-# Highrise
+# Peakmaker
 
 Design a slope section by section, select its hexagon tiles and shape them, start anywhere, ride it, build some more, ride on. A browser 3D game where making the mountain is the gameplay.
+
+**Play it at [peakmaker.vercel.app](https://peakmaker.vercel.app).**
 
 This is **Phase 0**: a grey-box prototype to prove the core loop is fun before any art investment.
 

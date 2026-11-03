@@ -271,7 +271,7 @@ export function createUI(opts) {
       const sub = document.querySelector('.brand-sub');
       sub.textContent = name || t('brand.sub');
       sub.classList.toggle('is-project', !!name);
-      document.title = name ? `${name} · Highrise` : 'Highrise';
+      document.title = name ? `${name} · Peakmaker` : 'Peakmaker';
     },
     // the records: the best score, and the best time when there is one
     setBest(best, bestTime = null) {

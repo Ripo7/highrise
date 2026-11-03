@@ -3,7 +3,8 @@
 //   bloom (High)   a soft glow around what is brighter than white: the sun
 //   grade          one pass to the screen: linear to sRGB, a gentle contrast curve, a touch
 //                  of saturation, cool shadows and warm highlights, a light vignette,
-//                  dithering (no banding in the sky)
+//                  dithering (no banding in the sky); at speed, the edges of the picture
+//                  blur outwards (the middle, where the skier is, stays sharp)
 // Low skips all of it and draws straight to the screen, as the game always did.
 //
 // The sky is in the scene too (sky.js), so the grade reaches it.
@@ -36,6 +37,7 @@ const GradeShader = {
     uHighlights: { value: new THREE.Vector3(...GRADE.highlights) },
     uVignette: { value: GRADE.vignette },
     uAspect: { value: 1 },
+    uSpeed: { value: 0 }, // 0 .. 1: how much the edges blur with speed
   },
   vertexShader: /* glsl */ `
     varying vec2 vUv;
@@ -51,6 +53,7 @@ const GradeShader = {
     uniform vec3 uHighlights;
     uniform float uVignette;
     uniform float uAspect;
+    uniform float uSpeed;
     varying vec2 vUv;
     vec3 toSRGB(vec3 c) {
       return mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, step(vec3(0.0031308), c));
@@ -59,7 +62,21 @@ const GradeShader = {
       return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453);
     }
     void main() {
-      vec3 c = toSRGB(clamp(texture2D(tDiffuse, vUv).rgb, 0.0, 1.0));
+      vec3 src = texture2D(tDiffuse, vUv).rgb;
+      // speed: average a few taps along the line to the centre of the picture, more of them
+      // the further out (a zoom blur that leaves the middle alone)
+      if (uSpeed > 0.004) {
+        vec2 toC = vec2(0.5, 0.52) - vUv;
+        float edge = smoothstep(0.18, 0.62, length(toC * vec2(uAspect, 1.0)) / length(vec2(uAspect, 1.0) * 0.5));
+        vec2 stepUv = toC * uSpeed * edge * 0.0075;
+        // each pixel starts its taps a random fraction along, so they blend instead of
+        // stacking up as copies
+        float j = hash(gl_FragCoord.xy + 17.0);
+        vec3 sum = src;
+        for (int i = 1; i <= 6; i++) sum += texture2D(tDiffuse, vUv + stepUv * (float(i) - j)).rgb;
+        src = sum / 7.0;
+      }
+      vec3 c = toSRGB(clamp(src, 0.0, 1.0));
       c = mix(c, c * c * (3.0 - 2.0 * c), uContrast);
       float l = dot(c, vec3(0.2126, 0.7152, 0.0722));
       c = mix(vec3(l), c, uSaturation);
@@ -130,6 +147,10 @@ export function createPost(renderer, scene, camera) {
       composer.setPixelRatio(renderer.getPixelRatio());
       composer.setSize(size.x, size.y);
       grade.uniforms.uAspect.value = size.x / Math.max(1, size.y);
+    },
+    // how fast it looks: 0 .. 1 (the edges blur outwards)
+    setSpeed(k) {
+      if (grade) grade.uniforms.uSpeed.value = k;
     },
     // the light's grade: { contrast, saturation, shadows [r, g, b], highlights [r, g, b] }
     setGrade(g) {

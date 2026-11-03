@@ -4,7 +4,8 @@ import { toonRamp } from './toon.js';
 // The gates of the course (core/course.js): two poles with a numbered panel each, red and
 // blue in turn like a slalom, and a line on the snow between them. While you build, each
 // has its number floating above it, the same size at any distance. During a run a gate
-// you've been through fades, a missed one goes grey. Nothing here collides.
+// you've been through fades, a missed one goes grey. The panels turn a little about their
+// poles in the wind and flap when you go through. Nothing here collides.
 
 const POLE_H = 3.4;
 const PANEL_W = 1.6;
@@ -100,6 +101,7 @@ export class GateMeshes {
       const color = g.behind ? BEHIND : GATE_COLORS[(g.n - 1) % 2];
       const root = new THREE.Group();
       const mats = [];
+      const panels = [];
       for (const side of [-1, 1]) {
         const x = g.x + g.across[0] * g.half * side;
         const z = g.z + g.across[1] * g.half * side;
@@ -108,14 +110,22 @@ export class GateMeshes {
         pole.position.set(x, y, z);
         pole.castShadow = true;
         root.add(pole);
-        // the panel hangs off the outside of its pole, facing up the slope
+        // the panel hangs off the outside of its pole, facing up the slope, and turns
+        // about the pole (a pivot on it)
         const mat = new THREE.MeshBasicMaterial({ map: this.texture('panel', g.behind ? '–' : String(g.n), color), side: THREE.DoubleSide, transparent: true });
         mats.push(mat);
         const panel = new THREE.Mesh(this.panelGeo, mat);
-        const off = (PANEL_W / 2 + 0.07) * side;
-        panel.position.set(x + g.across[0] * off, y + POLE_H - PANEL_H / 2 - 0.05, z + g.across[1] * off);
-        panel.rotation.y = Math.atan2(-g.dir[0], -g.dir[1]); // its front up the slope
-        root.add(panel);
+        const pivot = new THREE.Group();
+        const face = Math.atan2(-g.dir[0], -g.dir[1]); // its front up the slope
+        pivot.position.set(x, y + POLE_H - PANEL_H / 2 - 0.05, z);
+        pivot.rotation.y = face;
+        // the pivot's own +x, in the world: (cos, -sin) of its turn; the panel goes out along
+        // the gate's across, on this pole's side
+        const off = (PANEL_W / 2 + 0.07) * side * (g.across[0] * Math.cos(face) - g.across[1] * Math.sin(face));
+        panel.position.set(off, 0, 0);
+        pivot.add(panel);
+        root.add(pivot);
+        panels.push({ pivot, face, side: Math.sign(off) || 1, ph: g.x * 0.37 + g.z * 0.11 + side * 1.3 });
       }
       // the line on the snow, pole to pole
       const steps = Math.max(2, Math.ceil((2 * g.half) / 0.6));
@@ -152,7 +162,33 @@ export class GateMeshes {
       label.position.set(g.x, hf.heightAt(g.x, g.z) + POLE_H + 2.5, g.z);
       label.renderOrder = 5;
       this.labels.add(label);
-      this.items.push({ gate: g, mats, line, label, root, state: null });
+      this.items.push({ gate: g, mats, line, label, root, state: null, panels, flapT: -99, flapK: 0 });
+    }
+  }
+
+  // the skier went through gate number n: its panels flap (k: 0 .. 1, from his speed)
+  flap(n, k = 1) {
+    for (const it of this.items) {
+      if (it.gate.n === n && !it.gate.behind) {
+        it.flapT = this.time || 0;
+        it.flapK = Math.max(0.3, Math.min(1, k));
+      }
+    }
+  }
+
+  // once a frame: the panels in the wind
+  update(dt) {
+    this.time = (this.time || 0) + dt;
+    const t = this.time;
+    for (const it of this.items) {
+      const age = t - it.flapT;
+      const flap = age >= 0 && age < 3 ? it.flapK * Math.exp(-age * 1.8) * Math.sin(age * 11) : 0;
+      for (const p of it.panels) {
+        const breeze = 0.07 * Math.sin(t * 1.9 + p.ph) + 0.04 * Math.sin(t * 3.3 + p.ph * 2.1);
+        // swings out of the way behind the skier, then back
+        p.pivot.rotation.y = p.face + p.side * (breeze + 0.55 * flap);
+        p.pivot.rotation.x = 0.04 * Math.sin(t * 2.6 + p.ph) + 0.12 * Math.abs(flap);
+      }
     }
   }
 

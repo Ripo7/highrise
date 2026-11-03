@@ -25,6 +25,9 @@ import { Decor } from './render/decor.js';
 import { TerrainMesh, SNOW_FX } from './render/terrainMesh.js';
 import { SkierMesh, Trail } from './render/skierMesh.js';
 import { Spray } from './render/spray.js';
+import { createShake, createSpring } from './render/cameraFeel.js';
+import { WindStreaks } from './render/windStreaks.js';
+import { tickWind, shakeAt } from './render/wind.js';
 import { GhostRider, packPath } from './render/ghost.js';
 import { Sound } from './audio.js';
 import { t as tx, num, applyDom, onLang } from './i18n.js';
@@ -47,7 +50,7 @@ import { TIERS, TIER_ORDER, SETTINGS, readSetting, tierFor, pixelRatio, createGo
 import { createPost, floatTargets } from './render/post.js';
 import { Sky } from './render/sky.js';
 import { Snowfall } from './render/snowfall.js';
-import { tickAtmosphere, ATMO } from './render/atmosphere.js';
+import { tickAtmosphere, ATMO, WIND } from './render/atmosphere.js';
 import { LIGHTS, lightPreset, mixLight, setLightUniforms } from './render/light.js';
 
 // ---------- state ----------
@@ -485,6 +488,9 @@ const trail = new Trail({ color: '#ff5a1f', max: Math.ceil(PHYS.maxTime * 30) + 
 scene.add(trail.line);
 const spray = new Spray();
 scene.add(spray.points);
+// blown snow streaking past the lens at speed
+const windStreaks = new WindStreaks();
+scene.add(windStreaks.mesh);
 
 const sound = new Sound();
 sound.muted = state.muted;
@@ -1804,7 +1810,13 @@ function setTool(t) {
 // ---------- runs ----------
 // A run lives on while you build: Build pauses it (the skier waits where he is), Ride picks
 // it up at the same speed, From the start begins a new one at the gate.
-const rig = { pos: new THREE.Vector3(), look: new THREE.Vector3(), snap: true, shake: 0, air: 0, roll: 0 };
+const rig = { pos: new THREE.Vector3(), look: new THREE.Vector3(), snap: true, air: 0, roll: 0, yawRate: 0, prevFlat: new THREE.Vector3(0, 0, 1) };
+// the operator's hand (render/cameraFeel.js): knocks from landings and crashes, the snow's
+// rumble, the dip of a landing, the lens
+const camShake = createShake();
+const camRumble = createShake({ decay: 0, move: 1, turn: 0.4, freq: 21 });
+const camDip = createSpring(0, { k: 70, d: 0.45 });
+const camFov = createSpring(60, { k: 36, d: 0.85 });
 
 // Ride: carry on with the paused run, or start one at the gate
 function ride() {
@@ -1843,7 +1855,7 @@ function startRun() {
   enterRide();
   showGates();
   rig.snap = true;
-  rig.shake = 0;
+  camShake.reset();
   trail.line.visible = false; // behind the chase cam the trail climbs past the lens
 }
 
@@ -1905,6 +1917,7 @@ function enterRide() {
   gateMeshes.building = false;
   ui.setRideCam(state.rideCam);
   skierMesh.setFirstPerson(state.rideCam === 'helmet');
+  windStreaks.reset();
 }
 
 function exitRide() {
@@ -1920,6 +1933,9 @@ function exitRide() {
   ui.setRiding(false);
   ui.clearTricks();
   ui.setRush(0);
+  post.setSpeed(0);
+  speedLook = 0;
+  windStreaks.reset();
   skierMesh.setFirstPerson(false);
   ghostRider.update(0, 0, false);
   camera.near = 1;
@@ -2038,6 +2054,8 @@ const _vel = new THREE.Vector3();
 const _right = new THREE.Vector3();
 const _up = new THREE.Vector3();
 const _dp = [0, 0, 0];
+const _lead = new THREE.Vector3();
+const _lookAt = new THREE.Vector3();
 const _gateC = new THREE.Vector3();
 function updateRideCamera(dt) {
   const [x, y, z] = skier.drawPos(_dp);
@@ -2051,11 +2069,21 @@ function updateRideCamera(dt) {
     _flat.normalize();
   }
   const speed = skier.speed;
+  // how fast the line is turning (rad/s, + to the left), smoothed: the camera looks a little
+  // into the turn, where he's going, rather than straight along where he is going now
+  if (!rig.snap && dt > 0) {
+    const turn = Math.atan2(rig.prevFlat.z * _flat.x - rig.prevFlat.x * _flat.z, rig.prevFlat.dot(_flat)) / dt;
+    rig.yawRate += (Math.max(-3, Math.min(3, turn)) - rig.yawRate) * Math.min(1, dt * 4);
+  } else rig.yawRate = 0;
+  rig.prevFlat.copy(_flat);
+  const lead = Math.max(-0.32, Math.min(0.32, rig.yawRate * 0.32 * Math.min(1, speed / 8)));
+  _lead.set(_flat.x * Math.cos(lead) + _flat.z * Math.sin(lead), 0, -_flat.x * Math.sin(lead) + _flat.z * Math.cos(lead));
   // airborne: ease the camera back and up to show the trick
   const airTarget = !skier.grounded && skier.curAir > 0.25 ? 1 : 0;
   rig.air += (airTarget - rig.air) * Math.min(1, dt * 3);
   let posRate;
   let lookRate;
+  let fovWant;
   const kick = Math.min(1, Math.max(0, (speed - 6) / 30));
   // read the slope ahead: where the snow actually is 6-25 m down the line, so the camera
   // aims at the run (not over a crest into the sky) and rises to see down steep faces
@@ -2070,11 +2098,11 @@ function updateRideCamera(dt) {
     // baskets sit at the bottom of the frame: they show speed, lean and where you point
     _want.copy(_p).addScaledVector(_flat, -0.35);
     _want.y = Math.max(y, groundHere) + 1.65;
-    _look.copy(_p).addScaledVector(_flat, lookDist + 6);
+    _look.copy(_p).addScaledVector(_lead, lookDist + 6);
     _look.y = Math.min(_want.y - 1.9, aheadAt(lookDist + 6) + 0.4);
     posRate = 30;
     lookRate = 12;
-    camera.fov = 74 + 18 * kick;
+    fovWant = 74 + 18 * kick;
   } else {
     const portrait = camera.aspect < 1;
     const back = (portrait ? 5.4 : 4.4) + 1.6 * kick + 3.5 * rig.air;
@@ -2088,19 +2116,19 @@ function updateRideCamera(dt) {
     if (_want.y < behind + clear) _want.y = behind + clear;
     // aim between the skier and the snow ahead; in the air, favour the skier
     const toSkier = 0.42 + 0.4 * rig.air;
-    _look.copy(_p).addScaledVector(_flat, lookDist * (1 - toSkier));
+    _look.copy(_p).addScaledVector(_lead, lookDist * (1 - toSkier));
     _look.y = (y + 0.8) * toSkier + (gLook + 0.6) * (1 - toSkier);
     posRate = 8;
     lookRate = 10;
-    camera.fov = (portrait ? 68 : 60) + 22 * kick;
+    fovWant = (portrait ? 68 : 60) + 22 * kick;
   }
-  // a little rumble over the snow at speed
-  if (skier.grounded && speed > 15) {
-    const amp = Math.min(0.06, (speed - 15) * 0.0022);
-    const t = performance.now() * 0.001;
-    _look.x += Math.sin(t * 37.1) * amp;
-    _look.y += Math.sin(t * 43.7 + 1.3) * amp;
-  }
+  // a little rumble over the snow at speed: sharper on ice, soft in powder, none in the air
+  let rumble = 0;
+  if (skier.grounded && speed > 12) rumble = Math.min(0.07, (speed - 12) * 0.0024) * (1 + 0.6 * (skier.ice || 0) - 0.55 * (skier.powder || 0));
+  camRumble.trauma = Math.sqrt(Math.max(0, rumble));
+  camRumble.update(dt);
+  _look.x += camRumble.x;
+  _look.y += camRumble.y;
   const ground = hf.heightAt(_want.x, _want.z);
   if (_want.y < ground + 1) _want.y = ground + 1;
   if (state.rideCam === 'chase') {
@@ -2116,6 +2144,8 @@ function updateRideCamera(dt) {
     rig.look.copy(_look);
     rig.roll = 0;
     rig.snap = false;
+    camDip.snap(0);
+    camFov.snap(fovWant);
   } else {
     rig.pos.lerp(_want, 1 - Math.exp(-dt * posRate));
     rig.look.lerp(_look, 1 - Math.exp(-dt * lookRate));
@@ -2123,43 +2153,96 @@ function updateRideCamera(dt) {
   // the lens lags behind: never let it drift through a crown on the way
   if (state.rideCam === 'chase') outOfTrees(rig.pos, 0.35);
   camera.position.copy(rig.pos);
-  // landing / wipeout shake
-  if (rig.shake > 0.001) {
-    const s = rig.shake;
-    camera.position.x += (Math.random() - 0.5) * s;
-    camera.position.y += (Math.random() - 0.5) * s;
-    rig.shake *= Math.exp(-dt * 7);
-  }
+  // a landing pushes the camera down and it springs back up (the look nods with it)
+  const dip = camDip.step(0, dt);
+  camera.position.y += dip;
+  // landing / crash knocks: along smooth noise, fading
+  camShake.update(dt);
+  camera.position.x += camShake.x;
+  camera.position.y += camShake.y;
+  camera.position.z += camShake.z;
   // the camera banks a little with the skier's lean, like a follow cam on a gimbal
   _right.set(-_flat.z, 0, _flat.x);
   const lean = skier.grounded ? -(skier.tilt[0] * _right.x + skier.tilt[2] * _right.z) : 0;
   rig.roll += (Math.max(-0.5, Math.min(0.5, lean)) * (state.rideCam === 'helmet' ? 0.35 : 0.22) - rig.roll) * Math.min(1, dt * 4);
   _up.set(0, 1, 0).addScaledVector(_right, -Math.sin(rig.roll)).normalize();
   camera.up.copy(_up);
-  camera.lookAt(rig.look);
+  _lookAt.copy(rig.look);
+  _lookAt.y += dip * 0.55;
+  camera.lookAt(_lookAt);
+  camera.rotateZ(camShake.roll);
+  camera.rotateX(camShake.pitch);
+  // the lens follows the speed on a spring (a pop or a landing nudges it)
+  camera.fov = camFov.step(fovWant, dt);
   camera.updateProjectionMatrix();
+}
+
+// Trees he skis close by quiver and drop a little snow off their branches (a hit: a lot).
+// Each tree once a second at most.
+const BRUSH_R = 3.4; // metres from the trunk, for a tree of size 1
+function brushTrees(sk, hit = 0) {
+  if (sk.speed < 6 && !hit) return;
+  const now = performance.now() * 0.001;
+  const [x, , z] = sk.pos;
+  for (const p of props.near(x, z, BRUSH_R * 1.6)) {
+    if (p.k !== TREE) continue;
+    const pz = props.worldZ(p);
+    const d = Math.hypot(p.x - x, pz - z);
+    const r = BRUSH_R * Math.max(0.6, p.s);
+    if (d > r || (p._brushed && now - p._brushed < 1)) continue;
+    p._brushed = now;
+    const k = Math.min(1, hit || 0.25 + 0.75 * (1 - d / r) * Math.min(1, sk.speed / 22));
+    shakeAt(p.x, pz, k);
+    // snow off the branches: clumps falling, a little dust that hangs
+    const h = propHeight(p);
+    const gy = hf.heightAt(p.x, pz);
+    const n = Math.round(5 + 14 * k);
+    for (let i = 0; i < n; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const rr = (0.3 + Math.random() * 1.4) * p.s;
+      const dust = Math.random() < 0.35;
+      spray.emitOne(
+        [p.x + Math.cos(a) * rr, gy + h * (0.3 + Math.random() * 0.55), pz + Math.sin(a) * rr],
+        [Math.cos(a) * 0.6 + sk.vel[0] * 0.08, -0.4 - Math.random() * 0.8, Math.sin(a) * 0.6 + sk.vel[2] * 0.08],
+        dust ? 2 + Math.random() * 1.5 : 0.5 + Math.random() * 0.6,
+        dust ? 1.4 + Math.random() * 0.8 : 0.9 + Math.random() * 0.6,
+        dust ? 0.4 : 5
+      );
+    }
+  }
 }
 
 // sound, spray and shake for what just happened
 function onSkierEvent(ev) {
   if (ev.type === 'pop') {
     sound.pop(ev.value);
+    // the camera lifts with him and the lens opens a touch
+    camDip.kick(0.6 + 1.2 * (ev.value || 0));
+    skierMesh.popped(ev.value || 0);
+    camFov.kick(14 * (0.4 + (ev.value || 0)));
   } else if (ev.type === 'land') {
     const k = Math.min(1, ev.impact / 16);
     if (ev.air > 0.2) {
       sound.land(ev.impact, ev.quality);
       spray.burst(skier, 0.4 + k);
-      rig.shake = Math.max(rig.shake, 0.08 + 0.4 * k * k);
+      camShake.add(0.22 + 0.55 * k);
+      skierMesh.impact(k);
+      camDip.kick(-(1.2 + 4.2 * k));
+      camFov.kick(-18 * k);
     }
+  } else if (ev.type === 'gate') {
+    gateMeshes.flap(ev.n, skier.speed / 20);
   } else if (ev.type === 'bump') {
     // brushed a tree or rock, or the edge of the mountain
     sound.land(Math.min(16, 6 + (ev.value || 3)), 'sketchy');
     spray.burst(skier, 0.5);
-    rig.shake = Math.max(rig.shake, 0.2);
+    camShake.add(0.45);
+    if (ev.what === 'tree') brushTrees(skier, 1);
   } else if (ev.type === 'wipeout') {
     sound.wipeout();
     spray.burst(skier, 2);
-    rig.shake = Math.max(rig.shake, 0.7);
+    camShake.add(0.9);
+    camDip.kick(-3);
   }
 }
 
@@ -2501,6 +2584,8 @@ function frame() {
   spray.update(dt);
   stepLight(dt);
   tickAtmosphere(dt);
+  tickWind(dt);
+  gateMeshes.update(dt);
   snowfall.update(dt);
   updateOcclusion();
   updateHaze();
@@ -2530,6 +2615,8 @@ function frame() {
     decorAt = performance.now();
     decor.refresh();
   }
+  windStreaks.setView(renderer.domElement.width, renderer.domElement.height, renderer.getPixelRatio());
+  windStreaks.update(dt, camera.position, riding ? speedLook : 0, WIND);
   updateSun();
   // the crest ink is measured in CSS pixels, whatever the resolution (terrainMesh.js)
   terrain.uniforms.uPxRatio.value = renderer.getPixelRatio();
@@ -2541,6 +2628,7 @@ requestAnimationFrame(frame);
 
 // One frame of riding: input, physics, score, the skier's mesh, spray, tracks, camera
 let scriptedInput = null; // tests drive the skier with this instead of the controls
+let speedLook = 0; // 0 .. 1: how fast the ride looks (streaks, blur)
 function rideStep(dt) {
   {
     if (skier.status === 'running') {
@@ -2565,8 +2653,14 @@ function rideStep(dt) {
       if (skier.status !== 'running' && skier.status !== 'aborted') onRunEnd(skier);
     }
     spray.fromSkier(skier, dt);
+    if (skier.status === 'running') brushTrees(skier);
     recordTrack(skier);
-    ui.setRush(skier.status === 'running' ? (skier.speed - 14) / 20 : 0);
+    // how fast it looks: blown snow streaks past and the picture's edges blur (Medium and
+    // High); Low keeps its streaked, darkened edges
+    const rush = skier.status === 'running' ? THREE.MathUtils.smoothstep(skier.speed, 11, 32) : 0;
+    ui.setRush(post.on ? 0 : skier.status === 'running' ? (skier.speed - 14) / 20 : 0);
+    post.setSpeed(rush * 0.9);
+    speedLook = rush;
     ghostRider.update(skier.time, dt, skier.status === 'running');
     updateRideCamera(dt);
     const d = camera.position.distanceTo(_gateC.copy(decor.gate.position).setY(decor.gate.position.y + 2));
@@ -2753,6 +2847,7 @@ window.__highrise = {
   camera,
   hf,
   props,
+  propMeshes,
   surf,
   tracks,
   controls,

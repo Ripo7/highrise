@@ -17,8 +17,8 @@ export const ATMO = {
   uAtmoSun: LIGHT.uSunDir, // the same object: the light moves the sun
 };
 
-// wind in m/s across the layer
-const WIND = new THREE.Vector2(7.5, 3.0);
+// wind in m/s across the layer (and the air round the rider: render/windStreaks.js)
+export const WIND = new THREE.Vector2(7.5, 3.0);
 
 export function tickAtmosphere(dt) {
   ATMO.uCloudOff.value.addScaledVector(WIND, dt);

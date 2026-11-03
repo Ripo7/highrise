@@ -183,13 +183,15 @@ export class SkierMesh {
   pose(skier, dt) {
     const want = Object.fromEntries(POSES.map((p) => [p, 0]));
     const flying = !skier.grounded && skier.curAir > 0.18;
-    const braking = skier.input.brake || skier.input.pitch < -0.4;
+    // (tucking / braking: the skier's own, from the stick smoothed: a thumb swinging across
+    // the stick doesn't flash a tuck)
+    const braking = skier.braking ?? (skier.input.brake || skier.input.pitch < -0.4);
     if (skier.wipeout > 0) want.Tumble = 1;
     else if (flying) {
       if (skier.crouching) want.Crouch = 1; // absorbing a landing
       else want.Air = 1;
     } else if (skier.crouching) want.Crouch = 1;
-    else if ((skier.input.tuck || skier.input.pitch > 0.4) && !skier.poling) want.Tuck = 1;
+    else if ((skier.tucking ?? (skier.input.tuck || skier.input.pitch > 0.4)) && !skier.poling) want.Tuck = 1;
     else if (braking && skier.speed > 2) want.Brake = 1;
     else {
       // carving: sink a little into the turn; soaking up a bump: knees bend
@@ -237,8 +239,10 @@ export class SkierMesh {
     // the head keeps the eyes nearer level than the body (a skier's horizon stays put)
     this.level += (Math.max(-0.6, Math.min(0.6, lean)) - this.level) * Math.min(1, dt * 10);
     const nod = this.nod.step(0, dt);
+    const w = this.weights;
+    const upright = Math.max(0, Math.min(1, 1 - w.Tuck - w.Air - 0.6 * w.Crouch));
     if (this.headBone) {
-      this.headBone.rotateZ(0.55 * this.level);
+      this.headBone.rotateZ(0.55 * this.level * upright);
       this.headBone.rotateX(Math.max(-0.35, Math.min(0.45, nod)));
     }
     // the arms: swung a little to the outside of a turn by its pull, then the pole plant
@@ -264,8 +268,8 @@ export class SkierMesh {
     const A = this.arms;
     if (A.L && A.R) {
       // swing: the body leans left (+), the arms trail out to the right (the left one in)
-      A.L.rotateZ(0.5 * swing);
-      A.R.rotateZ(0.5 * swing);
+      A.L.rotateZ(0.5 * swing * upright);
+      A.R.rotateZ(0.5 * swing * upright);
       const pl = this.plantSide > 0 ? A.L : A.R;
       const pf = this.plantSide > 0 ? A.fL : A.fR;
       pl.rotateX(-0.55 * plant);
@@ -281,11 +285,17 @@ export class SkierMesh {
     if (!this.spine || skier.wipeout > 0) return;
     const q = this._qi.copy(this.group.quaternion).invert();
     const n = this._n.set(skier.n[0], skier.n[1], skier.n[2]).applyQuaternion(q);
-    const roll = skier.grounded ? Math.max(-0.9, Math.min(0.9, Math.atan2(n.x, n.y))) : 0;
+    let roll = skier.grounded ? Math.max(-0.9, Math.min(0.9, Math.atan2(n.x, n.y))) : 0;
     const v = this._v.set(skier.vel[0], skier.vel[1], skier.vel[2]).applyQuaternion(q);
     const moving = Math.max(0, Math.min(1, (skier.speed - 2) / 4));
-    const yaw = skier.grounded ? Math.atan2(v.x, Math.abs(v.z) + 1e-3) * moving : 0;
+    let yaw = skier.grounded ? Math.atan2(v.x, Math.abs(v.z) + 1e-3) * moving : 0;
     const k = Math.min(1, dt * 7);
+    // only standing up: bent over in a tuck or a crouch, the spine's axes point elsewhere
+    // and the same turns would twist him into a knot
+    const w = this.weights;
+    const upright = Math.max(0, Math.min(1, 1 - w.Tuck - w.Air - w.Tumble - 0.6 * w.Crouch));
+    roll *= upright;
+    yaw *= upright;
     this.angRoll = (this.angRoll || 0) + (roll - (this.angRoll || 0)) * k;
     this.angYaw = (this.angYaw || 0) + (Math.max(-0.55, Math.min(0.55, 0.45 * yaw)) - (this.angYaw || 0)) * k;
     this.spine.rotateZ(-0.4 * this.angRoll);
@@ -333,7 +343,7 @@ export class SkierMesh {
     this.orient(up, this._fwd, dt);
 
     // crouch (loading a jump, tucking, absorbing a landing)
-    const wantCrouch = skier.crouching ? 1 : skier.grounded && skier.input.pitch > 0.4 ? 0.6 : 0;
+    const wantCrouch = skier.crouching ? 1 : (skier.tucking ?? (skier.grounded && skier.input.pitch > 0.4)) ? 0.6 : 0;
     this.crouch += (wantCrouch - this.crouch) * Math.min(1, dt * 14);
     // squash into a landing, stretch off a pop (volume kept: wider as it gets shorter)
     const sq = Math.max(-0.12, Math.min(0.2, this.squash.step(0, dt)));

@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { LIGHT } from './light.js';
+import { WIND_U, swayPars } from './wind.js';
 
 // Shared pieces of the cartoon look: sun shadows sampled inside our own shaders, ink
 // outlines drawn as an inverted hull, and a 3-step ramp for three's toon material.
@@ -45,9 +46,10 @@ export const shadowFragPars = /* glsl */ `
 // --- ink outlines: the mesh again, back faces only, pushed out along the normals ---
 // Width is in pixels-ish: the push grows with distance so the line stays about as thick.
 
-const outlineVert = (instanced, skinned) => /* glsl */ `
+const outlineVert = (instanced, skinned, sway) => /* glsl */ `
   #include <common>
   ${skinned ? '#include <skinning_pars_vertex>' : ''}
+  ${sway ? swayPars : ''}
   uniform float uWidth;
   varying float vDist;
   void main() {
@@ -56,6 +58,7 @@ const outlineVert = (instanced, skinned) => /* glsl */ `
     #include <begin_vertex>
     ${skinned ? '#include <skinbase_vertex>\n#include <skinnormal_vertex>\n#include <skinning_vertex>' : ''}
     vec4 w = m * vec4(transformed, 1.0);
+    ${sway ? 'w.xyz += sway(transformed, m);' : ''}
     vec3 nw = normalize(mat3(m) * objectNormal);
     vec4 mv = viewMatrix * w;
     float d = -mv.z;
@@ -83,9 +86,10 @@ const outlineFrag = /* glsl */ `
   }
 `;
 
-export function outlineMaterial({ instanced = false, skinned = false, width = 1.6, fade = 1600 } = {}) {
+// sway: the instances move in the wind like the trees they outline (wind.js)
+export function outlineMaterial({ instanced = false, skinned = false, width = 1.6, fade = 1600, sway = false } = {}) {
   return new THREE.ShaderMaterial({
-    vertexShader: outlineVert(instanced, skinned),
+    vertexShader: outlineVert(instanced, skinned, sway),
     fragmentShader: outlineFrag,
     side: THREE.BackSide,
     uniforms: {
@@ -95,6 +99,7 @@ export function outlineMaterial({ instanced = false, skinned = false, width = 1.
       uFogNear: { value: 1400 },
       uFogFar: { value: 4200 },
       uFade: { value: fade },
+      ...(sway ? WIND_U : {}),
     },
   });
 }

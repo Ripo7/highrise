@@ -158,6 +158,20 @@ Then act on the selection. Actions stay on the tiles, so they stack (tap again f
 
 Hold to load a jump (the ring fills) and release at a lip (a kicker, a raised crest, an eased shelf, a drop) to fly higher. Land with the skis straight and upright: clean landings score full points, sketchy ones half and cost speed, and only a really bad one is a wipeout (you lose the combo, tumble, get up and carry on). Let go of the stick in the air and the skier straightens up and finishes a nearly-complete flip by himself. Hitting the edge of the mountain just bumps you back.
 
+**How it moves.**
+- **The camera** is a camera operator's hand, not a rigid mount (`src/render/cameraFeel.js`):
+  - it looks a little into a turn, where you're going;
+  - a landing pushes it down and it springs back, nodding the view;
+  - knocks (landings, trees, crashes) shake it along smooth noise, more for harder ones;
+  - the snow rumbles under it at speed: sharper on ice, softer in powder;
+  - the lens opens with speed on a spring, a touch more off a pop.
+- **Speed shows**: blown snow streaks past the lens towards the edges of the picture (`src/render/windStreaks.js`), and on Medium and High the edges blur outwards while the middle stays sharp. Low keeps its streaked, darkened edges.
+- **The skier** squashes into a landing and stretches off a pop, keeps his head level through a turn and nods with a landing, his arms swing with the turn's pull, and he plants the inside pole as each new turn starts.
+- **The world moves**:
+  - the trees sway in the wind, in gusts that roll across the forest (`src/render/wind.js`), and their outlines move with them;
+  - a tree you ski close by quivers and drops snow off its branches;
+  - gate panels turn in the wind and flap when you go through.
+
 **Speed bonus:** above 100 km/h a speed streak builds (40 points a second at 100 km/h, +3 per extra km/h: about 170/s at 145 km/h). It's banked once you've been back under 100 for 0.8 s, or at the finish, and lost on a wipeout. Tricks landed within 2.6 s of each other chain into a combo (×1.5, ×2, … up to ×5). A see-through ghost replays your best run.
 
 Your slope, tiles (gates included), start gate, best score and best time, ghost, ski tracks and the project it's saved as autosave in the browser (save v12; v9 to v11 saves load with their tiles, their ghosts moved to the new height of the slope). Saves from the wild mountains become sections of about the same length, width and steepness, with their tiles kept (and painted pieces from before the tile actions become the matching actions: a bump raised 3 m, a flat eased all the way, a wall steepened, forest planted, powder kept). Saves from before the wild mountains are kept aside, untouched, and you start on a new slope.
@@ -197,7 +211,7 @@ Hand it to a few people. Do they say "one more tweak" and keep going? If not, fi
 ```bash
 npm install
 npm run dev      # local dev server
-npm test         # picture quality (Auto's tiers and frame governor), contact shadows, the light presets, physics, scoring, slope design, the hexagon grid, tile actions and jumps, gates and courses, pieces, joints, projects, the translation, the tutorial levels (Node, no browser needed)
+npm test         # picture quality (Auto's tiers and frame governor), contact shadows, the light presets, the camera's shake and springs, physics, scoring, slope design, the hexagon grid, tile actions and jumps, gates and courses, pieces, joints, projects, the translation, the tutorial levels (Node, no browser needed)
 npm run build    # production build into dist/
 npm run smoke    # browser smoke test on the build: design a slope, move the start, select tiles, raise, undo, a jump, rotate, copy and paste, edit the slope keeping the tiles, ride, pause and act, ride on, start again, switch to French, play a tutorial level and leave it, set a course of gates, race it, miss a gate, the picture quality setting, the slope editor in 3D (side view, drag a dot, undo), the view buttons (select, rotate, move, top, slope), double click a piece, save as a project, open it again, reload (needs Chromium: npx playwright install chromium)
 ```

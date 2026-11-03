@@ -6,6 +6,7 @@ import { CUT_SHADOW, CUT_LIT } from './theme.js';
 import { lightUniforms, shadowVertPars, shadowVert, shadowFragPars, outlineMaterial } from './toon.js';
 import { ATMO, cloudPars } from './atmosphere.js';
 import { LIGHT } from './light.js';
+import { WIND_U, swayPars } from './wind.js';
 
 // Trees and rocks come from the Blender factory (art/export_props.py -> public/models/props.glb):
 // 6 tree and 5 rock variants, each drawn as one instanced mesh. Parts are tagged by material
@@ -21,6 +22,7 @@ const ROCK_RADIUS = 1.6;
 
 const vert = /* glsl */ `
   ${shadowVertPars}
+  ${swayPars}
   attribute float aKind;
   varying float vKind;
   varying vec3 vN;
@@ -28,6 +30,8 @@ const vert = /* glsl */ `
   void main() {
     mat4 m = modelMatrix * instanceMatrix;
     vec4 w = m * vec4(position, 1.0);
+    // the trees sway in the wind (wind.js); rocks are too low to move
+    w.xyz += sway(position, m);
     vWorld = w.xyz;
     vec3 nw = normalize(mat3(m) * normal);
     vN = nw;
@@ -96,6 +100,7 @@ function toonMaterial() {
       uFogNear: { value: 1400 },
       uFogFar: { value: 4200 },
       ...ATMO,
+      ...WIND_U,
     },
   });
 }
@@ -158,7 +163,7 @@ export class PropMeshes {
   constructor(props) {
     this.props = props;
     this.material = toonMaterial();
-    this.outline = outlineMaterial({ instanced: true, width: 1.5, fade: 900 });
+    this.outline = outlineMaterial({ instanced: true, width: 1.5, fade: 900, sway: true });
     this.group = new THREE.Group();
     this._m = new THREE.Matrix4();
     this._q = new THREE.Quaternion();

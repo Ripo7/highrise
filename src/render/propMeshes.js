@@ -25,10 +25,15 @@ const vert = /* glsl */ `
   ${swayPars}
   attribute float aKind;
   varying float vKind;
+  varying float vVar;
   varying vec3 vN;
   varying vec3 vWorld;
   void main() {
     mat4 m = modelMatrix * instanceMatrix;
+    // each tree its own: a number from where it stands
+    vec2 q = fract(m[3].xz * vec2(0.1031, 0.1030));
+    q += dot(q, q.yx + 33.33);
+    vVar = fract((q.x + q.y) * q.x);
     vec4 w = m * vec4(position, 1.0);
     // the trees sway in the wind (wind.js); rocks are too low to move
     w.xyz += sway(position, m);
@@ -55,6 +60,7 @@ const frag = /* glsl */ `
   uniform float uFogNear;
   uniform float uFogFar;
   varying float vKind;
+  varying float vVar;
   varying vec3 vN;
   varying vec3 vWorld;
   void main() {
@@ -73,6 +79,10 @@ const frag = /* glsl */ `
     vec3 col = mix(sh, mix(mid, lit, smoothstep(uCutLit - aa, uCutLit + aa, ndl) * bright),
                    smoothstep(uCutShadow - aa, uCutShadow + aa, ndl) * inSun);
     col *= mix(vec3(1.0), vec3(0.88, 0.89, 0.97), cloudShadow(vWorld));
+    // a forest of individuals: some needles bluer (spruce), some warmer (pine), a little
+    // lighter or darker; the bark too, a touch
+    if (k == 1) col *= mix(vec3(0.88, 0.97, 1.07), vec3(1.07, 1.03, 0.86), vVar) * (0.93 + 0.13 * fract(vVar * 7.31));
+    else if (k == 2) col *= 0.92 + 0.14 * fract(vVar * 3.7);
     float dist = length(cameraPosition - vWorld);
     col = mix(col, uFog, smoothstep(uFogNear, uFogFar, dist));
     gl_FragColor = vec4(col, 1.0);

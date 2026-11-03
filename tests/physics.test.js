@@ -44,7 +44,8 @@ test('the kicker line produces five clean jumps', () => {
   const { hf, start } = mountain('kickers');
   const s = new Skier(hf, start).simulate();
   assert.equal(s.jumps, 5);
-  assert.ok(s.airTime > 5, `air ${s.airTime.toFixed(1)} s`);
+  // (snappy jumps: gravity in the air is 1.4 g)
+  assert.ok(s.airTime > 3.5, `air ${s.airTime.toFixed(1)} s`);
   const lands = s.events.filter((e) => e.type === 'land');
   assert.ok(lands.every((e) => e.quality === 'clean'), lands.map((e) => e.quality).join(','));
 });
@@ -415,8 +416,8 @@ test('flying over a rock clears it', () => {
   props.add({ k: ROCK, u: 200, x: lineAt(hf, start, 200), s: 1, r: 0 });
   const s = new Skier(hf, start);
   s.props = props;
-  // load a full jump and pop ~15 m before the rock
-  while (s.pos[2] - hf.startZ < 172) s.step(1 / 240);
+  // load a full jump and pop ~20 m before the rock
+  while (s.pos[2] - hf.startZ < 180) s.step(1 / 240);
   s.input.crouch = true;
   for (let k = 0; k < 110; k++) s.step(1 / 240);
   s.input.crouch = false;

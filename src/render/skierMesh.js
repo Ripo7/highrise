@@ -124,6 +124,7 @@ export class SkierMesh {
     this._v = new THREE.Vector3();
     this.mixer = null;
     this.weights = Object.fromEntries(POSES.map((p) => [p, p === 'Stance' ? 1 : 0]));
+    this.wMid = { ...this.weights };
     loadSkier()
       .then((gltf) => this.useModel(gltf))
       .catch((err) => console.warn('skier.glb failed to load, keeping the stand-in', err));
@@ -196,15 +197,18 @@ export class SkierMesh {
       want.Stance = 1 - bend;
       want.Crouch = bend;
     }
-    const k = Math.min(1, dt * 12);
+    // two smoothings in a row: a pose eases in and out (an S curve) instead of starting
+    // with a jerk, which read as the upper body jumping when he tucked or stood up
+    const k = Math.min(1, dt * 14);
     let sum = 0;
     for (const p of POSES) {
-      this.weights[p] += (want[p] - this.weights[p]) * k;
+      this.wMid[p] += (want[p] - this.wMid[p]) * k;
+      this.weights[p] += (this.wMid[p] - this.weights[p]) * k;
       sum += this.weights[p];
     }
     for (const p of POSES) this.actions[p]?.setEffectiveWeight(this.weights[p] / Math.max(1e-4, sum));
     this.mixer.update(dt);
-    this.angulate(skier);
+    this.angulate(skier, dt);
     this.followThrough(skier, dt, want);
   }
 
@@ -270,16 +274,22 @@ export class SkierMesh {
   }
 
   // the upper body: a little more upright than the legs in a carve, turned towards the
-  // direction of travel in a skid (the spine bone, after the poses are applied)
-  angulate(skier) {
+  // direction of travel in a skid (the spine bone, after the poses are applied). Both follow
+  // the snow and the travel smoothly: read raw each frame they jumped about over bumps, at a
+  // crawl (where the direction of travel is noise) and on landing (snapping from none)
+  angulate(skier, dt) {
     if (!this.spine || skier.wipeout > 0) return;
     const q = this._qi.copy(this.group.quaternion).invert();
     const n = this._n.set(skier.n[0], skier.n[1], skier.n[2]).applyQuaternion(q);
-    const roll = skier.grounded ? Math.atan2(n.x, n.y) : 0;
+    const roll = skier.grounded ? Math.max(-0.9, Math.min(0.9, Math.atan2(n.x, n.y))) : 0;
     const v = this._v.set(skier.vel[0], skier.vel[1], skier.vel[2]).applyQuaternion(q);
-    const yaw = skier.grounded && skier.speed > 2 ? Math.atan2(v.x, Math.abs(v.z) + 1e-3) : 0;
-    this.spine.rotateZ(-0.4 * roll);
-    this.spine.rotateY(Math.max(-0.7, Math.min(0.7, 0.45 * yaw)));
+    const moving = Math.max(0, Math.min(1, (skier.speed - 2) / 4));
+    const yaw = skier.grounded ? Math.atan2(v.x, Math.abs(v.z) + 1e-3) * moving : 0;
+    const k = Math.min(1, dt * 7);
+    this.angRoll = (this.angRoll || 0) + (roll - (this.angRoll || 0)) * k;
+    this.angYaw = (this.angYaw || 0) + (Math.max(-0.55, Math.min(0.55, 0.45 * yaw)) - (this.angYaw || 0)) * k;
+    this.spine.rotateZ(-0.4 * this.angRoll);
+    this.spine.rotateY(this.angYaw);
   }
 
   addTo(scene) {
@@ -378,8 +388,10 @@ export class SkierMesh {
     this.level = 0;
     this.plantT = 1;
     this.turnSide = 0;
+    this.angRoll = 0;
+    this.angYaw = 0;
     this._fwd.set(0, 0, 1);
-    for (const p of POSES) this.weights[p] = p === 'Stance' ? 1 : 0;
+    for (const p of POSES) this.weights[p] = this.wMid[p] = p === 'Stance' ? 1 : 0;
   }
 }
 

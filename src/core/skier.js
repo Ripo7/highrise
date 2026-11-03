@@ -135,6 +135,9 @@ export class Skier {
     // steer -1..1 (right +), pitch -1..1 (up +: tuck / front flip, down -: brake / back flip),
     // crouch: hold to load a jump, release to pop. brake / tuck kept for direct control.
     this.input = { steer: 0, pitch: 0, crouch: false, brake: false, tuck: false };
+    this.groundPitch = 0; // the stick's up / down on the snow, smoothed (tuck, brake)
+    this.tucking = false; // for drawing: tucked / braking on the snow
+    this.braking = false;
     this._wasCrouching = false;
     this.crouchSpent = false; // crouch used to absorb a landing: releasing it doesn't pop
     this.crouchTime = 0;
@@ -255,10 +258,16 @@ export class Skier {
       return;
     }
 
-    // derived controls
-    const tuck = inp.tuck || inp.crouch || (this.grounded && inp.pitch > 0.4);
-    const brakeAmt = inp.brake ? 1 : this.grounded ? Math.max(0, (-inp.pitch - 0.3) / 0.7) : 0;
+    // derived controls. On the snow the stick's up and down (tuck, brake) go through a short
+    // smoothing (~0.1 s): a thumb swinging from one side to the other over the top or the
+    // bottom of the stick flicked a tuck or a hockey stop in the middle of a turn
+    this.groundPitch += ((inp.pitch || 0) - this.groundPitch) * Math.min(1, dt * 9);
+    const gp = this.groundPitch;
+    const tuck = inp.tuck || inp.crouch || (this.grounded && gp > 0.4);
+    const brakeAmt = inp.brake ? 1 : this.grounded ? Math.max(0, (-gp - 0.3) / 0.7) : 0;
     const braking = brakeAmt > 0.05;
+    this.tucking = this.grounded && (inp.tuck || gp > 0.4);
+    this.braking = this.grounded && (inp.brake || gp < -0.4);
     const v0x = vel[0];
     const v0y = vel[1];
     const v0z = vel[2];
@@ -309,7 +318,7 @@ export class Skier {
         vel[2] -= (vt[2] / vtl) * dv;
       }
       // poles: pushing along on the flat (tuck at a crawl)
-      if (!out && !braking && (inp.tuck || inp.pitch > 0.4) && vtl < P.poleSpeed) {
+      if (!out && !braking && (inp.tuck || gp > 0.4) && vtl < P.poleSpeed) {
         const h = this.heading;
         const k = P.poleAccel * dt * Math.max(0, n[1]);
         vel[0] += h[0] * k;
@@ -626,9 +635,13 @@ export class Skier {
   rotateInAir(dt, inp) {
     const { P } = this;
     const k = Math.min(1, P.spinResponse * dt);
-    // arm air control once the input is released, or after a short grace in the air
-    if (!this.airSteerArmed && (Math.abs(inp.steer) < 0.1 || this.sinceGround > P.airGrace)) this.airSteerArmed = true;
-    if (!this.airPitchArmed && (Math.abs(inp.pitch) < 0.1 || this.sinceGround > P.airGrace)) this.airPitchArmed = true;
+    // arm air control once the input is released. After a pop (a jump on purpose) a stick
+    // held through the lip also starts rotating after a short grace; off a crest or a kicker
+    // he only rolled over, it never does (turning hard over rolling snow, he spun and
+    // flipped off every little hop, and crashed): let go and push again to trick
+    const grace = this.popped && this.sinceGround > P.airGrace;
+    if (!this.airSteerArmed && (Math.abs(inp.steer) < 0.1 || grace)) this.airSteerArmed = true;
+    if (!this.airPitchArmed && (Math.abs(inp.pitch) < 0.1 || grace)) this.airPitchArmed = true;
     const steer = this.airSteerArmed ? inp.steer : 0;
     const pitch = this.airPitchArmed ? inp.pitch : 0;
     inp = { steer, pitch };

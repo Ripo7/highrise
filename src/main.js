@@ -2848,6 +2848,7 @@ window.__highrise = {
   hf,
   props,
   propMeshes,
+  skierMesh,
   surf,
   tracks,
   controls,

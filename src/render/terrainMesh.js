@@ -315,6 +315,10 @@ const frag = /* glsl */ `
     rock *= mix(0.86, 1.0, smoothstep(0.45 - sw, 0.45 + sw, sb));
     rock = mix(rock, uInk, (1.0 - smoothstep(0.0, sw * 1.5, min(sb, 1.0 - sb))) * 0.35 * (1.0 - smoothstep(60.0, 220.0, camDist)));
     vec3 col = mix(snow, rock, rockAmt);
+    // the big picture: a field of snow isn't one flat white. Wind-packed patches a few
+    // hundred metres across are a touch cooler and duller (it shows from the air and far off)
+    float macro = vnoise(vWorld.xz * 0.006 + 5.0) * 0.65 + vnoise(vWorld.xz * 0.017 - 2.0) * 0.35;
+    col = mix(col, col * vec3(0.93, 0.95, 1.02), smoothstep(0.45, 0.8, macro) * (1.0 - rockAmt) * (1.0 - uRelief) * 0.8);
     // contact shadows: hollows, the feet of kickers and walls, round tree trunks and rocks
     float ao = texture2D(uAO, suv).r * (1.0 - uRelief);
     col = mix(col, uSnowShadow * vec3(0.9, 0.9, 0.97), ao * 0.7);

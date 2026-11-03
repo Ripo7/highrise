@@ -49,6 +49,7 @@ import { createDebugOverlay } from './debugOverlay.js';
 import { TIERS, TIER_ORDER, SETTINGS, readSetting, tierFor, pixelRatio, createGovernor } from './render/quality.js';
 import { createPost, floatTargets } from './render/post.js';
 import { Sky } from './render/sky.js';
+import { Panorama } from './render/panorama.js';
 import { Snowfall } from './render/snowfall.js';
 import { tickAtmosphere, ATMO, WIND } from './render/atmosphere.js';
 import { LIGHTS, lightPreset, mixLight, setLightUniforms } from './render/light.js';
@@ -221,6 +222,9 @@ document.documentElement.style.setProperty('--sky-top', THEME.sky.top);
 document.documentElement.style.setProperty('--sky-low', THEME.sky.horizon);
 const sky = new Sky();
 scene.add(sky.mesh);
+// the world beyond the slope: ranges of peaks out of a sea of clouds below it
+const panorama = new Panorama(sky);
+scene.add(panorama.group);
 // snow in the air, round the camera (how much: the picture quality)
 const snowfall = new Snowfall();
 scene.add(snowfall.group);
@@ -337,6 +341,7 @@ function applyQuality() {
   }
   post.set(t);
   SNOW_FX.uWideShadow.value = t.glow ? 1 : 0;
+  panorama.setDetail(t.glow);
   // room for the most flakes a light can ask for (overcast); the light says how many show
   snowfall.setCount(t.snow * 3);
   snowfall.show(Math.round(t.snow * (lightNow?.snow1 ?? 1)));
@@ -2614,6 +2619,7 @@ function frame() {
     decorSeen = terrain.version;
     decorAt = performance.now();
     decor.refresh();
+    panorama.placeUnder(hf);
   }
   windStreaks.setView(renderer.domElement.width, renderer.domElement.height, renderer.getPixelRatio());
   windStreaks.update(dt, camera.position, riding ? speedLook : 0, WIND);

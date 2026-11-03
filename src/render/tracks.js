@@ -1,5 +1,6 @@
 import * as THREE from 'three';
-import { THEME, SUN_DIR } from './theme.js';
+import { SUN_DIR } from './theme.js';
+import { LIGHT } from './light.js';
 
 // Ski tracks that stay in the snow, run after run, until fresh snow covers them.
 //
@@ -131,10 +132,10 @@ export class Tracks {
       polygonOffsetFactor: -2,
       polygonOffsetUnits: -4,
       uniforms: {
-        uShadow: { value: c(THEME.snow[2]) },
-        uMid: { value: c(THEME.snow[1]) },
+        uShadow: LIGHT.uSnowShadow,
+        uMid: LIGHT.uSnowMid,
         uLit: { value: c('#ffffff') },
-        uFog: { value: c(THEME.haze) },
+        uFog: LIGHT.uFog,
         uFogNear: { value: 1400 },
         uFogFar: { value: 4200 },
         uFade: { value: 1 },

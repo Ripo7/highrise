@@ -2,9 +2,10 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { TREE } from '../core/props.js';
-import { THEME, SUN_DIR, CUT_SHADOW, CUT_LIT } from './theme.js';
+import { CUT_SHADOW, CUT_LIT } from './theme.js';
 import { lightUniforms, shadowVertPars, shadowVert, shadowFragPars, outlineMaterial } from './toon.js';
 import { ATMO, cloudPars } from './atmosphere.js';
+import { LIGHT } from './light.js';
 
 // Trees and rocks come from the Blender factory (art/export_props.py -> public/models/props.glb):
 // 6 tree and 5 rock variants, each drawn as one instanced mesh. Parts are tagged by material
@@ -46,6 +47,7 @@ const frag = /* glsl */ `
   uniform float uCutShadow;
   uniform float uCutLit;
   uniform vec3 uFog;
+  uniform float uShadowAmt;
   uniform float uFogNear;
   uniform float uFogFar;
   varying float vKind;
@@ -61,7 +63,7 @@ const frag = /* glsl */ `
     if (!gl_FrontFacing) n = -n;
     float ndl = dot(n, normalize(uSunDir));
     float aa = fwidth(ndl) + 0.004;
-    float inSun = smoothstep(0.35, 0.65, sunShadow());
+    float inSun = mix(1.0, smoothstep(0.35, 0.65, sunShadow()), uShadowAmt);
     // under a cloud's shadow the sunlit band drops to the middle one, as on the snow
     float bright = inSun * (1.0 - cloudShadow(vWorld));
     vec3 col = mix(sh, mix(mid, lit, smoothstep(uCutLit - aa, uCutLit + aa, ndl) * bright),
@@ -76,20 +78,21 @@ const frag = /* glsl */ `
 
 function toonMaterial() {
   const c = (h) => new THREE.Color(h);
-  const bands = [THEME.snow, THEME.needles, THEME.bark, THEME.rock];
   return new THREE.ShaderMaterial({
     vertexShader: vert,
     fragmentShader: frag,
     lights: true,
     uniforms: {
       ...lightUniforms(),
-      uLit: { value: bands.map((b) => c(b[0])) },
-      uMid: { value: bands.map((b) => c(b[1])) },
-      uShadow: { value: bands.map((b) => c(b[2])) },
-      uSunDir: { value: new THREE.Vector3(...SUN_DIR).normalize() },
+      // the palette and the sun: shared, set by the light (light.js)
+      uLit: LIGHT.uLit,
+      uMid: LIGHT.uMid,
+      uShadow: LIGHT.uShadow,
+      uSunDir: LIGHT.uSunDir,
+      uShadowAmt: LIGHT.uShadowAmt,
       uCutShadow: { value: CUT_SHADOW },
       uCutLit: { value: CUT_LIT },
-      uFog: { value: c(THEME.haze) },
+      uFog: LIGHT.uFog,
       uFogNear: { value: 1400 },
       uFogFar: { value: 4200 },
       ...ATMO,

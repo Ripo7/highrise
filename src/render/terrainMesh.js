@@ -1,7 +1,8 @@
 import * as THREE from 'three';
-import { THEME, SUN_DIR, CUT_SHADOW, CUT_LIT } from './theme.js';
+import { CUT_SHADOW, CUT_LIT } from './theme.js';
 import { lightUniforms, shadowVertPars, shadowVert, shadowFragPars } from './toon.js';
 import { ATMO, cloudPars } from './atmosphere.js';
+import { LIGHT } from './light.js';
 import { occlusion } from '../core/occlusion.js';
 
 const toHalf = THREE.DataUtils.toHalfFloat;
@@ -68,6 +69,7 @@ const frag = /* glsl */ `
   uniform vec2 uStart;
   uniform float uContours;
   uniform float uRelief;
+  uniform float uShadowAmt; // how much a cast shadow darkens (the light preset)
   uniform float uPxRatio; // device pixels per CSS pixel: the crest ink is measured in CSS pixels
   uniform sampler2D uLocalMean;
   uniform vec2 uHalf;
@@ -231,7 +233,7 @@ const frag = /* glsl */ `
     // faces turned right away from the sun are always in shadow
     level = min(level, 2.0 * smoothstep(0.02 - aa, 0.02 + aa, ndl));
     // shadows cast by trees, the rider and the terrain drop into the shadow band
-    level = clamp(level, 0.0, 2.0) * smoothstep(0.35, 0.65, sunShadow());
+    level = clamp(level, 0.0, 2.0) * mix(1.0, smoothstep(0.35, 0.65, sunShadow()), uShadowAmt);
     // a cloud's shadow passing over: the sunlit band drops to the middle one
     float cloud = cloudShadow(vWorld) * (1.0 - uRelief);
     level = min(level, 2.0 - cloud);
@@ -552,25 +554,12 @@ export class TerrainMesh {
     geo.boundingSphere = bound;
     this.geo = geo;
 
-    const sunDir = new THREE.Vector3(...SUN_DIR).normalize();
-    const T = THEME;
     const c = (hex) => new THREE.Color(hex);
     this.uniforms = {
-      uSunDir: { value: sunDir },
-      uSnowLit: { value: c(T.snow[0]) },
-      uSnowMid: { value: c(T.snow[1]) },
-      uSnowShadow: { value: c(T.snow[2]) },
-      uRockLit: { value: c(T.rock[0]) },
-      uRockMid: { value: c(T.rock[1]) },
-      uRockShadow: { value: c(T.rock[2]) },
-      uInk: { value: c(T.ink) },
+      // the palette and the sun: shared with every material, set by the light (light.js)
+      ...LIGHT,
       uCutShadow: { value: CUT_SHADOW },
       uCutLit: { value: CUT_LIT },
-      uStrata0: { value: c(T.strata[0]) },
-      uStrata1: { value: c(T.strata[1]) },
-      uStrata2: { value: c(T.strata[2]) },
-      uStrata3: { value: c(T.strata[3]) },
-      uFog: { value: c(T.haze) },
       // fog scales with the run so long runs fade into the distance, not into a wall
       uFogNear: { value: Math.max(1400, hf.sizeZ * 1.2) },
       uFogFar: { value: Math.max(4200, hf.sizeZ * 3.5) },
@@ -595,8 +584,6 @@ export class TerrainMesh {
       uNormOn: { value: 1 },
       uSurfSize: { value: new THREE.Vector2(hf.nx, hf.nz) },
       uCell: { value: hf.cell },
-      uIceLit: { value: c('#d6ebff') },
-      uIceShadow: { value: c('#86a8ea') },
       uTiles: { value: null },
       uTileInfo: { value: new THREE.Vector4(-240, hf.startZ, 6, 1) },
       uTileCols: { value: 1 },

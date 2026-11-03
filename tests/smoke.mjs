@@ -409,6 +409,14 @@ try {
     await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
   }
   assert.equal(await page.evaluate(() => localStorage.getItem('highrise.gfx')), 'auto', 'the setting is kept');
+  // the light (••• menu): golden hour -> morning -> overcast -> golden hour, crossfading
+  assert.equal((await page.textContent('#light-btn')).trim(), 'Light: Golden hour');
+  for (const [label, name] of [['Morning', 'morning'], ['Overcast', 'overcast'], ['Golden hour', 'golden']]) {
+    await page.click('#light-btn');
+    assert.equal((await page.textContent('#light-btn')).trim(), `Light: ${label}`);
+    assert.equal(await page.evaluate(() => window.__highrise.state.light), name);
+    await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
+  }
   await page.click('#more');
 
   // a course: two gates in the skier's line (Features ▸ Gate), the second two tiles wide;
@@ -492,7 +500,7 @@ try {
 
   assert.deepEqual(errors, [], 'no page errors');
   console.log(
-    `smoke test passed: a slope of 4 sections designed (and edited, tiles kept), start gate moved, ${picked} tiles selected and raised, undo/redo, a jump turned, copied and pasted (${tileCount} tiles), ride at ${(ride.speed * 3.6).toFixed(0)} km/h, pause and build, ride on at ${resumed.time.toFixed(1)} s, from the start; in French; the graphics setting cycled through every tier; a tutorial level done and left, your slope back; a course of gates raced in ${bestTime.toFixed(2)} s, a missed gate; the 3D slope editor (side view, a dot dragged, undone), the view buttons (select, rotate, move, top, slope), a double click on a piece; saved as a project, opened again, reloaded`
+    `smoke test passed: a slope of 4 sections designed (and edited, tiles kept), start gate moved, ${picked} tiles selected and raised, undo/redo, a jump turned, copied and pasted (${tileCount} tiles), ride at ${(ride.speed * 3.6).toFixed(0)} km/h, pause and build, ride on at ${resumed.time.toFixed(1)} s, from the start; in French; the graphics setting cycled through every tier, the light through every preset; a tutorial level done and left, your slope back; a course of gates raced in ${bestTime.toFixed(2)} s, a missed gate; the 3D slope editor (side view, a dot dragged, undone), the view buttons (select, rotate, move, top, slope), a double click on a piece; saved as a project, opened again, reloaded`
   );
 } catch (err) {
   // on CI, say what failed where it shows on the run's page too (an annotation), with a

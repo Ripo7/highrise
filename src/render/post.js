@@ -80,6 +80,7 @@ export function floatTargets(renderer) {
 
 export function createPost(renderer, scene, camera) {
   let composer = null;
+  let gradeNow = GRADE; // the light's grade (light.js), kept for when the pass is built
   let bloom = null;
   let grade = null;
   let on = false;
@@ -95,6 +96,15 @@ export function createPost(renderer, scene, camera) {
     composer.addPass(new RenderPass(scene, camera));
     grade = new ShaderPass(GradeShader);
     composer.addPass(grade);
+    setGradeUniforms();
+  };
+  const setGradeUniforms = () => {
+    if (!grade) return;
+    const u = grade.uniforms;
+    u.uContrast.value = gradeNow.contrast;
+    u.uSaturation.value = gradeNow.saturation;
+    u.uShadows.value.set(...gradeNow.shadows);
+    u.uHighlights.value.set(...gradeNow.highlights);
   };
   const addBloom = () => {
     bloom = new UnrealBloomPass(new THREE.Vector2(size.x, size.y), BLOOM.strength, BLOOM.radius, BLOOM.threshold);
@@ -120,6 +130,11 @@ export function createPost(renderer, scene, camera) {
       composer.setPixelRatio(renderer.getPixelRatio());
       composer.setSize(size.x, size.y);
       grade.uniforms.uAspect.value = size.x / Math.max(1, size.y);
+    },
+    // the light's grade: { contrast, saturation, shadows [r, g, b], highlights [r, g, b] }
+    setGrade(g) {
+      gradeNow = g;
+      setGradeUniforms();
     },
     render() {
       if (on) composer.render();

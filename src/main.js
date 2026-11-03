@@ -47,7 +47,8 @@ import { TIERS, TIER_ORDER, SETTINGS, readSetting, tierFor, pixelRatio, createGo
 import { createPost, floatTargets } from './render/post.js';
 import { Sky } from './render/sky.js';
 import { Snowfall } from './render/snowfall.js';
-import { tickAtmosphere } from './render/atmosphere.js';
+import { tickAtmosphere, ATMO } from './render/atmosphere.js';
+import { LIGHTS, lightPreset, mixLight, setLightUniforms } from './render/light.js';
 
 // ---------- state ----------
 const COARSE = window.matchMedia('(pointer: coarse)').matches;
@@ -76,6 +77,7 @@ const state = {
   tiles: [], // the tiles you changed, with what's on them (see core/tiles.js)
   start: null, // the start gate: { x, z }
   rideCam: 'chase', // chase | helmet
+  light: 'golden', // the light on the mountain: golden | morning | overcast (render/light.js)
   contours: false,
   relief: false,
   muted: false,
@@ -219,7 +221,8 @@ scene.add(sky.mesh);
 // snow in the air, round the camera (how much: the picture quality)
 const snowfall = new Snowfall();
 scene.add(snowfall.group);
-scene.add(new THREE.HemisphereLight(THEME.sky.top, THEME.sky.horizon, 1.4));
+const hemi = new THREE.HemisphereLight(THEME.sky.top, THEME.sky.horizon, 1.4);
+scene.add(hemi);
 const sun = new THREE.DirectionalLight(THEME.sun.color, 2.4);
 sun.position.set(...SUN_DIR).multiplyScalar(200);
 scene.add(sun, sun.target);
@@ -231,9 +234,11 @@ sun.castShadow = true;
 sun.shadow.mapSize.setScalar(1024); // set by the picture quality (applyQuality)
 sun.shadow.bias = -0.0004;
 sun.shadow.normalBias = 0.6;
-const SUN_V = new THREE.Vector3(...SUN_DIR).normalize();
+const SUN_V = new THREE.Vector3(...SUN_DIR).normalize(); // towards the sun (the light moves it)
 const sunRot = new THREE.Matrix4().lookAt(SUN_V, new THREE.Vector3(), new THREE.Vector3(0, 1, 0));
 const sunRotInv = sunRot.clone().invert();
+const ORIGIN = new THREE.Vector3();
+const UP = new THREE.Vector3(0, 1, 0);
 const _sunC = new THREE.Vector3();
 const _fwd = new THREE.Vector3();
 function updateSun() {
@@ -306,6 +311,16 @@ let gfxTier = tierFor(gfxSetting, DEVICE);
 const governor = createGovernor();
 let lastFrameAt = 0;
 let gfxShow = null; // the ••• menu's label, once the UI is there
+// the light (render/light.js, set further down; declared here, the picture quality reads it)
+let lightNow = null; // what's shown (a lightPreset, or between two)
+let lightFrom = null;
+let lightTo = null;
+let lightT = 1;
+let lightShow = null; // the ••• menu's label, once the UI is there
+// the haze (updateHaze): how far it starts, times the light's own
+let hazeMul = 1;
+let hazeSet = '';
+let hazeFog = null;
 function applyQuality() {
   const t = TIERS[gfxTier];
   renderer.setPixelRatio(pixelRatio(gfxTier, DEVICE.dpr, gfxSetting === 'auto' ? governor.scale : 1));
@@ -317,7 +332,9 @@ function applyQuality() {
     sun.shadow.map = null;
   }
   post.set(t);
-  snowfall.setCount(t.snow);
+  // room for the most flakes a light can ask for (overcast); the light says how many show
+  snowfall.setCount(t.snow * 3);
+  snowfall.show(Math.round(t.snow * (lightNow?.snow1 ?? 1)));
   gfxShow?.(gfxSetting, gfxTier);
 }
 applyQuality();
@@ -515,6 +532,11 @@ const ui = createUI({
     scheduleSave({ prefs: true });
   },
   onGfx: () => cycleGfx(),
+  // golden hour -> morning -> overcast; the light goes with the slope
+  onLight: () => {
+    setLight(LIGHTS[(LIGHTS.indexOf(state.light) + 1) % LIGHTS.length]);
+    scheduleSave();
+  },
   onMute: (m) => {
     state.muted = m;
     sound.setMuted(m);
@@ -542,6 +564,8 @@ const ui = createUI({
 });
 gfxShow = (setting, tier) => ui.setGfx(setting, tier);
 gfxShow(gfxSetting, gfxTier);
+lightShow = (name) => ui.setLight(name);
+lightShow(state.light);
 window.__highriseToast = (msg, kind) => ui.toast(msg, kind);
 booted = true;
 
@@ -1534,6 +1558,7 @@ function savePayload() {
     project: state.project,
     dirty,
     rideCam: state.rideCam,
+    light: state.light,
     relief: state.relief,
     contours: state.contours,
     muted: state.muted,
@@ -1610,6 +1635,8 @@ function openProject(id) {
   } catch {
     return ui.toast(tx('toast.unreadable'), 'bad');
   }
+  // the project's light, crossfading
+  setLight(state.light);
   state.project = { id: rec.id, name: rec.name };
   history.clear();
   selection.clear();
@@ -1683,6 +1710,8 @@ function loadSave() {
 // Put a save (or a project) in place: the slope, its tiles, the start, the records. Throws
 // on one that can't be read.
 function readSave(data) {
+  // the light goes with the slope (older saves: golden hour)
+  state.light = LIGHTS.includes(data.light) ? data.light : 'golden';
   {
     // v10 saves the slope you designed; before, a wild mountain (size, steepness, seed): it
     // becomes sections of about the same length, width and steepness
@@ -2334,6 +2363,60 @@ function progressOf(sk) {
   return (sk.pos[2] - z0) / Math.max(1, hf.finishZ - z0);
 }
 
+// ---------- the light (render/light.js) ----------
+// golden hour, morning or overcast: it goes with the slope (and its projects). Switching
+// crossfades every colour, the sun, the sky, the clouds and the grade over a second.
+function showLight(p) {
+  lightNow = p;
+  setLightUniforms(p);
+  SUN_V.copy(p.sunDir);
+  sunRot.lookAt(SUN_V, ORIGIN, UP);
+  sunRotInv.copy(sunRot).invert();
+  sun.color.copy(p.sunColor);
+  sun.intensity = p.sunIntensity;
+  hemi.color.copy(p.skyTop);
+  hemi.groundColor.copy(p.skyHorizon);
+  hemi.intensity = p.hemi;
+  const su = sky.uniforms;
+  su.uTopS.value.copy(p.skyTop).convertLinearToSRGB();
+  su.uHorizonS.value.copy(p.skyHorizon).convertLinearToSRGB();
+  su.uSunCol.value.copy(p.sunColor);
+  su.uCloudLit.value.copy(p.cloudLit);
+  su.uCloudDark.value.copy(p.cloudDark);
+  su.uSunPower.value = p.sunPower;
+  ATMO.uCloudCover.value = p.cloudCover;
+  ATMO.uCloudShade.value = p.cloudShade;
+  if (scene.fog) scene.fog.color.copy(p.haze);
+  post.setGrade(p.grade);
+  tracks.sunX = p.sunDir.x;
+  snowfall.show(Math.round(TIERS[gfxTier].snow * p.snow1));
+  snowfall.uniforms.uSize.value = p.flake;
+  hazeMul = p.hazeNear;
+  hazeSet = '';
+}
+// to this light: at once (loading) or crossfading
+function setLight(name, { now = false } = {}) {
+  state.light = LIGHTS.includes(name) ? name : 'golden';
+  lightTo = lightPreset(state.light);
+  // the page behind the canvas (before the first frame) in the same sky
+  document.documentElement.style.setProperty('--sky-top', `#${lightTo.skyTop.getHexString()}`);
+  document.documentElement.style.setProperty('--sky-low', `#${lightTo.skyHorizon.getHexString()}`);
+  if (now || !lightNow) {
+    lightT = 1;
+    showLight(lightTo);
+  } else {
+    lightFrom = lightNow;
+    lightT = 0;
+  }
+  lightShow?.(state.light);
+}
+function stepLight(dt) {
+  if (lightT >= 1) return;
+  lightT = Math.min(1, lightT + dt / 1.1);
+  const e = lightT * lightT * (3 - 2 * lightT);
+  showLight(lightT >= 1 ? lightTo : mixLight(lightFrom, lightTo, e));
+}
+
 // ---------- atmosphere ----------
 // contact shadows (core/occlusion.js): recomputed when the snow or the trees change, at
 // most a few times a second (a big slope with thousands of trees takes ~15 ms)
@@ -2355,12 +2438,10 @@ function updateOcclusion() {
 }
 // the haze: riding, distant snow and trees fade a little from a few hundred metres; while
 // building it starts beyond what you're looking at, so the mountain itself stays clear
-let hazeSet = '';
-let hazeFog = null;
 function updateHaze() {
   const far = terrain.uniforms.uFogFar.value;
   const base = Math.max(1400, hf.sizeZ * 1.2);
-  const near = Math.round(Math.min(base, riding ? 420 : Math.max(420, camera.position.distanceTo(controls.target) * 1.15)) / 20) * 20;
+  const near = Math.round((Math.min(base, riding ? 420 : Math.max(420, camera.position.distanceTo(controls.target) * 1.15)) * hazeMul) / 20) * 20;
   const key = `${near}:${far}`;
   if (key === hazeSet && scene.fog === hazeFog) return;
   hazeFog = scene.fog;
@@ -2372,6 +2453,8 @@ function updateHaze() {
   decor.setFog(near, far);
   tracks.setFog(near, far);
 }
+
+setLight(state.light, { now: true });
 
 // ---------- loop ----------
 const clock = new THREE.Clock();
@@ -2411,6 +2494,7 @@ function frame() {
   if (goalTiles.length) terrain.uniforms.uTime.value = clock.elapsedTime;
 
   spray.update(dt);
+  stepLight(dt);
   tickAtmosphere(dt);
   snowfall.update(dt);
   updateOcclusion();

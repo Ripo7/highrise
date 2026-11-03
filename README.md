@@ -64,6 +64,7 @@ Auto starts on High on a computer, Medium on a recent phone and Low on a small o
 - **Haze**: riding, distant snow and trees fade a little from a few hundred metres; while building it starts beyond what you're looking at.
 - **Sun shadows** reach further while riding the better the quality (80 m round the rider on Low, 110 on Medium, 150 on High with a sharper map), sit mostly ahead of the rider where the camera looks, and fade out at their edge instead of stopping on a line.
 - **Snow in the air** drifts round the camera, catching the low sun.
+- **Light** in the ••• menu: **Golden hour** (the game's look), **Morning** (a crisp blue sky, cleaner whites, the sun higher and from the other side) or **Overcast** (a grey sky full of cloud, flat light, faint shadows, snow falling). It goes with the slope, in its save and its projects, and switching crossfades everything over a second. A preset doesn't repaint the art: it shifts the theme's colours the way that light would (`src/render/light.js`); every material shades with the same shared colours, so they all follow.
 
 ### English and French
 
@@ -189,7 +190,7 @@ Hand it to a few people. Do they say "one more tweak" and keep going? If not, fi
 ```bash
 npm install
 npm run dev      # local dev server
-npm test         # picture quality (Auto's tiers and frame governor), contact shadows, physics, scoring, slope design, the hexagon grid, tile actions and jumps, gates and courses, pieces, joints, projects, the translation, the tutorial levels (Node, no browser needed)
+npm test         # picture quality (Auto's tiers and frame governor), contact shadows, the light presets, physics, scoring, slope design, the hexagon grid, tile actions and jumps, gates and courses, pieces, joints, projects, the translation, the tutorial levels (Node, no browser needed)
 npm run build    # production build into dist/
 npm run smoke    # browser smoke test on the build: design a slope, move the start, select tiles, raise, undo, a jump, rotate, copy and paste, edit the slope keeping the tiles, ride, pause and act, ride on, start again, switch to French, play a tutorial level and leave it, set a course of gates, race it, miss a gate, the picture quality setting, the slope editor in 3D (side view, drag a dot, undo), the view buttons (select, rotate, move, top, slope), double click a piece, save as a project, open it again, reload (needs Chromium: npx playwright install chromium)
 ```

@@ -57,6 +57,7 @@ import { LIGHTS, lightPreset, mixLight, setLightUniforms } from './render/light.
 // ---------- state ----------
 const COARSE = window.matchMedia('(pointer: coarse)').matches;
 let altHeld = false; // Alt/Option held: left button orbits
+// Storage keys keep the game's first name (Highrise), so slopes saved before the rename still load
 const SAVE_KEY = 'highrise.ski.v3'; // v12: the slope you designed, the tiles and their actions (gates too), the start gate, the records, the project it's saved as
 const SAVE_VERSIONS = [7, 8, 9, 10, 11, 12]; // the saves that can still be read
 const INTRO_KEY = 'highrise.intro.v8'; // v8: gates
@@ -173,8 +174,8 @@ try {
 }
 // the GPU can drop the context (driver reset, phone under memory pressure); three.js
 // restores it by itself, the player just needs to know why the screen flickered
-canvas.addEventListener('webglcontextlost', () => window.__highriseToast?.(tx('toast.gfxLost'), 'bad'));
-canvas.addEventListener('webglcontextrestored', () => window.__highriseToast?.(tx('toast.gfxBack')));
+canvas.addEventListener('webglcontextlost', () => window.__peakmakerToast?.(tx('toast.gfxLost'), 'bad'));
+canvas.addEventListener('webglcontextrestored', () => window.__peakmakerToast?.(tx('toast.gfxBack')));
 
 function showFatal(msg) {
   const el = document.createElement('div');
@@ -579,7 +580,7 @@ gfxShow = (setting, tier) => ui.setGfx(setting, tier);
 gfxShow(gfxSetting, gfxTier);
 lightShow = (name) => ui.setLight(name);
 lightShow(state.light);
-window.__highriseToast = (msg, kind) => ui.toast(msg, kind);
+window.__peakmakerToast = (msg, kind) => ui.toast(msg, kind);
 booted = true;
 
 const bar = createBuildBar({
@@ -2829,7 +2830,7 @@ refreshScene();
 refreshHistoryButtons();
 
 // read-only handle for debugging in the browser console (and the smoke test)
-window.__highrise = {
+window.__peakmaker = {
   renderer,
   // the picture quality: the setting, the tier it runs at, Auto's resolution scale
   get gfx() {

@@ -1,4 +1,4 @@
-"""Highrise art direction test: one diorama slope rendered in three styles.
+"""Peakmaker art direction test: one diorama slope rendered in three styles.
 
 Run headless:  python3 art/style_explore.py <style> <out.png> [width height]
    or inside Blender:  blender -b -P art/style_explore.py -- <style> <out.png>

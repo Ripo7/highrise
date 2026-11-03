@@ -32,7 +32,7 @@ try {
   await page.route(/^https?:\/\/(?!localhost)/, (r) => r.abort());
 
   await page.goto(url, { waitUntil: 'load' });
-  await page.waitForFunction(() => window.__highrise?.hf);
+  await page.waitForFunction(() => window.__peakmaker?.hf);
 
   // welcome card, then design the slope, in the 3D view: the Park template, wide, its first
   // section two degrees steeper, and one more section at the bottom
@@ -48,27 +48,27 @@ try {
   await page.click('#sb-section [data-act="add"]');
   assert.equal((await page.textContent('#sb-section .sb-num')).trim(), 'Section 4/4', 'four sections');
   // the snow follows the design as it changes
-  await page.waitForFunction(() => window.__highrise.hf.sizeX === 720 && window.__highrise.state.design.sections.length === 4);
+  await page.waitForFunction(() => window.__peakmaker.hf.sizeX === 720 && window.__peakmaker.state.design.sections.length === 4);
   await page.screenshot({ path: `${OUT}/0-slope.png` });
   await page.click('#sb-go');
   await page.waitForSelector('#slopebar', { state: 'hidden' });
-  const design = await page.evaluate(() => window.__highrise.state.design);
+  const design = await page.evaluate(() => window.__peakmaker.state.design);
   assert.equal(design.width, 'wide');
   assert.deepEqual(design.sections.map((x) => x.slope), [12, 16, 10, 10]);
-  assert.equal(await page.evaluate(() => window.__highrise.hf.sizeX), 720, '720 m wide');
+  assert.equal(await page.evaluate(() => window.__peakmaker.hf.sizeX), 720, '720 m wide');
   const pitch = await page.evaluate(() => {
-    const h = window.__highrise.hf;
+    const h = window.__peakmaker.hf;
     const z = h.startZ + 60 + 180;
     return (Math.atan2(h.heightAt(0, z - 5) - h.heightAt(0, z + 5), 10) * 180) / Math.PI;
   });
   assert.ok(Math.abs(pitch - 16) < 0.6, `the second section is 16° (${pitch.toFixed(1)}°)`);
-  assert.equal(await page.evaluate(() => window.__highrise.state.tiles.length), 0, 'a bare slope, nothing built yet');
-  await page.waitForFunction(() => window.__highrise.cameraSettled, null, { timeout: 120000 });
+  assert.equal(await page.evaluate(() => window.__peakmaker.state.tiles.length), 0, 'a bare slope, nothing built yet');
+  await page.waitForFunction(() => window.__peakmaker.cameraSettled, null, { timeout: 120000 });
 
   // look down on the top of the mountain (a slow software renderer makes free flying
   // unreliable to aim)
   await page.evaluate(() => {
-    const h = window.__highrise;
+    const h = window.__peakmaker;
     const z = h.hf.startZ + 150;
     const y = h.hf.heightAt(0, z);
     h.controls.target.set(0, y, z);
@@ -78,7 +78,7 @@ try {
   const at = (x, u) =>
     page.evaluate(
       ([x, u]) => {
-        const h = window.__highrise;
+        const h = window.__peakmaker;
         h.camera.updateMatrixWorld();
         const z = h.hf.startZ + u;
         const v = h.camera.position.clone().set(x, h.hf.heightAt(x, z), z).project(h.camera);
@@ -100,7 +100,7 @@ try {
   const doubleClickTile = (i, j) =>
     page.evaluate(
       ([i, j]) => {
-        const h = window.__highrise;
+        const h = window.__peakmaker;
         const c = h.tileCenter(i, j);
         const p = h.screenOf(c.x, c.z);
         const el = document.getElementById('scene');
@@ -119,26 +119,26 @@ try {
     const [px, py] = await at(40, 160);
     await page.mouse.click(px, py);
   }
-  const start = await get(() => ({ x: window.__highrise.state.start.x, u: window.__highrise.state.start.z - window.__highrise.hf.startZ }));
+  const start = await get(() => ({ x: window.__peakmaker.state.start.x, u: window.__peakmaker.state.start.z - window.__peakmaker.hf.startZ }));
   assert.ok(Math.abs(start.x - 40) < 4 && Math.abs(start.u - 160) < 4, `the gate moved (${start.x.toFixed(1)}, ${start.u.toFixed(1)})`);
 
   // Start again: back to selecting (there's no Look or Select button: you always select)
   await page.click('#buildbar [data-tool="start"]');
-  assert.equal(await get(() => window.__highrise.state.tool), 'select', 'back to selecting');
+  assert.equal(await get(() => window.__peakmaker.state.tool), 'select', 'back to selecting');
   // select a row of tiles across the slope (a drag), then raise them twice
   await drag([-50, 110], [30, 110]);
-  const picked = await get(() => window.__highrise.selection.length);
+  const picked = await get(() => window.__peakmaker.selection.length);
   assert.ok(picked >= 14, `selected tiles (${picked})`);
   assert.ok(await page.isVisible('#buildbar .bb-chip'), 'the selection chip shows');
-  await page.evaluate(() => (window.__before = window.__highrise.hf.h.slice()));
+  await page.evaluate(() => (window.__before = window.__peakmaker.hf.h.slice()));
   await page.click('#buildbar [data-tab="shape"]');
   await page.click('#buildbar [data-action="raise"]');
   await page.click('#buildbar [data-action="raise"]');
-  const lifts = await get(() => [...new Set(window.__highrise.state.tiles.map((t) => t.lift))]);
+  const lifts = await get(() => [...new Set(window.__peakmaker.state.tiles.map((t) => t.lift))]);
   assert.deepEqual(lifts, [3], 'two taps: 3 m');
   assert.equal(await page.textContent('#buildbar [data-action="raise"] .bb-badge'), '+3', 'the button shows it');
   const rise = await get(() => {
-    const h = window.__highrise.hf.h;
+    const h = window.__peakmaker.hf.h;
     let m = 0;
     for (let i = 0; i < h.length; i++) m = Math.max(m, h[i] - window.__before[i]);
     return m;
@@ -147,24 +147,24 @@ try {
 
   // undo takes one tap back, redo brings it again
   await page.keyboard.press('Control+z');
-  assert.deepEqual(await get(() => [...new Set(window.__highrise.state.tiles.map((t) => t.lift))]), [1.5], 'undo');
+  assert.deepEqual(await get(() => [...new Set(window.__peakmaker.state.tiles.map((t) => t.lift))]), [1.5], 'undo');
   await page.keyboard.press('Control+Shift+z');
-  assert.deepEqual(await get(() => [...new Set(window.__highrise.state.tiles.map((t) => t.lift))]), [3], 'redo');
+  assert.deepEqual(await get(() => [...new Set(window.__peakmaker.state.tiles.map((t) => t.lift))]), [3], 'redo');
 
   // a jump on the same tiles, facing down the fall line, then turned
   await page.click('#buildbar [data-tab="features"]');
   await page.click('#buildbar [data-action="jump"]');
-  const dir0 = await get(() => window.__highrise.state.tiles.find((t) => t.feat === 'jump')?.dir);
+  const dir0 = await get(() => window.__peakmaker.state.tiles.find((t) => t.feat === 'jump')?.dir);
   assert.ok(Number.isFinite(dir0), 'a jump');
   await page.click('#buildbar [data-tab="tools"]');
   await page.click('#buildbar [data-action="rotate"]');
-  assert.equal(await get(() => window.__highrise.state.tiles.find((t) => t.feat === 'jump').dir), (dir0 + 330) % 360, 'turned');
+  assert.equal(await get(() => window.__peakmaker.state.tiles.find((t) => t.feat === 'jump').dir), (dir0 + 330) % 360, 'turned');
   await page.screenshot({ path: `${OUT}/1-tiles.png` });
   // copy them and paste them further down, well to the side of the run from the gate (the
   // copy spans 80 m to the right of where it's put): the pasted tiles become the selection
   await page.click('#buildbar [data-action="copy"]');
   await page.click('#buildbar [data-action="paste"]');
-  assert.equal(await get(() => window.__highrise.state.tool), 'paste', 'pasting');
+  assert.equal(await get(() => window.__peakmaker.state.tool), 'paste', 'pasting');
   {
     const [px, py] = await at(-135, 250);
     const box = await page.locator('#scene').boundingBox();
@@ -172,19 +172,19 @@ try {
     assert.ok(await page.evaluate(([x, y]) => document.elementFromPoint(x, y)?.id === 'scene', [px, py]), 'nothing over the paste spot');
     await page.mouse.click(px, py);
   }
-  const tileCount = await get(() => window.__highrise.state.tiles.length);
+  const tileCount = await get(() => window.__peakmaker.state.tiles.length);
   assert.equal(tileCount, picked * 2, `pasted (${tileCount} tiles)`);
-  assert.equal(await get(() => window.__highrise.state.tiles.filter((t) => t.feat === 'jump').map((t) => t.g).filter((g, k, a) => a.indexOf(g) === k).length), 2, 'two jumps, each its own');
-  assert.equal(await get(() => window.__highrise.state.tool), 'select', 'back to selecting');
+  assert.equal(await get(() => window.__peakmaker.state.tiles.filter((t) => t.feat === 'jump').map((t) => t.g).filter((g, k, a) => a.indexOf(g) === k).length), 2, 'two jumps, each its own');
+  assert.equal(await get(() => window.__peakmaker.state.tool), 'select', 'back to selecting');
   // Esc deselects
   await page.keyboard.press('Escape');
-  assert.equal(await get(() => window.__highrise.selection.length), 0, 'deselected');
+  assert.equal(await get(() => window.__peakmaker.selection.length), 0, 'deselected');
   assert.ok(await page.isHidden('#buildbar .bb-chip'), 'the chip is gone');
 
   // a double click on what was built selects all of that piece again (the pasted jump)
-  const jumpTile = await get(() => window.__highrise.state.tiles.find((x) => x.feat === 'jump'));
+  const jumpTile = await get(() => window.__peakmaker.state.tiles.find((x) => x.feat === 'jump'));
   await doubleClickTile(jumpTile.i, jumpTile.j);
-  const piece = { n: await get(() => window.__highrise.selection.length) };
+  const piece = { n: await get(() => window.__peakmaker.selection.length) };
   assert.equal(piece.n, picked, `a double click selects the whole jump (${piece.n} tiles)`);
   assert.match(await page.textContent('#toast'), /^Selected: the jump/);
   await page.keyboard.press('Escape');
@@ -193,7 +193,7 @@ try {
   // selects nothing), Rotate off; a drag on Move slides it; Top looks down from above
   const camDir = () =>
     get(() => {
-      const h = window.__highrise;
+      const h = window.__peakmaker;
       const d = h.camera.position.clone().sub(h.controls.target);
       return Math.atan2(d.x, d.z);
     });
@@ -204,7 +204,7 @@ try {
   assert.deepEqual([await pressed('rotate'), await pressed('select')], ['true', 'false']);
   await drag([0, 140], [60, 140]);
   assert.ok(Math.abs((await camDir()) - az0) > 0.05, 'the drag turned the view');
-  assert.equal(await get(() => window.__highrise.selection.length), 0, 'and selected nothing');
+  assert.equal(await get(() => window.__peakmaker.selection.length), 0, 'and selected nothing');
   await page.click('#viewbtns [data-view="rotate"]');
   assert.deepEqual([await pressed('rotate'), await pressed('select')], ['false', 'true'], 'tapped again: back to Select');
   // Select, from Move: drags select tiles again
@@ -212,22 +212,22 @@ try {
   assert.equal(await pressed('pan'), 'true');
   await page.click('#viewbtns [data-view="select"]');
   assert.deepEqual([await pressed('pan'), await pressed('select')], ['false', 'true'], 'Select');
-  assert.equal(await get(() => window.__highrise.state.tool), 'select');
+  assert.equal(await get(() => window.__peakmaker.state.tool), 'select');
   {
-    const t0 = await get(() => window.__highrise.controls.target.clone());
+    const t0 = await get(() => window.__peakmaker.controls.target.clone());
     const b = await page.locator('#viewbtns [data-view="pan"]').boundingBox();
     await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2);
     await page.mouse.down();
     await page.mouse.move(b.x + b.width / 2 - 60, b.y + b.height / 2 + 30, { steps: 5 });
     await page.mouse.up();
-    const t1 = await get(() => window.__highrise.controls.target.clone());
+    const t1 = await get(() => window.__peakmaker.controls.target.clone());
     assert.ok(Math.hypot(t1.x - t0.x, t1.z - t0.z) > 5, 'dragging Move slid the view');
     assert.equal(await page.getAttribute('#viewbtns [data-view="pan"]', 'aria-pressed'), 'false', 'a drag on it leaves it off');
   }
   await page.click('#viewbtns [data-view="top"]');
-  await page.waitForFunction(() => !window.__highrise.viewMoving);
+  await page.waitForFunction(() => !window.__peakmaker.viewMoving);
   const down = await get(() => {
-    const h = window.__highrise;
+    const h = window.__peakmaker;
     return h.camera.position.clone().sub(h.controls.target).normalize().y;
   });
   assert.ok(down > 0.99, `from above (${down.toFixed(3)})`);
@@ -242,38 +242,38 @@ try {
   assert.equal(await page.isVisible('#viewbtns [data-view="select"]'), false, 'no tiles to select in the editor');
   assert.ok(await page.isVisible('#sb-keep-row'), 'it offers to keep the tiles');
   await page.click('#viewbtns [data-view="side"]');
-  await page.waitForFunction(() => !window.__highrise.viewMoving);
+  await page.waitForFunction(() => !window.__peakmaker.viewMoving);
   const side = await get(() => {
-    const h = window.__highrise;
+    const h = window.__peakmaker;
     return h.camera.position.clone().sub(h.controls.target).normalize().x;
   });
   assert.ok(side < -0.9, `seen from the side (${side.toFixed(2)})`);
-  const knob = await get(() => window.__highrise.slopeHandle(1));
+  const knob = await get(() => window.__peakmaker.slopeHandle(1));
   await page.mouse.move(knob.x, knob.y);
   await page.mouse.down();
   await page.mouse.move(knob.x + 40, knob.y - 30, { steps: 6 });
   await page.mouse.up();
-  const dragged = await get(() => window.__highrise.slopeDesign.sections[1]);
+  const dragged = await get(() => window.__peakmaker.slopeDesign.sections[1]);
   assert.ok(dragged.length !== 360 || dragged.slope !== 16, `the dot moved section 2 (${dragged.slope}°, ${dragged.length} m)`);
   await page.screenshot({ path: `${OUT}/3-slope-edit.png` });
   await page.keyboard.press('Control+z');
-  assert.deepEqual(await get(() => window.__highrise.slopeDesign.sections[1]), { slope: 16, length: 360 }, 'undone');
+  assert.deepEqual(await get(() => window.__peakmaker.slopeDesign.sections[1]), { slope: 16, length: 360 }, 'undone');
   await page.click('#sb-section [data-act="prev"]');
   assert.equal((await page.textContent('#sb-section .sb-num')).trim(), 'Section 1/4');
   await page.click('#sb-section [data-key="slope"] [data-step="1"]');
   await page.click('#viewbtns [data-view="slope"]');
   await page.waitForSelector('#slopebar', { state: 'hidden' });
   assert.equal(await pressed('slope'), 'false');
-  assert.equal(await get(() => window.__highrise.state.design.sections[0].slope), 13, 'the new slope');
-  assert.equal(await get(() => window.__highrise.state.tiles.length), tileCount, 'the tiles are kept');
+  assert.equal(await get(() => window.__peakmaker.state.design.sections[0].slope), 13, 'the new slope');
+  assert.equal(await get(() => window.__peakmaker.state.tiles.length), tileCount, 'the tiles are kept');
 
   // ride from the gate (a few real frames, then a couple of seconds in one go: the software
   // renderer is far too slow to ride in real time)
   await page.click('#send');
-  await page.waitForFunction(() => window.__highrise.skier?.time > 0.1, null, { timeout: 240000 });
-  await page.evaluate(() => window.__highrise.advance(2.5, {}));
+  await page.waitForFunction(() => window.__peakmaker.skier?.time > 0.1, null, { timeout: 240000 });
+  await page.evaluate(() => window.__peakmaker.advance(2.5, {}));
   const ride = await get(() => {
-    const h = window.__highrise;
+    const h = window.__peakmaker;
     const s = h.skier;
     return { status: s.status, speed: s.speed, time: s.time, pos: [...s.pos], tracks: h.tracks.count };
   });
@@ -285,9 +285,9 @@ try {
 
   // Build pauses the run: the skier waits where he is
   await page.click('#ride-exit');
-  await page.waitForFunction(() => !window.__highrise.riding, null, { timeout: 60000 });
+  await page.waitForFunction(() => !window.__peakmaker.riding, null, { timeout: 60000 });
   const paused = await get(() => ({
-    paused: window.__highrise.paused,
+    paused: window.__peakmaker.paused,
     label: document.getElementById('send-label').textContent,
     restart: !document.getElementById('restart').hidden,
     status: document.getElementById('status').textContent,
@@ -295,19 +295,19 @@ try {
   assert.deepEqual(paused, { paused: true, label: 'Ride on', restart: true, status: 'Paused' }, 'paused');
   // where he waits (the run went on for a few frames since the last look: compare with this)
   const waiting = await get(() => {
-    const s = window.__highrise.skier;
+    const s = window.__peakmaker.skier;
     return { time: s.time, speed: s.speed, pos: [...s.pos] };
   });
   // build something just ahead of him while he waits: select 7 tiles there, lower them
   await page.evaluate(() => {
-    const h = window.__highrise;
+    const h = window.__peakmaker;
     const s = h.skier;
     const v = Math.hypot(s.vel[0], s.vel[2]) || 1;
     h.selectAt(s.pos[0] + (s.vel[0] / v) * 30, s.pos[2] + (s.vel[2] / v) * 30, 2);
   });
   const liftOf = () =>
     get(() => {
-      const h = window.__highrise;
+      const h = window.__peakmaker;
       const by = new Map(h.state.tiles.map((t) => [`${t.i},${t.j}`, t.lift]));
       return h.selection.map(([i, j]) => by.get(`${i},${j}`) || 0);
     });
@@ -317,14 +317,14 @@ try {
   await page.click('#buildbar [data-action="lower"]');
   const liftAfter = await liftOf();
   assert.ok(liftAfter.every((v, k) => Math.abs(v - (liftBefore[k] - 1.5)) < 1e-6), 'all seven lowered 1.5 m');
-  await page.waitForFunction(() => window.__highrise.cameraSettled, null, { timeout: 120000 });
+  await page.waitForFunction(() => window.__peakmaker.cameraSettled, null, { timeout: 120000 });
   await page.screenshot({ path: `${OUT}/3-paused.png` });
 
   // Ride on: the same run, from where he was, as fast as he was going
   await page.click('#send');
-  await page.waitForFunction(() => window.__highrise.riding, null, { timeout: 60000 });
+  await page.waitForFunction(() => window.__peakmaker.riding, null, { timeout: 60000 });
   const resumed = await get(() => {
-    const s = window.__highrise.skier;
+    const s = window.__peakmaker.skier;
     return { status: s.status, time: s.time, speed: s.speed, pos: [...s.pos] };
   });
   assert.equal(resumed.status, 'running');
@@ -334,16 +334,16 @@ try {
   const since = resumed.time - waiting.time;
   assert.ok(moved < waiting.speed * since * 1.5 + 2, `from where he waited (${moved.toFixed(1)} m in ${since.toFixed(2)} s)`);
   assert.ok(since > 0.5 || Math.abs(resumed.speed - waiting.speed) < Math.max(1.5, waiting.speed * 0.3), `at the same speed (${resumed.speed.toFixed(1)} vs ${waiting.speed.toFixed(1)} m/s)`);
-  await page.evaluate(() => window.__highrise.advance(1, {}));
-  assert.equal(await get(() => window.__highrise.skier.status), 'running');
+  await page.evaluate(() => window.__peakmaker.advance(1, {}));
+  assert.equal(await get(() => window.__peakmaker.skier.status), 'running');
 
   // From the start: a new run at the gate
   await page.click('#ride-exit');
-  await page.waitForFunction(() => !window.__highrise.riding, null, { timeout: 60000 });
+  await page.waitForFunction(() => !window.__peakmaker.riding, null, { timeout: 60000 });
   await page.click('#restart');
-  await page.waitForFunction(() => window.__highrise.riding, null, { timeout: 60000 });
+  await page.waitForFunction(() => window.__peakmaker.riding, null, { timeout: 60000 });
   const again = await get(() => {
-    const h = window.__highrise;
+    const h = window.__peakmaker;
     const s = h.skier;
     return { time: s.time, d: Math.hypot(s.pos[0] - h.state.start.x, s.pos[2] - h.state.start.z), paused: h.paused };
   });
@@ -351,8 +351,8 @@ try {
 
   // French: the menu switches the language, and the page follows
   await page.click('#ride-exit');
-  await page.waitForFunction(() => !window.__highrise.riding, null, { timeout: 60000 });
-  const mine = await page.evaluate(() => JSON.stringify({ d: window.__highrise.state.design, n: window.__highrise.state.tiles.length }));
+  await page.waitForFunction(() => !window.__peakmaker.riding, null, { timeout: 60000 });
+  const mine = await page.evaluate(() => JSON.stringify({ d: window.__peakmaker.state.design, n: window.__peakmaker.state.tiles.length }));
   await page.click('#more');
   await page.click('#lang-btn');
   assert.equal(await page.evaluate(() => document.documentElement.lang), 'fr');
@@ -365,28 +365,28 @@ try {
   // L brush; next level; leave, and your own slope is back as it was
   await page.click('#more');
   await page.click('#tutorial-btn');
-  await page.waitForFunction(() => window.__highrise.tutorial.active && window.__highrise.tutorial.level === 'select');
+  await page.waitForFunction(() => window.__peakmaker.tutorial.active && window.__peakmaker.tutorial.level === 'select');
   assert.ok(await page.isVisible('#tut'), 'the tutorial card');
   assert.equal((await page.textContent('#tut .tut-title')).trim(), 'Choisir');
   await page.screenshot({ path: `${OUT}/8-tutorial.png` });
-  await page.evaluate(() => window.__highrise.selectAt(0, window.__highrise.hf.startZ + 70, 2));
-  await page.waitForFunction(() => window.__highrise.tutorial.step === 'clear');
+  await page.evaluate(() => window.__peakmaker.selectAt(0, window.__peakmaker.hf.startZ + 70, 2));
+  await page.waitForFunction(() => window.__peakmaker.tutorial.step === 'clear');
   await page.click('#buildbar .bb-chip');
-  await page.waitForFunction(() => window.__highrise.tutorial.step === 'big');
+  await page.waitForFunction(() => window.__peakmaker.tutorial.step === 'big');
   await page.click('#buildbar [data-size="3"]');
-  await page.evaluate(() => window.__highrise.selectAt(-30, window.__highrise.hf.startZ + 110));
-  await page.waitForFunction(() => window.__highrise.tutorial.step === 'piece');
-  await page.waitForFunction(() => !window.__highrise.viewMoving);
+  await page.evaluate(() => window.__peakmaker.selectAt(-30, window.__peakmaker.hf.startZ + 110));
+  await page.waitForFunction(() => window.__peakmaker.tutorial.step === 'piece');
+  await page.waitForFunction(() => !window.__peakmaker.viewMoving);
   {
-    const [i, j] = await get(() => window.__highrise.tutorial.goals[3]);
+    const [i, j] = await get(() => window.__peakmaker.tutorial.goals[3]);
     await doubleClickTile(i, j);
   }
-  await page.waitForFunction(() => window.__highrise.tutorial.complete);
+  await page.waitForFunction(() => window.__peakmaker.tutorial.complete);
   await page.click('#tut [data-tut="next"]');
-  await page.waitForFunction(() => window.__highrise.tutorial.level === 'raise');
+  await page.waitForFunction(() => window.__peakmaker.tutorial.level === 'raise');
   await page.click('#tut [data-tut="exit"]');
-  await page.waitForFunction(() => !window.__highrise.tutorial.active);
-  const back = await page.evaluate(() => JSON.stringify({ d: window.__highrise.state.design, n: window.__highrise.state.tiles.length }));
+  await page.waitForFunction(() => !window.__peakmaker.tutorial.active);
+  const back = await page.evaluate(() => JSON.stringify({ d: window.__peakmaker.state.design, n: window.__peakmaker.state.tiles.length }));
   assert.equal(back, mine, 'your own slope and tiles are back');
   const saved = await page.evaluate(() => JSON.parse(localStorage.getItem('highrise.ski.v3')).design);
   assert.equal(JSON.stringify(saved), JSON.stringify(JSON.parse(mine).d), 'the tutorial never saved over it');
@@ -396,7 +396,7 @@ try {
 
   // picture quality (••• menu): Auto picked High here (a desktop), with the post-processing;
   // a tap moves on to Low (straight to the screen), Medium, High, and back to Auto; each draws
-  const gfx = () => page.evaluate(() => window.__highrise.gfx);
+  const gfx = () => page.evaluate(() => window.__peakmaker.gfx);
   const g0 = await gfx();
   assert.deepEqual([g0.setting, g0.tier, g0.post], ['auto', 'high', true], 'Auto: High here');
   await page.click('#more');
@@ -414,7 +414,7 @@ try {
   for (const [label, name] of [['Morning', 'morning'], ['Overcast', 'overcast'], ['Golden hour', 'golden']]) {
     await page.click('#light-btn');
     assert.equal((await page.textContent('#light-btn')).trim(), `Light: ${label}`);
-    assert.equal(await page.evaluate(() => window.__highrise.state.light), name);
+    assert.equal(await page.evaluate(() => window.__peakmaker.state.light), name);
     await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
   }
   await page.click('#more');
@@ -422,7 +422,7 @@ try {
   // a course: two gates in the skier's line (Features ▸ Gate), the second two tiles wide;
   // a run through both counts and sets the best time
   await page.evaluate(() => {
-    const h = window.__highrise;
+    const h = window.__peakmaker;
     h.applyWorld({ design: { width: 'narrow', sections: [{ slope: 14, length: 260 }] }, tiles: [], start: { x: 0, u: 14 } });
     h.selectAt(0, h.hf.startZ + 80, 1);
     h.act('gate');
@@ -432,30 +432,30 @@ try {
     h.act('gate');
     h.clearSelection();
   });
-  assert.equal(await get(() => window.__highrise.gates.length), 2, 'two gates');
+  assert.equal(await get(() => window.__peakmaker.gates.length), 2, 'two gates');
   assert.ok(await page.isVisible('#stat-gates'), 'the gate count in the scoreboard');
   assert.equal((await page.textContent('#s-gates')).trim(), '0/2');
   await page.screenshot({ path: `${OUT}/9-gates.png` });
   const raceIt = async () => {
     await page.click('#send');
-    await page.waitForFunction(() => window.__highrise.riding, null, { timeout: 60000 });
-    await page.evaluate(() => window.__highrise.advance(40, {}));
+    await page.waitForFunction(() => window.__peakmaker.riding, null, { timeout: 60000 });
+    await page.evaluate(() => window.__peakmaker.advance(40, {}));
     await page.waitForSelector('#results:not([hidden])');
   };
   await raceIt();
-  assert.equal(await get(() => window.__highrise.skier.status), 'finished');
+  assert.equal(await get(() => window.__peakmaker.skier.status), 'finished');
   assert.equal((await page.textContent('#res-gates')).trim(), '2/2', 'through both gates');
   assert.equal((await page.textContent('#res-eyebrow')).trim(), 'Run complete');
   assert.ok(await page.isVisible('#res-best-time'), 'a best time');
-  const bestTime = await get(() => window.__highrise.state.bestTime.time);
+  const bestTime = await get(() => window.__peakmaker.state.bestTime.time);
   assert.ok((await page.textContent('#s-best')).includes(' s'), 'the best time in the scoreboard');
   await page.screenshot({ path: `${OUT}/10-course.png` });
   // a third gate off the skier's line: a new course (its records start again), and a run
   // that misses it doesn't count
   await page.click('#res-sculpt');
-  await page.waitForFunction(() => !window.__highrise.riding, null, { timeout: 60000 });
+  await page.waitForFunction(() => !window.__peakmaker.riding, null, { timeout: 60000 });
   await page.evaluate(() => {
-    const h = window.__highrise;
+    const h = window.__peakmaker;
     h.selectAt(-70, h.hf.startZ + 120, 1);
     h.act('gate');
     h.clearSelection();
@@ -464,10 +464,10 @@ try {
   await raceIt();
   assert.match(await page.textContent('#res-gates'), /^2\/3 · missed gate 2/, 'gate 2 missed');
   assert.equal((await page.textContent('#res-eyebrow')).trim(), 'Missed a gate: the run doesn’t count');
-  assert.equal(await get(() => window.__highrise.state.bestTime), null, 'no record from it');
+  assert.equal(await get(() => window.__peakmaker.state.bestTime), null, 'no record from it');
   // Save as (••• menu): a project with a name, by the title
   await page.click('#res-sculpt');
-  await page.waitForFunction(() => !window.__highrise.riding, null, { timeout: 60000 });
+  await page.waitForFunction(() => !window.__peakmaker.riding, null, { timeout: 60000 });
   await page.click('#more');
   await page.click('#save-btn');
   await page.waitForSelector('#projects:not([hidden])');
@@ -475,28 +475,28 @@ try {
   await page.click('.pj-save-btn');
   await page.waitForSelector('#projects', { state: 'hidden' });
   assert.equal((await page.textContent('.brand-sub')).trim(), 'Smoke slope', 'the project’s name by the title');
-  const course = await get(() => JSON.stringify({ tiles: window.__highrise.state.tiles, gates: window.__highrise.gates.length }));
+  const course = await get(() => JSON.stringify({ tiles: window.__peakmaker.state.tiles, gates: window.__peakmaker.gates.length }));
   // change it, then open the project again (it asks first: the change isn't saved)
   await page.evaluate(() => {
-    const h = window.__highrise;
+    const h = window.__peakmaker;
     h.selectAt(60, h.hf.startZ + 200, 3);
     h.act('trees');
     h.clearSelection();
   });
-  assert.notEqual(await get(() => JSON.stringify({ tiles: window.__highrise.state.tiles, gates: window.__highrise.gates.length })), course);
+  assert.notEqual(await get(() => JSON.stringify({ tiles: window.__peakmaker.state.tiles, gates: window.__peakmaker.gates.length })), course);
   await page.click('#more');
   await page.click('#projects-btn');
   await page.waitForSelector('#projects:not([hidden])');
   await page.click('#pj-list [data-act="open"]');
   await page.click('#pj-list [data-act="yes"]');
   await page.waitForSelector('#projects', { state: 'hidden' });
-  assert.equal(await get(() => JSON.stringify({ tiles: window.__highrise.state.tiles, gates: window.__highrise.gates.length })), course, 'the project as it was saved');
+  assert.equal(await get(() => JSON.stringify({ tiles: window.__peakmaker.state.tiles, gates: window.__peakmaker.gates.length })), course, 'the project as it was saved');
   // reload: the tiles, the gates and the project are saved
   await page.waitForTimeout(800); // the autosave
   await page.reload({ waitUntil: 'load' });
-  await page.waitForFunction(() => window.__highrise?.hf);
-  assert.equal(await get(() => JSON.stringify({ tiles: window.__highrise.state.tiles, gates: window.__highrise.gates.length })), course, 'the same tiles and gates after a reload');
-  assert.equal(await get(() => window.__highrise.state.project?.name), 'Smoke slope', 'still that project');
+  await page.waitForFunction(() => window.__peakmaker?.hf);
+  assert.equal(await get(() => JSON.stringify({ tiles: window.__peakmaker.state.tiles, gates: window.__peakmaker.gates.length })), course, 'the same tiles and gates after a reload');
+  assert.equal(await get(() => window.__peakmaker.state.project?.name), 'Smoke slope', 'still that project');
 
   assert.deepEqual(errors, [], 'no page errors');
   console.log(

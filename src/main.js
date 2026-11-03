@@ -22,7 +22,7 @@ import { TABS, applyAction, describe, copyTiles, rotateCopy, pasteCells, pasteTi
 import { PropMeshes } from './render/propMeshes.js';
 import { Tracks } from './render/tracks.js';
 import { Decor } from './render/decor.js';
-import { TerrainMesh } from './render/terrainMesh.js';
+import { TerrainMesh, SNOW_FX } from './render/terrainMesh.js';
 import { SkierMesh, Trail } from './render/skierMesh.js';
 import { Spray } from './render/spray.js';
 import { GhostRider, packPath } from './render/ghost.js';
@@ -256,6 +256,7 @@ function updateSun() {
   const half = riding_ ? rideHalf : THREE.MathUtils.clamp(dist * 0.7, 40, 1400);
   // snap to whole shadow-map texels in the light's frame so shadows don't shimmer as we move
   const texel = (2 * half) / sun.shadow.mapSize.x;
+  if (terrain) terrain.uniforms.uShadowTexel.value = texel;
   _sunC.applyMatrix4(sunRotInv);
   _sunC.x = Math.round(_sunC.x / texel) * texel;
   _sunC.y = Math.round(_sunC.y / texel) * texel;
@@ -332,6 +333,7 @@ function applyQuality() {
     sun.shadow.map = null;
   }
   post.set(t);
+  SNOW_FX.uWideShadow.value = t.glow ? 1 : 0;
   // room for the most flakes a light can ask for (overcast); the light says how many show
   snowfall.setCount(t.snow * 3);
   snowfall.show(Math.round(t.snow * (lightNow?.snow1 ?? 1)));
@@ -2388,7 +2390,10 @@ function showLight(p) {
   ATMO.uCloudShade.value = p.cloudShade;
   if (scene.fog) scene.fog.color.copy(p.haze);
   post.setGrade(p.grade);
+  // the tracks' cuts are lit on the sun's side: redraw them if it moved to the other one
+  const flip = Math.sign(tracks.sunX) !== Math.sign(p.sunDir.x);
   tracks.sunX = p.sunDir.x;
+  if (flip) tracks.redrape();
   snowfall.show(Math.round(TIERS[gfxTier].snow * p.snow1));
   snowfall.uniforms.uSize.value = p.flake;
   hazeMul = p.hazeNear;

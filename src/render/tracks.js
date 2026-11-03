@@ -5,8 +5,10 @@ import { LIGHT } from './light.js';
 // Ski tracks that stay in the snow, run after run, until fresh snow covers them.
 //
 // Each run leaves a polyline of points (x, distance down the mountain, kind). Kinds:
-//   0 carve: two thin, sharp grooves, one per ski
-//   1 powder: one trench, shaded like a furrow with a sunny rim
+//   0 carve: two thin, sharp grooves, one per ski, each cut into the snow: the wall turned
+//     to the sun lit, the other in shadow, a little snow thrown up along the edges
+//   1 powder: one trench, shaded like a furrow, its walls lit and shaded the same way, the
+//     snow thrown up on its rims (the sunny one bright)
 //   2 skid: a wide scraped smear (braking, skidding a turn)
 // Points are kept every STEP metres, plus a last one that follows the skis every frame, so
 // the tracks start right at the skier. They're laid on the snow as ribbons, on the drawn
@@ -17,8 +19,8 @@ const MAX = 40000; // points
 const STEP = 0.6; // metres between points
 // two ribbons per point: [offset from the centre, width] for each ski
 const KIND = [
-  [[-0.13, 0.1], [0.13, 0.1]], // carve: two sharp grooves, under each ski
-  [[0, 0.7], [0, 0]], // powder: one trench, both skis and the boots
+  [[-0.14, 0.16], [0.14, 0.16]], // carve: two sharp grooves, under each ski
+  [[0, 0.85], [0, 0]], // powder: one trench, both skis and the boots
   [[0, 1.1], [0, 0]], // skid: one wide smear
 ];
 const LIFT = 0.035; // metres above the drawn snow
@@ -58,17 +60,30 @@ const frag = /* glsl */ `
     float s = vSide;
     float a;
     vec3 col;
+    // +side is towards the sun: in a cut, the wall on the -side faces it (lit), the wall
+    // on the +side faces away (shadow)
+    float as = abs(s);
+    // narrower than a pixel or so: a soft line, not a broken one
+    float thin = smoothstep(0.7, 2.2, fwidth(s));
     if (vKind < 0.5) {
-      // carve: a crisp groove
-      a = 0.55 * (1.0 - smoothstep(0.45, 1.0, abs(s)));
-      col = uShadow;
+      // carve: a V cut, its walls in light and shadow, a lip of thrown snow on each side
+      float wall = 1.0 - smoothstep(0.62, 0.8, as);
+      float lip = smoothstep(0.7, 0.82, as) * (1.0 - smoothstep(0.9, 1.0, as));
+      col = s > 0.0 ? uShadow : mix(uMid, uLit, 0.7);
+      a = wall * (s > 0.0 ? 0.92 : 0.5);
+      col = mix(col, uLit, lip);
+      a = max(a, lip * 0.35);
+      col = mix(col, mix(uMid, uShadow, 0.6), thin);
+      a = mix(a, 0.35 * (1.0 - smoothstep(0.3, 1.0, as)), thin);
     } else if (vKind < 1.5) {
-      // powder trench: a shadowed floor, snow thrown up on both sides, the sunny one bright
-      float floor_ = 1.0 - smoothstep(0.15, 0.62, abs(s));
-      float rim = smoothstep(0.55, 0.78, abs(s)) * (1.0 - smoothstep(0.82, 1.0, abs(s)));
-      col = mix(uMid, uShadow, floor_ * 0.8);
-      col = mix(col, s > 0.0 ? uLit : uMid, rim);
-      a = 0.6 * floor_ + (s > 0.0 ? 0.6 : 0.3) * rim;
+      // powder trench: a deep floor, walls lit and shaded, snow thrown up on the rims
+      float floor_ = 1.0 - smoothstep(0.2, 0.38, as);
+      float wallZ = smoothstep(0.2, 0.38, as) * (1.0 - smoothstep(0.6, 0.72, as));
+      float rim = smoothstep(0.62, 0.76, as) * (1.0 - smoothstep(0.86, 1.0, as));
+      col = mix(uShadow, uMid, 0.15);
+      col = mix(col, s > 0.0 ? uShadow : mix(uMid, uLit, 0.5), wallZ);
+      col = mix(col, s > 0.0 ? uMid : uLit * 1.04, rim);
+      a = 0.78 * floor_ + wallZ * (s > 0.0 ? 0.8 : 0.55) + rim * (s > 0.0 ? 0.45 : 0.7);
     } else {
       // skid: a wide scraped band, a touch shinier than the snow, with fine scratches
       float scratch = 0.5 + 0.5 * sin(s * 31.0);

@@ -8,6 +8,7 @@ import '@fontsource/nunito/latin-600.css';
 import '@fontsource/nunito/latin-700.css';
 import '@fontsource/nunito/latin-800.css';
 import './style.css';
+import { inject as injectAnalytics } from '@vercel/analytics';
 import { Heightfield } from './core/heightfield.js';
 import { History } from './core/history.js';
 import { Skier, PHYS } from './core/skier.js';
@@ -53,6 +54,9 @@ import { Panorama } from './render/panorama.js';
 import { Snowfall } from './render/snowfall.js';
 import { tickAtmosphere, ATMO, WIND } from './render/atmosphere.js';
 import { LIGHTS, lightPreset, mixLight, setLightUniforms } from './render/light.js';
+
+// Vercel Web Analytics: page views (production only; the dev server logs them instead)
+injectAnalytics({ mode: import.meta.env.DEV ? 'development' : 'production' });
 
 // ---------- state ----------
 const COARSE = window.matchMedia('(pointer: coarse)').matches;
